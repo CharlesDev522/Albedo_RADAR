@@ -142,6 +142,7 @@ class CommitmentStateBuilder:
                         hotkey=neuron.hotkey,
                         coldkey=neuron.coldkey,
                         subnet=snapshot.subnet,
+                        registered_at_block=neuron.registered_at_block,
                         status=MinerStatus.ACTIVE,
                         is_validator=neuron.is_validator,
                     )
@@ -150,6 +151,7 @@ class CommitmentStateBuilder:
                 m = existing[neuron.uid]
                 m.hotkey = neuron.hotkey
                 m.coldkey = neuron.coldkey
+                m.registered_at_block = neuron.registered_at_block
                 m.last_seen = datetime.now(timezone.utc)
 
         for uid, miner in existing.items():

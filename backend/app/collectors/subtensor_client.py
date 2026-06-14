@@ -21,6 +21,7 @@ class NeuronSnapshot:
     uid: int
     hotkey: str
     coldkey: str
+    registered_at_block: int | None
     stake: float
     alpha_stake: float
     tao_stake: float
@@ -41,6 +42,14 @@ class MetagraphSnapshot:
     block: int
     neurons: list[NeuronSnapshot]
     total_stake: float
+
+
+def _balance_to_float(value: Any) -> float:
+    if value is None:
+        return 0.0
+    if hasattr(value, "tao"):
+        return float(value.tao)
+    return float(value)
 
 
 class SubtensorClient:
@@ -78,54 +87,38 @@ class SubtensorClient:
         )
         await metagraph.sync(subtensor=self._subtensor)
 
-        block = int(metagraph.block.item())
-        neurons: list[NeuronSnapshot] = []
+        block = int(metagraph.block.item()) if hasattr(metagraph.block, "item") else int(metagraph.block)
+        reg_blocks: list[int] = list(getattr(metagraph, "block_at_registration", []) or [])
 
-        n = int(metagraph.n.item())
-        for i in range(n):
-            uid = int(metagraph.uids[i].item())
-            neuron = self._extract_neuron(metagraph, i, uid)
-            neurons.append(neuron)
+        neurons: list[NeuronSnapshot] = []
+        for i, neuron in enumerate(metagraph.neurons):
+            if getattr(neuron, "is_null", False):
+                continue
+            reg_block = int(reg_blocks[i]) if i < len(reg_blocks) else None
+            neurons.append(self._extract_neuron(neuron, reg_block))
 
         total_stake = sum(n.stake for n in neurons)
         return MetagraphSnapshot(subnet=netuid, block=block, neurons=neurons, total_stake=total_stake)
 
-    def _extract_neuron(self, metagraph: Any, index: int, uid: int) -> NeuronSnapshot:
-        """Extract neuron fields from metagraph tensors."""
-        hotkey = str(metagraph.hotkeys[index])
-        coldkey = str(metagraph.coldkeys[index])
-
-        stake = float(metagraph.S[index].item())
-        alpha_stake = float(metagraph.AS[index].item()) if hasattr(metagraph, "AS") else 0.0
-        tao_stake = float(metagraph.TS[index].item()) if hasattr(metagraph, "TS") else 0.0
-        rank = float(metagraph.R[index].item())
-        trust = float(metagraph.T[index].item())
-        incentive = float(metagraph.I[index].item())
-        emission = float(metagraph.E[index].item()) if hasattr(metagraph, "E") else 0.0
-        dividends = float(metagraph.D[index].item()) if hasattr(metagraph, "D") else 0.0
-
-        is_validator = False
-        if hasattr(metagraph, "validator_permit"):
-            is_validator = bool(metagraph.validator_permit[index].item())
-
-        active = True
-        if hasattr(metagraph, "active"):
-            active = bool(metagraph.active[index].item())
+    def _extract_neuron(self, neuron: Any, registered_at_block: int | None) -> NeuronSnapshot:
+        """Extract fields from a NeuronInfoLite / NeuronInfo object (SDK v10)."""
+        stake = _balance_to_float(getattr(neuron, "total_stake", None) or getattr(neuron, "stake", 0))
 
         return NeuronSnapshot(
-            uid=uid,
-            hotkey=hotkey,
-            coldkey=coldkey,
+            uid=int(neuron.uid),
+            hotkey=str(neuron.hotkey),
+            coldkey=str(neuron.coldkey),
+            registered_at_block=registered_at_block,
             stake=stake,
-            alpha_stake=alpha_stake,
-            tao_stake=tao_stake,
-            rank=rank,
-            trust=trust,
-            incentive=incentive,
-            emission=emission,
-            dividends=dividends,
-            is_validator=is_validator,
-            active=active,
+            alpha_stake=0.0,
+            tao_stake=stake,
+            rank=float(getattr(neuron, "rank", 0.0) or 0.0),
+            trust=float(getattr(neuron, "validator_trust", 0.0) or 0.0),
+            incentive=float(getattr(neuron, "incentive", 0.0) or 0.0),
+            emission=float(getattr(neuron, "emission", 0.0) or 0.0),
+            dividends=float(getattr(neuron, "dividends", 0.0) or 0.0),
+            is_validator=bool(getattr(neuron, "validator_permit", False)),
+            active=bool(getattr(neuron, "active", True)),
         )
 
     async def list_subnets(self) -> list[int]:
