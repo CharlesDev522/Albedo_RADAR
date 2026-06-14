@@ -1,7 +1,15 @@
-const API_URL =
-  process.env.API_URL ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  "http://localhost:8000/api/v1";
+/** Server-side (SSR): Docker internal URL. Browser: same-origin proxy via next.config rewrites. */
+function apiBase(): string {
+  if (typeof window !== "undefined") {
+    return "/api/v1";
+  }
+  return (
+    process.env.API_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:8000/api/v1"
+  );
+}
+
 const DEFAULT_SUBNET = 97;
 
 export interface Commitment {
@@ -53,8 +61,7 @@ export interface Registry {
 }
 
 async function fetchApi<T>(path: string): Promise<T> {
-  const base = process.env.NEXT_PUBLIC_API_URL || API_URL;
-  const res = await fetch(`${base}${path}`, { cache: "no-store" });
+  const res = await fetch(`${apiBase()}${path}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }

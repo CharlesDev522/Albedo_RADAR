@@ -13,8 +13,7 @@ import {
   type Registry,
 } from "@/lib/api";
 
-const LIVE_URL =
-  process.env.NEXT_PUBLIC_LIVE_URL || "http://localhost:8000/api/v1/live/stream";
+const LIVE_URL = "/api/v1/live/stream";
 const POLL_MS = 3000;
 
 interface LiveEvent {
@@ -29,14 +28,27 @@ interface LiveEvent {
   timestamp?: string;
 }
 
-export default function LiveDashboard() {
+interface LiveDashboardProps {
+  initialStats?: CommitmentStats | null;
+  initialCommits?: Commitment[];
+  initialRegistry?: Registry | null;
+}
+
+export default function LiveDashboard({
+  initialStats = null,
+  initialCommits = [],
+  initialRegistry = null,
+}: LiveDashboardProps) {
   const subnet = DEFAULT_SUBNET;
-  const [stats, setStats] = useState<CommitmentStats | null>(null);
-  const [commits, setCommits] = useState<Commitment[]>([]);
-  const [registry, setRegistry] = useState<Registry | null>(null);
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [stats, setStats] = useState<CommitmentStats | null>(initialStats);
+  const [commits, setCommits] = useState<Commitment[]>(initialCommits);
+  const [registry, setRegistry] = useState<Registry | null>(initialRegistry);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(
+    initialCommits.length > 0 ? new Date() : null
+  );
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [liveStatus, setLiveStatus] = useState<"connecting" | "live" | "polling">("connecting");
+  const [apiError, setApiError] = useState<string | null>(null);
   const [flashUids, setFlashUids] = useState<Set<number>>(new Set());
   const [feed, setFeed] = useState<LiveEvent[]>([]);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -61,8 +73,10 @@ export default function LiveDashboard() {
       setRegistry(r);
       setLastRefresh(new Date());
       setLatencyMs(Math.round(performance.now() - t0));
-    } catch {
+      setApiError(null);
+    } catch (err) {
       setLiveStatus("polling");
+      setApiError(err instanceof Error ? err.message : "API unreachable");
     }
   }, [subnet]);
 
@@ -111,6 +125,18 @@ export default function LiveDashboard() {
 
   return (
     <div className="space-y-3">
+      {apiError && (
+        <div className="panel px-3 py-2 border-rose-500/20 bg-rose-500/5 text-[11px] text-rose-300">
+          API error: {apiError} — data loads via <code className="mono text-rose-100">/api/v1</code> on this host (port 3000).
+        </div>
+      )}
+      {!apiError && commits.length === 0 && stats?.committed_miners === 0 && (
+        <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[11px] text-amber-300">
+          No v5 commits in database yet — check{" "}
+          <code className="mono text-amber-100">docker compose logs collector</code> and{" "}
+          <code className="mono text-amber-100">GET /api/v1/commitments/onchain</code>.
+        </div>
+      )}
       {/* status bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-zinc-500">
         <div className="flex items-center gap-3">

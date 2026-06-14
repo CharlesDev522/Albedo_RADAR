@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db.models import CommitmentHistory, Miner, MinerCommitment, MinerStatus
 from app.db.session import get_db
 from app.schemas.commitment import (
@@ -18,6 +19,7 @@ from app.schemas.commitment import (
 )
 
 router = APIRouter(prefix="/commitments", tags=["commitments"])
+settings = get_settings()
 
 
 @router.get("", response_model=CommitmentListResponse)
