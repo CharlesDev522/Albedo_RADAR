@@ -7,6 +7,7 @@ import {
   shortAddr,
   shortHash,
   shortRepo,
+  hippiusModelUrl,
   type Commitment,
   type CommitmentStats,
   type Registry,
@@ -165,7 +166,20 @@ export default function LiveDashboard() {
                     <span className="text-[9px] text-zinc-600">{e.timestamp ? fmtTime(e.timestamp) : "now"}</span>
                   </div>
                   <p className="mono text-[11px] text-emerald-400 mt-1">uid {e.uid ?? "?"}</p>
-                  <p className="text-[10px] text-zinc-500 truncate mt-0.5">{e.repo ? shortRepo(e.repo, 36) : e.model_uri}</p>
+                  <p className="text-[10px] text-zinc-500 truncate mt-0.5">
+                    {e.repo ? (
+                      <a
+                        href={hippiusModelUrl(e.repo)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:text-sky-400 hover:underline"
+                      >
+                        {shortRepo(e.repo, 36)}
+                      </a>
+                    ) : (
+                      e.model_uri
+                    )}
+                  </p>
                 </div>
               ))
             )}
@@ -225,11 +239,11 @@ export default function LiveDashboard() {
                         <td className="mono text-zinc-300 tabular-nums">{c.commit_block.toLocaleString()}</td>
                         <td className="max-w-[160px]">
                           <a
-                            href={`https://huggingface.co/${c.repo}`}
+                            href={hippiusModelUrl(c.repo)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-sky-400/90 hover:underline truncate block text-[10px]"
-                            title={c.repo}
+                            title={hippiusModelUrl(c.repo)}
                           >
                             {shortRepo(c.repo)}
                           </a>

@@ -72,6 +72,11 @@ export const api = {
     fetchApi<{ commits: Commitment[] }>(`/live/recent?subnet=${subnet}`),
 };
 
+export function hippiusModelUrl(repo: string, branch = "main"): string {
+  const clean = repo.replace(/^\/+|\/+$/g, "");
+  return `https://hub.hippius.com/models/${clean}/${branch}`;
+}
+
 export function shortAddr(addr: string, n = 5): string {
   if (!addr || addr.length <= n * 2 + 1) return addr;
   return `${addr.slice(0, n)}…${addr.slice(-n)}`;
