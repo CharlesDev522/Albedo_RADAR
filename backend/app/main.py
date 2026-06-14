@@ -2,14 +2,17 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
 from app.api.routes import coldkeys, commitments, events, hotkeys, leaderboards, miners
 from app.config import get_settings
-from app.db.models import Base
-from app.db.session import engine
+from app.db.init_db import init_db
+from app.db.models import Miner, MinerCommitment
+from app.db.session import engine, get_db
 from app.schemas.miner import HealthResponse
 
 settings = get_settings()
@@ -17,8 +20,7 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    await init_db(engine)
     yield
     await engine.dispose()
 
@@ -55,3 +57,25 @@ async def health() -> HealthResponse:
         network=settings.bittensor_network,
         default_subnet=settings.default_subnet,
     )
+
+
+@app.get("/health/db")
+async def health_db(db: AsyncSession = Depends(get_db)) -> dict:
+    """Quick check: is the collector writing to PostgreSQL?"""
+    miners = (await db.execute(select(func.count()).select_from(Miner))).scalar() or 0
+    commits = (await db.execute(select(func.count()).select_from(MinerCommitment))).scalar() or 0
+    uids = (
+        await db.execute(
+            select(MinerCommitment.uid)
+            .where(MinerCommitment.subnet == settings.default_subnet, MinerCommitment.uid.isnot(None))
+            .order_by(MinerCommitment.uid.asc())
+        )
+    ).scalars().all()
+    return {
+        "status": "ok" if commits > 0 else "empty",
+        "miners_in_db": miners,
+        "v5_commits_in_db": commits,
+        "v5_uids": list(uids),
+        "subnet": settings.default_subnet,
+        "hint": "If v5_commits_in_db is 0, run: docker compose logs collector --tail 30",
+    }

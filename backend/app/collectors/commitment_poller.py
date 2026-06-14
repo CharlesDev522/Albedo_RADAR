@@ -12,7 +12,7 @@ from app.chain_reader.commitment_scanner import scan_v5_commitments
 from app.collectors.event_publisher import EventPublisher
 from app.collectors.subtensor_client import SubtensorClient
 from app.config import get_settings
-from app.db.models import Base
+from app.db.init_db import init_db
 from app.db.session import AsyncSessionLocal, engine
 from app.processing.commitment_state_builder import CommitmentStateBuilder
 
@@ -31,8 +31,7 @@ class CommitmentPoller:
         self._running = False
 
     async def setup(self) -> None:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        await init_db(engine)
         await self.subtensor_client.connect()
         self._subtensor = self.subtensor_client._subtensor
         await self.publisher.connect()
