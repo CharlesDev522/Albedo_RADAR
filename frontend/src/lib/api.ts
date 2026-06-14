@@ -62,7 +62,16 @@ export interface Registry {
 
 async function fetchApi<T>(path: string): Promise<T> {
   const res = await fetch(`${apiBase()}${path}`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
   return res.json();
 }
 

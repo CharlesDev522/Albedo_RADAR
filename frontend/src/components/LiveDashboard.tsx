@@ -127,7 +127,8 @@ export default function LiveDashboard({
     <div className="space-y-3">
       {apiError && (
         <div className="panel px-3 py-2 border-rose-500/20 bg-rose-500/5 text-[11px] text-rose-300">
-          API error: {apiError} — data loads via <code className="mono text-rose-100">/api/v1</code> on this host (port 3000).
+          API error: {apiError} — browser calls <code className="mono text-rose-100">/api/v1</code> on port 3000,
+          which proxies to the FastAPI service (check <code className="mono text-rose-100">API_URL</code> in frontend container).
         </div>
       )}
       {!apiError && commits.length === 0 && stats?.committed_miners === 0 && (

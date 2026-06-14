@@ -8,6 +8,11 @@ MIGRATIONS: list[str] = [
     ALTER TABLE miner_commitments
     ADD COLUMN IF NOT EXISTS commit_source VARCHAR(16) DEFAULT 'active'
     """,
+    """
+    UPDATE miner_commitments
+    SET commit_source = 'active'
+    WHERE commit_source IS NULL
+    """,
 ]
 
 

@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CommitmentResponse(BaseModel):
@@ -27,6 +27,11 @@ class CommitmentResponse(BaseModel):
     commit_source: str = "active"
     first_seen: datetime
     last_updated: datetime
+
+    @field_validator("commit_source", mode="before")
+    @classmethod
+    def default_commit_source(cls, v: str | None) -> str:
+        return v or "active"
 
 
 class CommitmentListResponse(BaseModel):
