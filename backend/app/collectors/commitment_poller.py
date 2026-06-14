@@ -14,6 +14,7 @@ from app.chain_reader.commitment_scanner import (
     scan_v5_active_fast,
     scan_v5_commitments,
 )
+from app.chain_reader.encrypted_commitment_scanner import scan_encrypted_commitments
 from app.collectors.event_publisher import EventPublisher
 from app.collectors.subtensor_client import SubtensorClient
 from app.config import get_settings
@@ -21,6 +22,7 @@ from app.db.init_db import init_db
 from app.db.models import Miner, MinerCommitment, MinerStatus
 from app.db.session import AsyncSessionLocal, engine
 from app.processing.commitment_state_builder import CommitmentStateBuilder
+from app.processing.encrypted_commitment_state_builder import EncryptedCommitmentStateBuilder
 from sqlalchemy import func, select
 
 logger = logging.getLogger(__name__)
@@ -35,6 +37,7 @@ class CommitmentPoller:
         self._subtensor: AsyncSubtensor | None = None
         self.publisher = EventPublisher(self.settings)
         self.state_builder = CommitmentStateBuilder(publisher=self.publisher)
+        self.encrypted_state_builder = EncryptedCommitmentStateBuilder()
         self._running = False
         self._neurons: dict[str, dict] = {}
         self._last_full_scan = 0.0
@@ -63,6 +66,7 @@ class CommitmentPoller:
             logger.exception("Initial full poll failed — falling back to fast poll")
             self._last_full_scan = time.monotonic()
             await self._fast_poll(netuid)
+        await self._encrypted_poll(netuid)
 
     async def teardown(self) -> None:
         await self.subtensor_client.disconnect()
@@ -154,6 +158,38 @@ class CommitmentPoller:
 
         return stats
 
+    async def _encrypted_poll(self, netuid: int) -> dict[str, int]:
+        """Scan CommitmentOf for TimelockEncrypted (pre-reveal ciphertext)."""
+        assert self._subtensor is not None
+        commits = await scan_encrypted_commitments(self._subtensor, netuid, self._neurons)
+
+        if any(c.uid is None for c in commits):
+            self._neurons = await _neuron_index(self._subtensor, netuid)
+            commits = await scan_encrypted_commitments(self._subtensor, netuid, self._neurons)
+
+        async with AsyncSessionLocal() as session:
+            stats = await self.encrypted_state_builder.process_commits(session, commits, netuid)
+            await session.commit()
+
+        if stats["new"] > 0 or stats["updated"] > 0:
+            logger.warning(
+                "ENCRYPTED netuid=%d pending=%d new=%d updated=%d revealed=%d uids=%s",
+                netuid,
+                len(commits),
+                stats["new"],
+                stats["updated"],
+                stats["revealed"],
+                sorted({c.uid for c in commits if c.uid is not None}),
+            )
+        elif commits:
+            logger.info(
+                "ENCRYPTED netuid=%d pending=%d unchanged uids=%s",
+                netuid,
+                len(commits),
+                sorted({c.uid for c in commits if c.uid is not None}),
+            )
+        return stats
+
     async def _full_poll(self, netuid: int) -> dict[str, int]:
         """Full scan: revealed history + metagraph registry sync."""
         assert self._subtensor is not None
@@ -192,9 +228,12 @@ class CommitmentPoller:
                 self._last_metagraph_sync = now
 
             if now - self._last_full_scan >= self.settings.full_scan_interval_seconds:
-                return await self._full_poll(netuid)
+                stats = await self._full_poll(netuid)
+            else:
+                stats = await self._fast_poll(netuid)
 
-            return await self._fast_poll(netuid)
+            await self._encrypted_poll(netuid)
+            return stats
 
     async def run(self) -> None:
         self._running = True

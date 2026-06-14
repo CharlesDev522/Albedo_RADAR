@@ -8,7 +8,16 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
-from app.api.routes import coldkeys, commitments, events, hotkeys, leaderboards, live, miners
+from app.api.routes import (
+    coldkeys,
+    commitments,
+    encrypted_commitments,
+    events,
+    hotkeys,
+    leaderboards,
+    live,
+    miners,
+)
 from app.config import get_settings
 from app.db.init_db import init_db
 from app.db.models import Miner, MinerCommitment
@@ -43,6 +52,7 @@ app.add_middleware(
 api_prefix = settings.api_prefix
 app.include_router(live.router, prefix=api_prefix)
 app.include_router(commitments.router, prefix=api_prefix)
+app.include_router(encrypted_commitments.router, prefix=api_prefix)
 app.include_router(miners.router, prefix=api_prefix)
 app.include_router(leaderboards.router, prefix=api_prefix)
 app.include_router(hotkeys.router, prefix=api_prefix)

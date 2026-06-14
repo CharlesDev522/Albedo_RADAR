@@ -127,6 +127,46 @@ class MinerCommitment(Base):
     miner: Mapped["Miner | None"] = relationship(back_populates="commitment")
 
 
+class EncryptedCommitmentStatus(str, enum.Enum):
+    PENDING = "pending"
+    REVEALED = "revealed"
+
+
+class EncryptedMinerCommitment(Base):
+    """TimelockEncrypted commitment — ciphertext on chain before v5 reveal."""
+
+    __tablename__ = "encrypted_miner_commitments"
+    __table_args__ = (
+        UniqueConstraint("subnet", "hotkey", name="uq_encrypted_commitment_subnet_hotkey"),
+        Index("ix_encrypted_commitments_subnet_uid", "subnet", "uid"),
+        Index("ix_encrypted_commitments_subnet_status", "subnet", "status"),
+        Index("ix_encrypted_commitments_reveal_round", "subnet", "reveal_round"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    subnet: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hotkey: Mapped[str] = mapped_column(String(64), nullable=False)
+    coldkey: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    registered_at_block: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    commit_block: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    deposit: Mapped[int] = mapped_column(BigInteger, default=0)
+    reveal_round: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    encrypted_hex: Mapped[str] = mapped_column(Text, nullable=False)
+    encrypted_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    commitment_kind: Mapped[str] = mapped_column(String(32), default="TimelockEncrypted")
+    status: Mapped[EncryptedCommitmentStatus] = mapped_column(
+        Enum(EncryptedCommitmentStatus, name="encrypted_commitment_status"),
+        default=EncryptedCommitmentStatus.PENDING,
+    )
+
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_updated: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class CommitmentHistory(Base):
     """Historical v5 commitment reveals per hotkey."""
 

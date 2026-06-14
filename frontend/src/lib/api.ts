@@ -71,6 +71,33 @@ export interface Registry {
   uncommitted_count: number;
 }
 
+export interface EncryptedCommitment {
+  id: number;
+  subnet: number;
+  uid: number | null;
+  hotkey: string;
+  coldkey: string | null;
+  registered_at_block: number | null;
+  commit_block: number;
+  deposit: number;
+  reveal_round: number;
+  encrypted_hash: string;
+  encrypted_preview: string;
+  commitment_kind: string;
+  status: string;
+  first_seen: string;
+  last_updated: string;
+}
+
+export interface EncryptedCommitmentStats {
+  subnet: number;
+  pending_encrypted: number;
+  revealed_total: number;
+  latest_commit_block: number | null;
+  latest_reveal_round: number | null;
+  last_scan_at: string;
+}
+
 async function fetchApi<T>(path: string): Promise<T> {
   const res = await fetch(`${apiBase()}${path}`, { cache: "no-store" });
   if (!res.ok) {
@@ -97,6 +124,12 @@ export const api = {
     fetchApi<Registry>(`/commitments/registry?subnet=${subnet}`),
   getSyncStatus: (subnet = DEFAULT_SUBNET) =>
     fetchApi<SyncStatus>(`/commitments/sync-status?subnet=${subnet}`),
+  getEncryptedCommitments: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<{ commitments: EncryptedCommitment[]; total: number; pending_count: number }>(
+      `/encrypted-commitments?subnet=${subnet}&status=pending&limit=200`
+    ),
+  getEncryptedStats: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<EncryptedCommitmentStats>(`/encrypted-commitments/stats?subnet=${subnet}`),
   getRecent: (subnet = DEFAULT_SUBNET) =>
     fetchApi<{ commits: Commitment[] }>(`/live/recent?subnet=${subnet}`),
 };
