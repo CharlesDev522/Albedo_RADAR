@@ -65,16 +65,16 @@ class CommitmentStateBuilder:
                     stats,
                 )
                 stats["new"] += 1
-            elif (
-                existing.payload_hash != commit.payload_hash
-                or existing.commit_block != commit.block_number
-            ):
+            elif existing.payload_hash != commit.payload_hash:
                 previous_hash = existing.payload_hash
                 existing.uid = commit.uid
                 existing.coldkey = commit.coldkey
                 existing.registered_at_block = commit.registered_at_block
-                existing.commit_block = commit.block_number
-                existing.block_hash = commit.block_hash
+                if commit.block_number and commit.commit_source == "revealed":
+                    existing.commit_block = commit.block_number
+                elif commit.block_number and existing.commit_block == 0:
+                    existing.commit_block = commit.block_number
+                existing.block_hash = commit.block_hash or existing.block_hash
                 existing.reveal_string = commit.reveal_string
                 existing.repo = commit.commit_payload["repo"]
                 existing.digest = commit.commit_payload["digest"]
@@ -91,19 +91,25 @@ class CommitmentStateBuilder:
                     commit,
                     {
                         "model_uri": commit.model_uri,
-                        "commit_block": commit.block_number,
+                        "commit_block": existing.commit_block,
                         "previous_hash": previous_hash,
                     },
                     stats,
                 )
                 stats["updated"] += 1
             else:
-                # Refresh uid/coldkey from metagraph even if commit unchanged
+                # Same payload — refresh uid/coldkey only; do NOT bump commit_block every poll
                 existing.uid = commit.uid
                 existing.coldkey = commit.coldkey
                 existing.registered_at_block = commit.registered_at_block
                 existing.miner_id = miner.id if miner else None
                 existing.commit_source = commit.commit_source
+                if (
+                    commit.commit_source == "revealed"
+                    and commit.block_number
+                    and commit.block_number > existing.commit_block
+                ):
+                    existing.commit_block = commit.block_number
                 stats["unchanged"] += 1
 
         # Mark miners on subnet without v5 commitment

@@ -235,3 +235,23 @@ async def get_commitment_history(
         .order_by(CommitmentHistory.commit_block.desc())
     )
     return [CommitmentHistoryResponse.model_validate(h) for h in result.scalars().all()]
+
+
+@router.get("/onchain")
+async def onchain_v5_count(subnet: int = Query(default=97, ge=0)) -> dict:
+    """Debug: v5 commits on chain right now vs database (helps diagnose sync gaps)."""
+    from bittensor.core.async_subtensor import AsyncSubtensor
+
+    from app.chain_reader.commitment_scanner import _neuron_index, scan_v5_active_fast
+
+    async with AsyncSubtensor(network=settings.bittensor_network) as st:
+        neurons = await _neuron_index(st, subnet)
+        commits = await scan_v5_active_fast(st, subnet, neurons)
+
+    return {
+        "subnet": subnet,
+        "onchain_v5_count": len(commits),
+        "uids": sorted({c.uid for c in commits if c.uid is not None}),
+        "hotkeys": [c.hotkey for c in commits],
+        "repos": [c.commit_payload.get("repo") for c in commits],
+    }

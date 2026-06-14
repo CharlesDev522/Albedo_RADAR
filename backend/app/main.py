@@ -78,5 +78,5 @@ async def health_db(db: AsyncSession = Depends(get_db)) -> dict:
         "v5_commits_in_db": commits,
         "v5_uids": list(uids),
         "subnet": settings.default_subnet,
-        "hint": "If v5_commits_in_db is 0, run: docker compose logs collector --tail 30",
+        "hint": "If v5_commits_in_db is 0, check GET /api/v1/commitments/onchain and collector logs",
     }

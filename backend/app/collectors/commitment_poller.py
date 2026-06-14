@@ -18,8 +18,10 @@ from app.collectors.event_publisher import EventPublisher
 from app.collectors.subtensor_client import SubtensorClient
 from app.config import get_settings
 from app.db.init_db import init_db
+from app.db.models import Miner, MinerStatus
 from app.db.session import AsyncSessionLocal, engine
 from app.processing.commitment_state_builder import CommitmentStateBuilder
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +55,46 @@ class CommitmentPoller:
             self.settings.full_scan_interval_seconds,
             len(self._neurons),
         )
-        # Initial full sync
-        await self._full_poll(netuid)
+        try:
+            await self._full_poll(netuid)
+        except Exception:
+            logger.exception("Initial full poll failed — falling back to fast poll")
+            self._last_full_scan = time.monotonic()
+            await self._fast_poll(netuid)
 
     async def teardown(self) -> None:
         await self.subtensor_client.disconnect()
         await self.publisher.disconnect()
         await engine.dispose()
+
+    async def _sync_miners_from_cache(self, netuid: int, commits: list) -> None:
+        """Ensure miner rows exist for committed hotkeys (fast path, no full metagraph)."""
+        if not commits:
+            return
+        async with AsyncSessionLocal() as session:
+            for c in commits:
+                if c.uid is None:
+                    continue
+                result = await session.execute(
+                    select(Miner).where(Miner.subnet == netuid, Miner.uid == c.uid)
+                )
+                miner = result.scalar_one_or_none()
+                if miner is None:
+                    session.add(
+                        Miner(
+                            uid=c.uid,
+                            hotkey=c.hotkey,
+                            coldkey=c.coldkey or "",
+                            subnet=netuid,
+                            registered_at_block=c.registered_at_block,
+                            status=MinerStatus.ACTIVE,
+                        )
+                    )
+                else:
+                    miner.hotkey = c.hotkey
+                    miner.coldkey = c.coldkey or miner.coldkey
+                    miner.status = MinerStatus.ACTIVE
+            await session.commit()
 
     async def _fast_poll(self, netuid: int) -> dict[str, int]:
         """~1-2s: scan CommitmentOf only, detect new v5 commits instantly."""
@@ -71,18 +106,19 @@ class CommitmentPoller:
             stats = await self.state_builder.process_commits(session, commits, snapshot=None)
             await session.commit()
 
+        await self._sync_miners_from_cache(netuid, commits)
+
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-        if stats["new"] or stats["updated"]:
-            logger.info(
-                "FAST netuid=%d +%d new, +%d updated in %dms (v5_total=%d)",
-                netuid,
-                stats["new"],
-                stats["updated"],
-                elapsed_ms,
-                len(commits),
-            )
-        else:
-            logger.debug("fast poll %dms v5=%d unchanged", elapsed_ms, len(commits))
+        logger.info(
+            "FAST netuid=%d v5=%d new=%d updated=%d unchanged=%d %dms uids=%s",
+            netuid,
+            len(commits),
+            stats["new"],
+            stats["updated"],
+            stats["unchanged"],
+            elapsed_ms,
+            sorted({c.uid for c in commits if c.uid is not None}),
+        )
         return stats
 
     async def _full_poll(self, netuid: int) -> dict[str, int]:
@@ -101,12 +137,14 @@ class CommitmentPoller:
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         logger.info(
-            "FULL netuid=%d v5=%d new=%d updated=%d in %dms",
+            "FULL netuid=%d v5=%d new=%d updated=%d unchanged=%d %dms uids=%s",
             netuid,
             len(commits),
             stats["new"],
             stats["updated"],
+            stats.get("unchanged", 0),
             elapsed_ms,
+            sorted({c.uid for c in commits if c.uid is not None}),
         )
         self._last_full_scan = time.monotonic()
         return stats

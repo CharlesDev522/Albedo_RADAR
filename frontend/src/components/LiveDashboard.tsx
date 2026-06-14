@@ -290,7 +290,21 @@ export default function LiveDashboard() {
                   <td className="mono text-zinc-400">{shortAddr(m.hotkey, 6)}</td>
                   <td className="mono text-zinc-500">{shortAddr(m.coldkey, 4)}</td>
                   <td className="mono text-zinc-500 tabular-nums">{m.registered_at_block?.toLocaleString() ?? "—"}</td>
-                  <td className="text-[10px] text-zinc-500 truncate max-w-[180px]">{m.repo ? shortRepo(m.repo) : "—"}</td>
+                  <td className="text-[10px] truncate max-w-[180px]">
+                    {m.repo ? (
+                      <a
+                        href={hippiusModelUrl(m.repo)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-zinc-500 hover:text-sky-400 hover:underline"
+                        title={hippiusModelUrl(m.repo)}
+                      >
+                        {shortRepo(m.repo)}
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
