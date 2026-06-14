@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: minerwatch
+      POSTGRES_PASSWORD: minerwatch
+      POSTGRES_DB: minerwatch
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minerwatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
+      REDIS_URL: redis://redis:6379/0
+      BITTENSOR_NETWORK: finney
+      DEFAULT_SUBNET: "1"
+      POLL_INTERVAL_SECONDS: "30"
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000"]'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  collector:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.collector
+    environment:
+      DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
+      REDIS_URL: redis://redis:6379/0
+      BITTENSOR_NETWORK: finney
+      DEFAULT_SUBNET: "1"
+      POLL_INTERVAL_SECONDS: "30"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
