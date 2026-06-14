@@ -117,6 +117,7 @@ class MinerCommitment(Base):
     model_uri: Mapped[str] = mapped_column(String(640), nullable=False)
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     commit_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    commit_source: Mapped[str] = mapped_column(String(16), default="active")
 
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_updated: Mapped[datetime] = mapped_column(

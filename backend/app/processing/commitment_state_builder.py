@@ -81,6 +81,7 @@ class CommitmentStateBuilder:
                 existing.model_uri = commit.model_uri
                 existing.payload_hash = commit.payload_hash
                 existing.commit_payload = commit.commit_payload
+                existing.commit_source = commit.commit_source
                 existing.miner_id = miner.id if miner else None
                 existing.last_updated = datetime.now(timezone.utc)
                 await self._record_history(session, commit)
@@ -102,6 +103,7 @@ class CommitmentStateBuilder:
                 existing.coldkey = commit.coldkey
                 existing.registered_at_block = commit.registered_at_block
                 existing.miner_id = miner.id if miner else None
+                existing.commit_source = commit.commit_source
                 stats["unchanged"] += 1
 
         # Mark miners on subnet without v5 commitment
@@ -187,6 +189,7 @@ class CommitmentStateBuilder:
             model_uri=commit.model_uri,
             payload_hash=commit.payload_hash,
             commit_payload=commit.commit_payload,
+            commit_source=commit.commit_source,
         )
 
     async def _record_history(self, session: AsyncSession, commit: Commit) -> None:

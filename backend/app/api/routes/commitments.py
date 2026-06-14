@@ -13,6 +13,8 @@ from app.schemas.commitment import (
     CommitmentListResponse,
     CommitmentResponse,
     CommitmentStatsResponse,
+    MinerRegistryEntry,
+    MinerRegistryResponse,
 )
 
 router = APIRouter(prefix="/commitments", tags=["commitments"])
@@ -157,3 +159,58 @@ async def get_commitment_history(
         .order_by(CommitmentHistory.commit_block.desc())
     )
     return [CommitmentHistoryResponse.model_validate(h) for h in result.scalars().all()]
+
+
+@router.get("/registry", response_model=MinerRegistryResponse)
+async def miner_registry(
+    subnet: int = Query(default=97, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> MinerRegistryResponse:
+    """Full miner list with v5 commitment status — committed miners first."""
+    miners_result = await db.execute(
+        select(Miner).where(
+            Miner.subnet == subnet,
+            Miner.status == MinerStatus.ACTIVE,
+            Miner.is_validator == False,  # noqa: E712
+        ).order_by(Miner.uid.asc())
+    )
+    miners = list(miners_result.scalars().all())
+
+    commits_result = await db.execute(
+        select(MinerCommitment).where(MinerCommitment.subnet == subnet)
+    )
+    commits_by_uid = {c.uid: c for c in commits_result.scalars().all() if c.uid is not None}
+
+    entries: list[MinerRegistryEntry] = []
+    v5_count = 0
+
+    for m in miners:
+        c = commits_by_uid.get(m.uid)
+        has_v5 = c is not None
+        if has_v5:
+            v5_count += 1
+        entries.append(
+            MinerRegistryEntry(
+                uid=m.uid,
+                hotkey=m.hotkey,
+                coldkey=m.coldkey,
+                registered_at_block=m.registered_at_block,
+                has_v5=has_v5,
+                commit_block=c.commit_block if c else None,
+                repo=c.repo if c else None,
+                model_uri=c.model_uri if c else None,
+                commit_source=c.commit_source if c else None,
+                last_updated=c.last_updated if c else None,
+            )
+        )
+
+    # Sort: v5 committed first (newest commit block), then uncommitted by uid
+    entries.sort(key=lambda e: (not e.has_v5, -(e.commit_block or 0), e.uid))
+
+    return MinerRegistryResponse(
+        subnet=subnet,
+        miners=entries,
+        total=len(entries),
+        v5_count=v5_count,
+        uncommitted_count=len(entries) - v5_count,
+    )

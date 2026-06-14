@@ -24,6 +24,7 @@ class CommitmentResponse(BaseModel):
     model_uri: str
     payload_hash: str
     commit_payload: dict[str, Any]
+    commit_source: str = "active"
     first_seen: datetime
     last_updated: datetime
 
@@ -44,6 +45,27 @@ class CommitmentStatsResponse(BaseModel):
     coverage_pct: float
     latest_commit_block: int | None
     last_scan_at: datetime | None
+
+
+class MinerRegistryEntry(BaseModel):
+    uid: int
+    hotkey: str
+    coldkey: str
+    registered_at_block: int | None
+    has_v5: bool
+    commit_block: int | None = None
+    repo: str | None = None
+    model_uri: str | None = None
+    commit_source: str | None = None
+    last_updated: datetime | None = None
+
+
+class MinerRegistryResponse(BaseModel):
+    subnet: int
+    miners: list[MinerRegistryEntry]
+    total: int
+    v5_count: int
+    uncommitted_count: int
 
 
 class CommitmentHistoryResponse(BaseModel):

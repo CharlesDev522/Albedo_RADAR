@@ -2,22 +2,67 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-bittensor-dark text-gray-100 antialiased;
+@layer base {
+  body {
+    @apply bg-[#09090b] text-zinc-300 antialiased;
+    font-feature-settings: "tnum" 1, "ss01" 1;
+  }
 }
 
-.card {
-  @apply bg-bittensor-card border border-bittensor-border rounded-lg p-4;
-}
+@layer components {
+  .panel {
+    @apply bg-zinc-900/40 border border-zinc-800/80 rounded-md;
+  }
 
-.badge {
-  @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
-}
+  .panel-head {
+    @apply px-3 py-2 border-b border-zinc-800/80 flex items-center justify-between gap-2;
+  }
 
-.badge-active {
-  @apply badge bg-green-900/50 text-green-400;
-}
+  .tbl {
+    @apply w-full text-[11px];
+  }
 
-.badge-event {
-  @apply badge bg-blue-900/50 text-blue-400;
+  .tbl th {
+    @apply text-left py-1.5 px-2 text-[10px] font-medium uppercase tracking-wider text-zinc-500 bg-zinc-900/60;
+  }
+
+  .tbl td {
+    @apply py-1.5 px-2 border-t border-zinc-800/50 align-middle;
+  }
+
+  .tbl tr:hover td {
+    @apply bg-zinc-800/20;
+  }
+
+  .mono {
+    font-family: var(--font-mono), ui-monospace, monospace;
+  }
+
+  .pill {
+    @apply inline-flex items-center px-1.5 py-px rounded text-[10px] font-medium border;
+  }
+
+  .pill-v5 {
+    @apply pill border-emerald-500/30 bg-emerald-500/10 text-emerald-400;
+  }
+
+  .pill-none {
+    @apply pill border-zinc-700 bg-zinc-800/50 text-zinc-500;
+  }
+
+  .pill-active {
+    @apply pill border-sky-500/30 bg-sky-500/10 text-sky-400;
+  }
+
+  .stat {
+    @apply panel px-3 py-2;
+  }
+
+  .stat-label {
+    @apply text-[10px] text-zinc-500 uppercase tracking-wide;
+  }
+
+  .stat-value {
+    @apply text-lg font-semibold text-zinc-100 mt-0.5 tabular-nums;
+  }
 }

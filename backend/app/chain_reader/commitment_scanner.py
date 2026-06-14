@@ -1,7 +1,10 @@
 """Bittensor chain reading — discover v5 model commits on a subnet.
 
-A v5 commitment is a pipe-delimited reveal string: ``v5|<repo>|<sha256:digest>``.
-Only v5 commits are tracked; older commitment formats are ignored.
+Scans two on-chain sources:
+  - ``CommitmentOf`` — current active commitment per hotkey (where new v5 commits appear first)
+  - ``RevealedCommitments`` — historical reveal log with block numbers
+
+A v5 commitment is: ``v5|<repo>|<sha256:digest>``
 """
 
 from __future__ import annotations
@@ -10,7 +13,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,7 @@ class Commit:
     reveal_string: str
     model_uri: str
     payload_hash: str
+    commit_source: str  # "active" | "revealed"
 
 
 def parse_v5(data: str, chain_hotkey: str) -> dict[str, Any] | None:
@@ -56,10 +60,7 @@ def payload_hash(payload: dict[str, Any]) -> str:
 
 
 def _decode_commitment_pair(pair: tuple[Any, Any]) -> tuple[str, list[tuple[int, str]]]:
-    """Return (hotkey_ss58, [(block, payload), ...]) for one RevealedCommitments row.
-
-    Handles both hex-serialized SCALE bytes (``0x...``) and raw latin-1 wrapped bytes.
-    """
+    """Return (hotkey_ss58, [(block, payload), ...]) for one RevealedCommitments row."""
     key, data = pair
     if not isinstance(key, str):
         key = str(getattr(key, "value", key))
@@ -93,15 +94,24 @@ async def _iter_revealed(subtensor: Any, netuid: int) -> list[tuple[str, int, st
         try:
             hotkey, entries = _decode_commitment_pair(pair)
         except Exception:
-            logger.debug("failed to decode commitment for pair", exc_info=True)
+            logger.debug("failed to decode revealed commitment", exc_info=True)
             continue
         for block, payload in entries:
             results.append((hotkey, block, payload))
     return results
 
 
+async def _iter_active_commitments(subtensor: Any, netuid: int) -> dict[str, str]:
+    """Read current CommitmentOf per hotkey via SDK decoder."""
+    try:
+        return await subtensor.get_all_commitments(netuid)
+    except Exception:
+        logger.warning("get_all_commitments(%d) failed", netuid, exc_info=True)
+        return {}
+
+
 def _latest_v5_per_hotkey(entries: list[tuple[str, int, str]]) -> dict[str, tuple[int, str]]:
-    """Return the highest-block v5 reveal per hotkey."""
+    """Return the highest-block v5 reveal per hotkey from revealed history."""
     latest: dict[str, tuple[int, str]] = {}
     for hotkey, block, data in entries:
         if parse_v5(data, hotkey) is None:
@@ -110,6 +120,30 @@ def _latest_v5_per_hotkey(entries: list[tuple[str, int, str]]) -> dict[str, tupl
         if prev is None or block > prev[0]:
             latest[hotkey] = (block, data)
     return latest
+
+
+def _merge_v5_sources(
+    active: dict[str, str],
+    revealed: dict[str, tuple[int, str]],
+    current_block: int,
+) -> dict[str, tuple[int, str, str]]:
+    """Merge active CommitmentOf and RevealedCommitments into latest v5 per hotkey."""
+    merged: dict[str, tuple[int, str, str]] = {}
+
+    for hotkey, text in active.items():
+        if parse_v5(text, hotkey) is not None:
+            merged[hotkey] = (current_block, text, "active")
+
+    for hotkey, (block, data) in revealed.items():
+        if hotkey in merged:
+            existing_block, existing_data, _ = merged[hotkey]
+            # Prefer revealed block when payload matches or revealed is newer
+            if data == existing_data or block >= existing_block:
+                merged[hotkey] = (block, data, "revealed")
+        else:
+            merged[hotkey] = (block, data, "revealed")
+
+    return merged
 
 
 async def _block_hash(subtensor: Any, block: int) -> str | None:
@@ -132,17 +166,16 @@ async def _neuron_index(subtensor: Any, netuid: int) -> dict[str, dict[str, Any]
         metagraph = await async_metagraph(netuid=netuid, lite=True, subtensor=subtensor)
         await metagraph.sync(subtensor=subtensor)
 
-        block_at_reg: list[int] = []
-        if hasattr(metagraph, "block_at_registration"):
-            block_at_reg = [int(b) for b in metagraph.block_at_registration]
+        reg_blocks: list[int] = list(getattr(metagraph, "block_at_registration", []) or [])
 
         index: dict[str, dict[str, Any]] = {}
-        n = int(metagraph.n.item())
-        for i in range(n):
-            uid = int(metagraph.uids[i].item())
-            hotkey = str(metagraph.hotkeys[i])
-            coldkey = str(metagraph.coldkeys[i])
-            reg_block = block_at_reg[i] if i < len(block_at_reg) else None
+        for i, neuron in enumerate(metagraph.neurons):
+            if getattr(neuron, "is_null", False):
+                continue
+            uid = int(neuron.uid)
+            hotkey = str(neuron.hotkey)
+            coldkey = str(neuron.coldkey)
+            reg_block = int(reg_blocks[i]) if i < len(reg_blocks) else None
             index[hotkey] = {"uid": uid, "coldkey": coldkey, "registered_at_block": reg_block}
         return index
     except Exception:
@@ -151,19 +184,20 @@ async def _neuron_index(subtensor: Any, netuid: int) -> dict[str, dict[str, Any]
 
 
 async def scan_v5_commitments(subtensor: Any, netuid: int) -> list[Commit]:
-    """Read revealed commitments on ``netuid`` and return latest v5 Commit per hotkey."""
-    revealed = await _iter_revealed(subtensor, netuid)
-    latest_v5 = _latest_v5_per_hotkey(revealed)
+    """Read active + revealed commitments and return latest v5 Commit per hotkey."""
+    current_block = await subtensor.get_current_block()
+    active = await _iter_active_commitments(subtensor, netuid)
+    revealed_entries = await _iter_revealed(subtensor, netuid)
+    revealed_v5 = _latest_v5_per_hotkey(revealed_entries)
+    merged = _merge_v5_sources(active, revealed_v5, current_block)
     neurons = await _neuron_index(subtensor, netuid)
 
     commits: list[Commit] = []
-    n_total = len(revealed)
-    n_skipped = 0
+    n_active_v5 = sum(1 for t in active.values() if parse_v5(str(t), "x") is not None)
 
-    for hotkey, (block, data) in latest_v5.items():
+    for hotkey, (block, data, source) in merged.items():
         parsed = parse_v5(data, hotkey)
         if parsed is None:
-            n_skipped += 1
             continue
 
         neuron = neurons.get(hotkey)
@@ -172,7 +206,7 @@ async def scan_v5_commitments(subtensor: Any, netuid: int) -> list[Commit]:
         reg_block = neuron["registered_at_block"] if neuron else None
 
         if uid is None:
-            logger.warning("no uid for hotkey=%s; including commit without uid", hotkey)
+            logger.warning("v5 commit for unregistered/unknown hotkey=%s", hotkey)
 
         commits.append(
             Commit(
@@ -187,15 +221,16 @@ async def scan_v5_commitments(subtensor: Any, netuid: int) -> list[Commit]:
                 reveal_string=data,
                 model_uri=f"{parsed['repo']}@{parsed['digest']}",
                 payload_hash=payload_hash(parsed),
+                commit_source=source,
             )
         )
 
     logger.info(
-        "scan netuid=%d: revealed_entries=%d hotkeys_with_v5=%d commits=%d skipped=%d",
+        "scan netuid=%d: active_v5=%d revealed_v5=%d merged=%d commits=%d",
         netuid,
-        n_total,
-        len(latest_v5),
+        n_active_v5,
+        len(revealed_v5),
+        len(merged),
         len(commits),
-        n_skipped,
     )
     return commits
