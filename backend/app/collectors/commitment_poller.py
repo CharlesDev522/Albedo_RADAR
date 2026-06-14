@@ -18,10 +18,10 @@ from app.collectors.event_publisher import EventPublisher
 from app.collectors.subtensor_client import SubtensorClient
 from app.config import get_settings
 from app.db.init_db import init_db
-from app.db.models import Miner, MinerStatus
+from app.db.models import Miner, MinerCommitment, MinerStatus
 from app.db.session import AsyncSessionLocal, engine
 from app.processing.commitment_state_builder import CommitmentStateBuilder
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,8 @@ class CommitmentPoller:
         self._neurons: dict[str, dict] = {}
         self._last_full_scan = 0.0
         self._last_metagraph_sync = 0.0
+        self._poll_lock = asyncio.Lock()
+        self._seen_v5_hotkeys: set[str] = set()
 
     async def setup(self) -> None:
         await init_db(engine)
@@ -102,23 +104,54 @@ class CommitmentPoller:
         t0 = time.monotonic()
         commits = await scan_v5_active_fast(self._subtensor, netuid, self._neurons)
 
+        new_hotkeys = {c.hotkey for c in commits} - self._seen_v5_hotkeys
+        needs_neuron_refresh = any(c.uid is None for c in commits) or bool(new_hotkeys)
+        if needs_neuron_refresh:
+            self._neurons = await _neuron_index(self._subtensor, netuid)
+            commits = await scan_v5_active_fast(self._subtensor, netuid, self._neurons)
+
         async with AsyncSessionLocal() as session:
             stats = await self.state_builder.process_commits(session, commits, snapshot=None)
+            db_count = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(MinerCommitment)
+                    .where(MinerCommitment.subnet == netuid)
+                )
+            ).scalar() or 0
             await session.commit()
 
+        self._seen_v5_hotkeys = {c.hotkey for c in commits}
         await self._sync_miners_from_cache(netuid, commits)
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
+        if stats["new"] > 0:
+            logger.warning(
+                "NEW v5 commit(s) netuid=%d count=%d uids=%s",
+                netuid,
+                stats["new"],
+                sorted({c.uid for c in commits if c.uid is not None}),
+            )
         logger.info(
-            "FAST netuid=%d v5=%d new=%d updated=%d unchanged=%d %dms uids=%s",
+            "FAST netuid=%d v5=%d new=%d updated=%d unchanged=%d db=%d %dms uids=%s",
             netuid,
             len(commits),
             stats["new"],
             stats["updated"],
             stats["unchanged"],
+            db_count,
             elapsed_ms,
             sorted({c.uid for c in commits if c.uid is not None}),
         )
+
+        if len(commits) > db_count:
+            logger.warning(
+                "on-chain ahead of DB (chain=%d db=%d) — running full scan",
+                len(commits),
+                db_count,
+            )
+            return await self._full_poll(netuid)
+
         return stats
 
     async def _full_poll(self, netuid: int) -> dict[str, int]:
@@ -151,16 +184,17 @@ class CommitmentPoller:
 
     async def poll_once(self, netuid: int | None = None) -> dict[str, int]:
         netuid = netuid or self.settings.default_subnet
-        now = time.monotonic()
+        async with self._poll_lock:
+            now = time.monotonic()
 
-        if now - self._last_metagraph_sync >= self.settings.metagraph_sync_interval_seconds:
-            self._neurons = await _neuron_index(self._subtensor, netuid)
-            self._last_metagraph_sync = now
+            if now - self._last_metagraph_sync >= self.settings.metagraph_sync_interval_seconds:
+                self._neurons = await _neuron_index(self._subtensor, netuid)
+                self._last_metagraph_sync = now
 
-        if now - self._last_full_scan >= self.settings.full_scan_interval_seconds:
-            return await self._full_poll(netuid)
+            if now - self._last_full_scan >= self.settings.full_scan_interval_seconds:
+                return await self._full_poll(netuid)
 
-        return await self._fast_poll(netuid)
+            return await self._fast_poll(netuid)
 
     async def run(self) -> None:
         self._running = True

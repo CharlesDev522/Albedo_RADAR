@@ -11,6 +11,7 @@ import {
   type Commitment,
   type CommitmentStats,
   type Registry,
+  type SyncStatus,
 } from "@/lib/api";
 
 const LIVE_URL = "/api/v1/live/stream";
@@ -49,9 +50,11 @@ export default function LiveDashboard({
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [liveStatus, setLiveStatus] = useState<"connecting" | "live" | "polling">("connecting");
   const [apiError, setApiError] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [flashUids, setFlashUids] = useState<Set<number>>(new Set());
   const [feed, setFeed] = useState<LiveEvent[]>([]);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const knownUids = useRef<Set<number>>(new Set(initialCommits.map((c) => c.uid).filter((u): u is number => u != null)));
 
   const flash = useCallback((uid: number | undefined) => {
     if (uid == null) return;
@@ -63,14 +66,24 @@ export default function LiveDashboard({
   const refresh = useCallback(async () => {
     const t0 = performance.now();
     try {
-      const [s, c, r] = await Promise.all([
+      const [s, c, r, sync] = await Promise.all([
         api.getStats(subnet),
         api.getCommitments(subnet),
         api.getRegistry(subnet),
+        api.getSyncStatus(subnet),
       ]);
+      for (const row of c.commitments) {
+        if (row.uid != null && !knownUids.current.has(row.uid)) {
+          flash(row.uid);
+        }
+      }
+      knownUids.current = new Set(
+        c.commitments.map((row) => row.uid).filter((u): u is number => u != null)
+      );
       setStats(s);
       setCommits(c.commitments);
       setRegistry(r);
+      setSyncStatus(sync);
       setLastRefresh(new Date());
       setLatencyMs(Math.round(performance.now() - t0));
       setApiError(null);
@@ -78,7 +91,7 @@ export default function LiveDashboard({
       setLiveStatus("polling");
       setApiError(err instanceof Error ? err.message : "API unreachable");
     }
-  }, [subnet]);
+  }, [subnet, flash]);
 
   useEffect(() => {
     refresh();
@@ -131,6 +144,18 @@ export default function LiveDashboard({
           which proxies to the FastAPI service (check <code className="mono text-rose-100">API_URL</code> in frontend container).
         </div>
       )}
+      {!apiError && syncStatus && !syncStatus.in_sync && (
+        <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[11px] text-amber-300">
+          Chain has <strong>{syncStatus.onchain_v5_count}</strong> v5 commits (uids{" "}
+          {syncStatus.onchain_uids.join(", ") || "—"}) but DB has{" "}
+          <strong>{syncStatus.db_v5_count}</strong>
+          {syncStatus.missing_in_db.length > 0 && (
+            <> — missing uids: {syncStatus.missing_in_db.join(", ")}</>
+          )}
+          . Collector should catch up within ~10s — check{" "}
+          <code className="mono text-amber-100">docker compose logs collector --tail 20</code>.
+        </div>
+      )}
       {!apiError && commits.length === 0 && stats?.committed_miners === 0 && (
         <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[11px] text-amber-300">
           No v5 commits in database yet — check{" "}
@@ -162,7 +187,9 @@ export default function LiveDashboard({
             </span>
           )}
         </div>
-        <span className="mono text-zinc-600">collector polls chain every ~5s</span>
+        <span className="mono text-zinc-600">
+          chain {syncStatus?.onchain_v5_count ?? "—"} · db {syncStatus?.db_v5_count ?? stats?.committed_miners ?? "—"} · poll ~3s
+        </span>
       </div>
 
       {/* KPIs */}

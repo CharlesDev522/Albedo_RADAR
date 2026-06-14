@@ -52,6 +52,17 @@ export interface RegistryMiner {
   last_updated: string | null;
 }
 
+export interface SyncStatus {
+  subnet: number;
+  onchain_v5_count: number;
+  db_v5_count: number;
+  in_sync: boolean;
+  onchain_uids: number[];
+  db_uids: number[];
+  missing_in_db: number[];
+  repos: string[];
+}
+
 export interface Registry {
   subnet: number;
   miners: RegistryMiner[];
@@ -84,6 +95,8 @@ export const api = {
     ),
   getRegistry: (subnet = DEFAULT_SUBNET) =>
     fetchApi<Registry>(`/commitments/registry?subnet=${subnet}`),
+  getSyncStatus: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<SyncStatus>(`/commitments/sync-status?subnet=${subnet}`),
   getRecent: (subnet = DEFAULT_SUBNET) =>
     fetchApi<{ commits: Commitment[] }>(`/live/recent?subnet=${subnet}`),
 };

@@ -239,6 +239,51 @@ async def get_commitment_history(
     return [CommitmentHistoryResponse.model_validate(h) for h in result.scalars().all()]
 
 
+@router.get("/sync-status")
+async def sync_status(
+    subnet: int = Query(default=97, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Compare on-chain v5 commits vs database — shows if collector is behind."""
+    from bittensor.core.async_subtensor import AsyncSubtensor
+
+    from app.chain_reader.commitment_scanner import _neuron_index, scan_v5_active_fast
+
+    db_count = (
+        await db.execute(
+            select(func.count()).select_from(MinerCommitment).where(MinerCommitment.subnet == subnet)
+        )
+    ).scalar() or 0
+
+    db_uids = sorted(
+        (
+            await db.execute(
+                select(MinerCommitment.uid)
+                .where(MinerCommitment.subnet == subnet, MinerCommitment.uid.isnot(None))
+                .order_by(MinerCommitment.uid.asc())
+            )
+        ).scalars().all()
+    )
+
+    async with AsyncSubtensor(network=settings.bittensor_network) as st:
+        neurons = await _neuron_index(st, subnet)
+        commits = await scan_v5_active_fast(st, subnet, neurons)
+
+    onchain_uids = sorted({c.uid for c in commits if c.uid is not None})
+    missing_in_db = sorted(set(onchain_uids) - set(db_uids))
+
+    return {
+        "subnet": subnet,
+        "onchain_v5_count": len(commits),
+        "db_v5_count": db_count,
+        "in_sync": len(missing_in_db) == 0 and db_count >= len(commits),
+        "onchain_uids": onchain_uids,
+        "db_uids": db_uids,
+        "missing_in_db": missing_in_db,
+        "repos": [c.commit_payload.get("repo") for c in commits],
+    }
+
+
 @router.get("/onchain")
 async def onchain_v5_count(subnet: int = Query(default=97, ge=0)) -> dict:
     """Debug: v5 commits on chain right now vs database (helps diagnose sync gaps)."""
