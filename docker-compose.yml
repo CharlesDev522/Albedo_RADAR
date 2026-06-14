@@ -5,8 +5,10 @@ services:
       POSTGRES_USER: minerwatch
       POSTGRES_PASSWORD: minerwatch
       POSTGRES_DB: minerwatch
-    ports:
-      - "5432:5432"
+    # No host port mapping — api/collector reach postgres via Docker network.
+    # If you need host access (psql/pgAdmin), uncomment and pick a free port:
+    # ports:
+    #   - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,8 +19,9 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # Internal only; uncomment if you need host Redis access:
+    # ports:
+    #   - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
