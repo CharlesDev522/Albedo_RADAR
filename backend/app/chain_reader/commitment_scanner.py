@@ -234,3 +234,41 @@ async def scan_v5_commitments(subtensor: Any, netuid: int) -> list[Commit]:
         len(commits),
     )
     return commits
+
+
+async def scan_v5_active_fast(
+    subtensor: Any,
+    netuid: int,
+    neurons: dict[str, dict[str, Any]],
+) -> list[Commit]:
+    """Fast path: CommitmentOf only (~1-2s). Used for near-instant new-commit detection."""
+    current_block = await subtensor.get_current_block()
+    active = await _iter_active_commitments(subtensor, netuid)
+    commits: list[Commit] = []
+
+    for hotkey, text in active.items():
+        data = str(text)
+        parsed = parse_v5(data, hotkey)
+        if parsed is None:
+            continue
+        neuron = neurons.get(hotkey)
+        uid = neuron["uid"] if neuron else None
+        coldkey = neuron["coldkey"] if neuron else None
+        reg_block = neuron["registered_at_block"] if neuron else None
+        commits.append(
+            Commit(
+                netuid=netuid,
+                block_number=current_block,
+                block_hash=None,
+                uid=uid,
+                hotkey=hotkey,
+                coldkey=coldkey,
+                registered_at_block=reg_block,
+                commit_payload=parsed,
+                reveal_string=data,
+                model_uri=f"{parsed['repo']}@{parsed['digest']}",
+                payload_hash=payload_hash(parsed),
+                commit_source="active",
+            )
+        )
+    return commits

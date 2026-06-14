@@ -18,6 +18,8 @@ class EventPublisher:
     """Publishes miner events to Redis streams and optionally Kafka."""
 
     STREAM_KEY = "minerwatch:events"
+    LIVE_CHANNEL = "minerwatch:live"
+    STATE_KEY = "minerwatch:commit_state"
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -65,3 +67,11 @@ class EventPublisher:
             await self._kafka_producer.send_and_wait(self.settings.kafka_topic, payload)
 
         logger.debug("Published event: %s subnet=%d", event_type, subnet)
+
+    async def publish_live(self, payload: dict[str, Any]) -> None:
+        """Instant push to connected dashboards via Redis pub/sub."""
+        if not self._redis:
+            return
+        message = json.dumps(payload, separators=(",", ":"))
+        await self._redis.publish(self.LIVE_CHANNEL, message)
+        await self._redis.set(self.STATE_KEY, message, ex=3600)

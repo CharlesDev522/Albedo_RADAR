@@ -53,11 +53,8 @@ export interface Registry {
 }
 
 async function fetchApi<T>(path: string): Promise<T> {
-  const base =
-    process.env.API_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    API_URL;
-  const res = await fetch(`${base}${path}`, { next: { revalidate: 10 } });
+  const base = process.env.NEXT_PUBLIC_API_URL || API_URL;
+  const res = await fetch(`${base}${path}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -67,10 +64,12 @@ export const api = {
     fetchApi<CommitmentStats>(`/commitments/stats?subnet=${subnet}`),
   getCommitments: (subnet = DEFAULT_SUBNET) =>
     fetchApi<{ commitments: Commitment[]; total: number }>(
-      `/commitments?subnet=${subnet}&limit=200&sort=commit_block`
+      `/commitments?subnet=${subnet}&limit=200&sort=last_updated`
     ),
   getRegistry: (subnet = DEFAULT_SUBNET) =>
     fetchApi<Registry>(`/commitments/registry?subnet=${subnet}`),
+  getRecent: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<{ commits: Commitment[] }>(`/live/recent?subnet=${subnet}`),
 };
 
 export function shortAddr(addr: string, n = 5): string {

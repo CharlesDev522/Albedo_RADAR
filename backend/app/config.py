@@ -16,7 +16,9 @@ class Settings(BaseSettings):
     # Bittensor / Subtensor
     bittensor_network: str = "finney"
     default_subnet: int = 97
-    poll_interval_seconds: int = 30
+    poll_interval_seconds: int = 3
+    metagraph_sync_interval_seconds: int = 60
+    full_scan_interval_seconds: int = 300
     mechid: int = 0
 
     # Database

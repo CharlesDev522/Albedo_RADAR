@@ -241,3 +241,18 @@ class CommitmentStateBuilder:
         stats["events"] += 1
         if self.publisher:
             await self.publisher.publish(event_type.value, commit.netuid, data)
+            await self.publisher.publish_live({
+                "type": event_type.value,
+                "subnet": commit.netuid,
+                "uid": commit.uid,
+                "hotkey": commit.hotkey,
+                "coldkey": commit.coldkey,
+                "registered_at_block": commit.registered_at_block,
+                "commit_block": commit.block_number,
+                "repo": commit.commit_payload.get("repo"),
+                "digest": commit.commit_payload.get("digest"),
+                "model_uri": commit.model_uri,
+                "payload_hash": commit.payload_hash,
+                "commit_source": commit.commit_source,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })

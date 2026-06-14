@@ -39,7 +39,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       BITTENSOR_NETWORK: finney
       DEFAULT_SUBNET: "97"
-      POLL_INTERVAL_SECONDS: "30"
+      POLL_INTERVAL_SECONDS: "3"
+      METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
+      FULL_SCAN_INTERVAL_SECONDS: "300"
       CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000"]'
     depends_on:
       postgres:
@@ -57,7 +59,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       BITTENSOR_NETWORK: finney
       DEFAULT_SUBNET: "97"
-      POLL_INTERVAL_SECONDS: "30"
+      POLL_INTERVAL_SECONDS: "3"
+      METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
+      FULL_SCAN_INTERVAL_SECONDS: "300"
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,6 +82,7 @@ services:
       API_URL: http://api:8000/api/v1
       # Optional: set if browser also needs direct API access
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      NEXT_PUBLIC_LIVE_URL: http://localhost:8000/api/v1/live/stream
     depends_on:
       - api
     restart: unless-stopped
