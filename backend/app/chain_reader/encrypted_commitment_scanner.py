@@ -55,23 +55,51 @@ def _field_kind_and_payload(field: Any) -> tuple[str, dict[str, Any]] | None:
 def parse_timelock_encrypted(field: Any) -> tuple[str, int] | None:
     """Return (encrypted_hex, reveal_round) for a TimelockEncrypted field, else None."""
     parsed = _field_kind_and_payload(field)
-    if parsed is None:
-        return None
-    kind, payload = parsed
-    if TIMELOCK_KIND not in kind:
-        return None
+    if parsed is not None:
+        kind, payload = parsed
+        if TIMELOCK_KIND in kind:
+            encrypted = payload.get("encrypted") or payload.get("Encrypted")
+            reveal_raw = (
+                payload.get("reveal_round")
+                or payload.get("revealRound")
+                or payload.get("RevealRound")
+            )
+            if encrypted:
+                try:
+                    reveal_round = int(reveal_raw) if reveal_raw is not None else 0
+                except (TypeError, ValueError):
+                    reveal_round = 0
+                return str(encrypted), reveal_round
 
-    encrypted = payload.get("encrypted") or payload.get("Encrypted")
-    if not encrypted:
-        return None
+    # Fallback: field already flattened (explorer-style)
+    if isinstance(field, dict):
+        encrypted = field.get("encrypted") or field.get("Encrypted")
+        reveal_raw = field.get("reveal_round") or field.get("revealRound") or field.get("RevealRound")
+        if encrypted and str(encrypted).startswith("0x"):
+            try:
+                reveal_round = int(reveal_raw) if reveal_raw is not None else 0
+            except (TypeError, ValueError):
+                reveal_round = 0
+            return str(encrypted), reveal_round
 
-    reveal_raw = payload.get("reveal_round") or payload.get("revealRound") or payload.get("RevealRound")
-    try:
-        reveal_round = int(reveal_raw) if reveal_raw is not None else 0
-    except (TypeError, ValueError):
-        reveal_round = 0
+    return None
 
-    return str(encrypted), reveal_round
+
+def is_plaintext_commitment(field: Any, hotkey: str = "") -> bool:
+    """True if field decodes to readable v4/v5/JSON text (not TimelockEncrypted)."""
+    if parse_timelock_encrypted(field) is not None:
+        return False
+    if not isinstance(field, dict):
+        return False
+    for key, val in field.items():
+        if not str(key).startswith("Raw") or not isinstance(val, str):
+            continue
+        try:
+            text = bytes.fromhex(val.removeprefix("0x")).decode("utf-8", errors="ignore")
+        except Exception:
+            return False
+        return bool(text.strip())
+    return False
 
 
 def encrypted_payload_hash(encrypted_hex: str, reveal_round: int) -> str:

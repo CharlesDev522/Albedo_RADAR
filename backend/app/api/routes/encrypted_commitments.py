@@ -22,22 +22,22 @@ settings = get_settings()
 def _to_response(row: EncryptedMinerCommitment) -> EncryptedCommitmentResponse:
     preview = row.encrypted_hex[:18] + "…" if len(row.encrypted_hex) > 18 else row.encrypted_hex
     return EncryptedCommitmentResponse(
-      id=row.id,
-      subnet=row.subnet,
-      uid=row.uid,
-      hotkey=row.hotkey,
-      coldkey=row.coldkey,
-      registered_at_block=row.registered_at_block,
-      commit_block=row.commit_block,
-      deposit=row.deposit,
-      reveal_round=row.reveal_round,
-      encrypted_hash=row.encrypted_hash,
-      encrypted_preview=preview,
-      commitment_kind=row.commitment_kind,
-      status=row.status.value if hasattr(row.status, "value") else str(row.status),
-      first_seen=row.first_seen,
-      last_updated=row.last_updated,
-  )
+        id=row.id,
+        subnet=row.subnet,
+        uid=row.uid,
+        hotkey=row.hotkey,
+        coldkey=row.coldkey,
+        registered_at_block=row.registered_at_block,
+        commit_block=row.commit_block,
+        deposit=row.deposit,
+        reveal_round=row.reveal_round,
+        encrypted_hash=row.encrypted_hash,
+        encrypted_preview=preview,
+        commitment_kind=row.commitment_kind,
+        status=row.status.value if hasattr(row.status, "value") else str(row.status),
+        first_seen=row.first_seen,
+        last_updated=row.last_updated,
+    )
 
 
 @router.get("", response_model=EncryptedCommitmentListResponse)
@@ -174,6 +174,61 @@ async def get_encrypted_by_uid(
     if not row:
         raise HTTPException(status_code=404, detail="No pending encrypted commitment for this UID")
     return _to_response(row)
+
+
+@router.get("/sync-status")
+async def encrypted_sync_status(
+    subnet: int = Query(default=97, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Compare on-chain TimelockEncrypted vs database."""
+    from bittensor.core.async_subtensor import AsyncSubtensor
+
+    from app.chain_reader.commitment_scanner import _neuron_index
+    from app.chain_reader.encrypted_commitment_scanner import scan_encrypted_commitments
+
+    db_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(EncryptedMinerCommitment)
+            .where(
+                EncryptedMinerCommitment.subnet == subnet,
+                EncryptedMinerCommitment.status == EncryptedCommitmentStatus.PENDING,
+            )
+        )
+    ).scalar() or 0
+
+    db_uids = sorted(
+        (
+            await db.execute(
+                select(EncryptedMinerCommitment.uid)
+                .where(
+                    EncryptedMinerCommitment.subnet == subnet,
+                    EncryptedMinerCommitment.status == EncryptedCommitmentStatus.PENDING,
+                    EncryptedMinerCommitment.uid.isnot(None),
+                )
+                .order_by(EncryptedMinerCommitment.uid.asc())
+            )
+        ).scalars().all()
+    )
+
+    async with AsyncSubtensor(network=settings.bittensor_network) as st:
+        neurons = await _neuron_index(st, subnet)
+        commits = await scan_encrypted_commitments(st, subnet, neurons)
+
+    onchain_uids = sorted({c.uid for c in commits if c.uid is not None})
+    missing_in_db = sorted(set(onchain_uids) - set(db_uids))
+
+    return {
+        "subnet": subnet,
+        "onchain_encrypted_count": len(commits),
+        "db_encrypted_count": db_count,
+        "in_sync": len(missing_in_db) == 0 and db_count >= len(commits),
+        "onchain_uids": onchain_uids,
+        "db_uids": db_uids,
+        "missing_in_db": missing_in_db,
+        "note": "TimelockEncrypted only — not v4, not v5 plaintext",
+    }
 
 
 @router.get("/onchain")

@@ -98,6 +98,17 @@ export interface EncryptedCommitmentStats {
   last_scan_at: string;
 }
 
+export interface EncryptedSyncStatus {
+  subnet: number;
+  onchain_encrypted_count: number;
+  db_encrypted_count: number;
+  in_sync: boolean;
+  onchain_uids: number[];
+  db_uids: number[];
+  missing_in_db: number[];
+  note: string;
+}
+
 async function fetchApi<T>(path: string): Promise<T> {
   const res = await fetch(`${apiBase()}${path}`, { cache: "no-store" });
   if (!res.ok) {
@@ -130,6 +141,8 @@ export const api = {
     ),
   getEncryptedStats: (subnet = DEFAULT_SUBNET) =>
     fetchApi<EncryptedCommitmentStats>(`/encrypted-commitments/stats?subnet=${subnet}`),
+  getEncryptedSyncStatus: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<EncryptedSyncStatus>(`/encrypted-commitments/sync-status?subnet=${subnet}`),
   getRecent: (subnet = DEFAULT_SUBNET) =>
     fetchApi<{ commits: Commitment[] }>(`/live/recent?subnet=${subnet}`),
 };
