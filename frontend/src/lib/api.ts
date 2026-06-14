@@ -49,7 +49,12 @@ export interface Event {
 }
 
 async function fetchApi<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, { next: { revalidate: 15 } });
+  // API_URL = server-side (Docker: http://api:8000). NEXT_PUBLIC_ = browser access.
+  const base =
+    process.env.API_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:8000/api/v1";
+  const res = await fetch(`${base}${path}`, { next: { revalidate: 15 } });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
