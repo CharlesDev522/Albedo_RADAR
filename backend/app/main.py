@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api.routes import coldkeys, events, hotkeys, leaderboards, miners
+from app.api.routes import coldkeys, commitments, events, hotkeys, leaderboards, miners
 from app.config import get_settings
 from app.db.models import Base
 from app.db.session import engine
@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    description="Real-time miner intelligence, tracking, and analytics for Bittensor subnets",
+    description="Real-time v5 commitment tracking and miner intelligence for Bittensor subnet 97",
     version=__version__,
     lifespan=lifespan,
 )
@@ -39,6 +39,7 @@ app.add_middleware(
 )
 
 api_prefix = settings.api_prefix
+app.include_router(commitments.router, prefix=api_prefix)
 app.include_router(miners.router, prefix=api_prefix)
 app.include_router(leaderboards.router, prefix=api_prefix)
 app.include_router(hotkeys.router, prefix=api_prefix)

@@ -35,7 +35,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
       REDIS_URL: redis://redis:6379/0
       BITTENSOR_NETWORK: finney
-      DEFAULT_SUBNET: "1"
+      DEFAULT_SUBNET: "97"
       POLL_INTERVAL_SECONDS: "30"
       CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000"]'
     depends_on:
@@ -53,7 +53,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
       REDIS_URL: redis://redis:6379/0
       BITTENSOR_NETWORK: finney
-      DEFAULT_SUBNET: "1"
+      DEFAULT_SUBNET: "97"
       POLL_INTERVAL_SECONDS: "30"
     depends_on:
       postgres:

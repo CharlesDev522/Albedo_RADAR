@@ -41,6 +41,8 @@ class EventType(str, enum.Enum):
     EMISSION_CHANGED = "emission_changed"
     RANK_CHANGED = "rank_changed"
     VALIDATOR_STAKE_CHANGED = "validator_stake_changed"
+    COMMITMENT_REVEALED = "commitment_revealed"
+    COMMITMENT_UPDATED = "commitment_updated"
 
 
 class Miner(Base):
@@ -81,6 +83,72 @@ class Miner(Base):
     stakes: Mapped[list["Stake"]] = relationship(back_populates="miner", cascade="all, delete-orphan")
     rankings: Mapped[list["Ranking"]] = relationship(back_populates="miner", cascade="all, delete-orphan")
     events: Mapped[list["Event"]] = relationship(back_populates="miner", cascade="all, delete-orphan")
+    commitment: Mapped["MinerCommitment | None"] = relationship(
+        back_populates="miner", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class MinerCommitment(Base):
+    """Latest v5 on-chain model commitment per miner hotkey."""
+
+    __tablename__ = "miner_commitments"
+    __table_args__ = (
+        UniqueConstraint("subnet", "hotkey", name="uq_commitment_subnet_hotkey"),
+        Index("ix_commitments_subnet_uid", "subnet", "uid"),
+        Index("ix_commitments_subnet_block", "subnet", "commit_block"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    miner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("miners.id", ondelete="SET NULL"), nullable=True
+    )
+    subnet: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hotkey: Mapped[str] = mapped_column(String(64), nullable=False)
+    coldkey: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    registered_at_block: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    commit_block: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    block_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    reveal_string: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[str] = mapped_column(String(8), default="v5")
+    repo: Mapped[str] = mapped_column(String(512), nullable=False)
+    digest: Mapped[str] = mapped_column(String(128), nullable=False)
+    model_uri: Mapped[str] = mapped_column(String(640), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    commit_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_updated: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    miner: Mapped["Miner | None"] = relationship(back_populates="commitment")
+
+
+class CommitmentHistory(Base):
+    """Historical v5 commitment reveals per hotkey."""
+
+    __tablename__ = "commitment_history"
+    __table_args__ = (
+        UniqueConstraint("subnet", "hotkey", "commit_block", "payload_hash", name="uq_commitment_history"),
+        Index("ix_commitment_history_subnet_ts", "subnet", "revealed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    subnet: Mapped[int] = mapped_column(Integer, nullable=False)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hotkey: Mapped[str] = mapped_column(String(64), nullable=False)
+    coldkey: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    commit_block: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    block_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    reveal_string: Mapped[str] = mapped_column(Text, nullable=False)
+    repo: Mapped[str] = mapped_column(String(512), nullable=False)
+    digest: Mapped[str] = mapped_column(String(128), nullable=False)
+    model_uri: Mapped[str] = mapped_column(String(640), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    commit_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    revealed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Emission(Base):

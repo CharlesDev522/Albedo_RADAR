@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # Bittensor / Subtensor
     bittensor_network: str = "finney"
-    default_subnet: int = 1
+    default_subnet: int = 97
     poll_interval_seconds: int = 30
     mechid: int = 0
 

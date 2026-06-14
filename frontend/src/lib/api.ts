@@ -1,36 +1,42 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const DEFAULT_SUBNET = 97;
 
-export interface Miner {
+export interface Commitment {
   id: number;
-  uid: number;
-  hotkey: string;
-  coldkey: string;
   subnet: number;
-  status: string;
-  is_validator: boolean;
-  current_stake: number;
-  current_emission: number;
-  current_incentive: number;
-  current_rank: number;
-  rank_position: number | null;
+  uid: number | null;
+  hotkey: string;
+  coldkey: string | null;
+  registered_at_block: number | null;
+  commit_block: number;
+  block_hash: string | null;
+  reveal_string: string;
+  version: string;
+  repo: string;
+  digest: string;
+  model_uri: string;
+  payload_hash: string;
+  commit_payload: Record<string, unknown>;
   first_seen: string;
-  last_seen: string;
+  last_updated: string;
 }
 
-export interface LeaderboardEntry {
-  rank: number;
-  miner_id: number;
-  uid: number;
-  hotkey: string;
-  coldkey: string;
-  value: number;
-}
-
-export interface Leaderboard {
-  category: string;
+export interface CommitmentList {
+  commitments: Commitment[];
+  total: number;
   subnet: number;
-  entries: LeaderboardEntry[];
-  updated_at: string;
+  committed_count: number;
+  uncommitted_uids: number[];
+}
+
+export interface CommitmentStats {
+  subnet: number;
+  total_neurons: number;
+  committed_miners: number;
+  uncommitted_miners: number;
+  coverage_pct: number;
+  latest_commit_block: number | null;
+  last_scan_at: string;
 }
 
 export interface Event {
@@ -42,34 +48,19 @@ export interface Event {
   timestamp: string;
 }
 
-export interface SubnetStats {
-  subnet: number;
-  block: number;
-  neuron_count: number;
-  active_miners: number;
-  active_validators: number;
-  total_stake: number;
-  total_emission: number;
-  last_updated: string;
-}
-
 async function fetchApi<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, { next: { revalidate: 30 } });
+  const res = await fetch(`${API_URL}${path}`, { next: { revalidate: 15 } });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
 export const api = {
-  getMiners: (subnet = 1) => fetchApi<{ miners: Miner[]; total: number }>(`/miners?subnet=${subnet}&limit=50`),
-  getLeaderboard: (category: string, subnet = 1) =>
-    fetchApi<Leaderboard>(`/leaderboards/${category}?subnet=${subnet}&limit=10`),
-  getEvents: (subnet = 1) => fetchApi<{ events: Event[] }>(`/events?subnet=${subnet}&limit=20`),
-  getRegistrations: (subnet = 1) => fetchApi<{ events: Event[] }>(`/events/registrations?subnet=${subnet}`),
-  getSubnetStats: (subnet = 1) => fetchApi<SubnetStats>(`/subnets/${subnet}/stats`),
-  getClusters: (subnet = 1) =>
-    fetchApi<Array<{ coldkey: string; miner_count: number; total_stake: number }>>(
-      `/coldkeys/clusters?subnet=${subnet}&min_miners=2`
-    ),
+  getCommitments: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<CommitmentList>(`/commitments?subnet=${subnet}&limit=200&sort=commit_block`),
+  getCommitmentStats: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<CommitmentStats>(`/commitments/stats?subnet=${subnet}`),
+  getCommitmentEvents: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<{ events: Event[] }>(`/events?subnet=${subnet}&limit=30`),
 };
 
 export function truncateAddress(addr: string, chars = 6): string {
@@ -77,8 +68,13 @@ export function truncateAddress(addr: string, chars = 6): string {
   return `${addr.slice(0, chars)}...${addr.slice(-chars)}`;
 }
 
-export function formatNumber(n: number, decimals = 4): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`;
-  return n.toFixed(decimals);
+export function truncateRepo(repo: string, max = 40): string {
+  if (repo.length <= max) return repo;
+  const parts = repo.split("/");
+  if (parts.length >= 2) {
+    return `${parts[0]}/${parts[1]?.slice(0, 20)}…`;
+  }
+  return repo.slice(0, max) + "…";
 }
+
+export { DEFAULT_SUBNET };
