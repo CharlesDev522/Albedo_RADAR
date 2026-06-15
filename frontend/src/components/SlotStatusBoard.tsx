@@ -251,11 +251,11 @@ export default function SlotStatusBoard() {
       </div>
 
       {allSlots.length > 0 && (
-        <div className="px-3 py-2 border-b border-zinc-800/80">
+        <div className="px-3 py-2.5 border-b border-zinc-800/80">
           <div
-            className="inline-grid gap-px p-px bg-zinc-800/60 rounded"
-            style={{ gridTemplateColumns: "repeat(32, 4px)" }}
-            title="256 UID slots — click to jump to row"
+            className="inline-grid gap-[2px] p-1.5 bg-zinc-950/60 border border-zinc-800/70 rounded-md shadow-inner"
+            style={{ gridTemplateColumns: "repeat(16, 10px)" }}
+            title="256 UID slots (16×16) — click to jump to row"
           >
             {sortSlots(allSlots, "uid_asc").map((s) => (
               <button
@@ -263,17 +263,17 @@ export default function SlotStatusBoard() {
                 type="button"
                 title={`uid ${s.uid} · ${s.commitment_type}${s.registered_at_block ? ` · reg ${s.registered_at_block}` : ""}`}
                 onClick={() => jumpToUid(s.uid)}
-                className={`w-[4px] h-[4px] rounded-[0.5px] p-0 border-0 ${GRID_COLORS[s.commitment_type] ?? "bg-zinc-700"} ${
-                  filter !== "all" && !filterSlots([s], filter).length ? "opacity-25" : "opacity-100"
-                } ${highlightUid === s.uid ? "ring-1 ring-white scale-150 z-10" : ""} hover:ring-1 hover:ring-white/60 hover:scale-125 cursor-pointer transition-transform`}
+                className={`w-[10px] h-[10px] rounded-[2px] p-0 border-0 ${GRID_COLORS[s.commitment_type] ?? "bg-zinc-700"} ${
+                  filter !== "all" && !filterSlots([s], filter).length ? "opacity-30 saturate-50" : "opacity-100"
+                } ${highlightUid === s.uid ? "ring-2 ring-white/90 ring-offset-1 ring-offset-zinc-950 scale-110 z-10" : ""} hover:ring-1 hover:ring-white/70 hover:brightness-110 cursor-pointer transition-all duration-100`}
               />
             ))}
           </div>
-          <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1.5 text-[8px] text-zinc-600">
+          <div className="flex flex-wrap gap-x-2.5 gap-y-1 mt-2 text-[9px] text-zinc-500">
             {Object.entries(GRID_COLORS).map(([k, c]) => (
-              <span key={k} className="inline-flex items-center gap-0.5">
-                <span className={`w-1 h-1 rounded-[0.5px] ${c}`} />
-                {k === "timelock_encrypted" ? "enc" : k === "none" ? "empty" : k}
+              <span key={k} className="inline-flex items-center gap-1">
+                <span className={`w-2 h-2 rounded-[2px] ${c}`} />
+                {k === "timelock_encrypted" ? "encrypted" : k === "none" ? "empty" : k}
               </span>
             ))}
           </div>
