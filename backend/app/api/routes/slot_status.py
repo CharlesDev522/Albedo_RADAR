@@ -38,6 +38,8 @@ VALID_SORTS = {
     "reg_desc",
     "commit_asc",
     "commit_desc",
+    "coldkey_asc",
+    "coldkey_desc",
     "type",
 }
 
@@ -51,19 +53,16 @@ async def list_slot_status(
     db: AsyncSession = Depends(get_db),
 ) -> SlotStatusResponse:
     """All miner UID slots with commitment type — v5, encrypted, v4, json, none, etc."""
-    filt = filter_type.lower()
-    if filt == "encrypted":
-        filt = "timelock_encrypted"
-    if filt == "legacy":
-        filt = "non_v5"
+    _ = filter_type  # filter applied client-side; kept for API compat
 
     all_rows = await _load_slot_rows(db, subnet, force_live=live)
     summary = _summary_from_rows(subnet, all_rows)
-    display = _sort_rows(_filter_rows(all_rows, filt), sort)
+    # Return full slot set — client applies filter/sort (avoids re-scan on sort change).
+    ordered = sorted(all_rows, key=lambda r: r.uid)
 
     return SlotStatusResponse(
         subnet=subnet,
-        slots=[SlotStatusEntry.model_validate(r) for r in display],
+        slots=[SlotStatusEntry.model_validate(r) for r in ordered],
         summary=summary,
         filter=filter_type,
         sort=sort,
@@ -100,24 +99,35 @@ def _sort_rows(rows: list, sort: str) -> list:
     if sort not in VALID_SORTS:
         sort = "uid_asc"
 
-    def reg_key(r):
-        return r.registered_at_block if r.registered_at_block is not None else -1
+    def reg_key(r, asc: bool):
+        if r.registered_at_block is None:
+            return float("inf") if asc else float("-inf")
+        return r.registered_at_block
 
-    def commit_key(r):
-        return r.commit_block if r.commit_block is not None else -1
+    def commit_key(r, asc: bool):
+        if r.commit_block is None:
+            return float("inf") if asc else float("-inf")
+        return r.commit_block
+
+    def coldkey_key(r):
+        return (r.coldkey or "").lower()
 
     if sort == "uid_asc":
         return sorted(rows, key=lambda r: r.uid)
     if sort == "uid_desc":
         return sorted(rows, key=lambda r: r.uid, reverse=True)
     if sort == "reg_asc":
-        return sorted(rows, key=lambda r: (reg_key(r), r.uid))
+        return sorted(rows, key=lambda r: (reg_key(r, True), r.uid))
     if sort == "reg_desc":
-        return sorted(rows, key=lambda r: (reg_key(r), r.uid), reverse=True)
+        return sorted(rows, key=lambda r: (reg_key(r, False), r.uid), reverse=True)
     if sort == "commit_asc":
-        return sorted(rows, key=lambda r: (commit_key(r), r.uid))
+        return sorted(rows, key=lambda r: (commit_key(r, True), r.uid))
     if sort == "commit_desc":
-        return sorted(rows, key=lambda r: (commit_key(r), r.uid), reverse=True)
+        return sorted(rows, key=lambda r: (commit_key(r, False), r.uid), reverse=True)
+    if sort == "coldkey_asc":
+        return sorted(rows, key=lambda r: (coldkey_key(r) or "\uffff", r.uid))
+    if sort == "coldkey_desc":
+        return sorted(rows, key=lambda r: (coldkey_key(r) or "", r.uid), reverse=True)
     if sort == "type":
         return sorted(rows, key=lambda r: (r.commitment_type, r.uid))
     return rows

@@ -10,9 +10,17 @@ import {
   type SlotStatusEntry,
   type SlotStatusSummary,
 } from "@/lib/api";
+import {
+  columnSortDirection,
+  sortLabel,
+  sortSlotEntries,
+  toggleColumnSort,
+  type SlotSortKey,
+} from "@/lib/slotSort";
 import { useSubnet } from "@/lib/useSubnet";
+import SortableTh from "@/components/SortableTh";
 
-const POLL_MS = 5000;
+const POLL_MS = 3000;
 
 type FilterKey =
   | "all"
@@ -24,8 +32,6 @@ type FilterKey =
   | "v4"
   | "json"
   | "none";
-
-type SortKey = "uid_asc" | "uid_desc" | "reg_asc" | "reg_desc" | "commit_asc" | "commit_desc" | "type";
 
 const FILTERS: { key: FilterKey; label: string; color: string; hint?: string }[] = [
   { key: "all", label: "all 256", color: "text-zinc-300 border-zinc-600" },
@@ -39,15 +45,7 @@ const FILTERS: { key: FilterKey; label: string; color: string; hint?: string }[]
   { key: "none", label: "no commit", color: "text-zinc-500 border-zinc-700 bg-zinc-800/30" },
 ];
 
-const SORTS: { key: SortKey; label: string }[] = [
-  { key: "uid_asc", label: "uid ↑" },
-  { key: "uid_desc", label: "uid ↓" },
-  { key: "reg_desc", label: "registered ↓" },
-  { key: "reg_asc", label: "registered ↑" },
-  { key: "commit_desc", label: "commit blk ↓" },
-  { key: "commit_asc", label: "commit blk ↑" },
-  { key: "type", label: "type" },
-];
+const EXTRA_SORTS: SlotSortKey[] = ["reg_desc", "reg_asc", "type"];
 
 const TYPE_STYLES: Record<string, string> = {
   v6: "text-lime-400 border-lime-500/30 bg-lime-500/10",
@@ -83,46 +81,63 @@ function filterSlots(slots: SlotStatusEntry[], filter: FilterKey): SlotStatusEnt
   return slots.filter((s) => s.commitment_type === filter);
 }
 
-function sortSlots(slots: SlotStatusEntry[], sort: SortKey): SlotStatusEntry[] {
-  const copy = [...slots];
-  const reg = (s: SlotStatusEntry) => s.registered_at_block ?? -1;
-  const commit = (s: SlotStatusEntry) => s.commit_block ?? -1;
-  switch (sort) {
-    case "uid_desc":
-      return copy.sort((a, b) => b.uid - a.uid);
-    case "reg_asc":
-      return copy.sort((a, b) => reg(a) - reg(b) || a.uid - b.uid);
-    case "reg_desc":
-      return copy.sort((a, b) => reg(b) - reg(a) || a.uid - b.uid);
-    case "commit_asc":
-      return copy.sort((a, b) => commit(a) - commit(b) || a.uid - b.uid);
-    case "commit_desc":
-      return copy.sort((a, b) => commit(b) - commit(a) || a.uid - b.uid);
-    case "type":
-      return copy.sort((a, b) => a.commitment_type.localeCompare(b.commitment_type) || a.uid - b.uid);
-    default:
-      return copy.sort((a, b) => a.uid - b.uid);
-  }
+function summaryFromSlots(subnet: number, slots: SlotStatusEntry[]): SlotStatusSummary {
+  const counts: Record<string, number> = {};
+  for (const s of slots) counts[s.commitment_type] = (counts[s.commitment_type] ?? 0) + 1;
+  return {
+    subnet,
+    total_slots: slots.length,
+    v6: counts.v6 ?? 0,
+    v5: counts.v5 ?? 0,
+    v4: counts.v4 ?? 0,
+    json: counts.json ?? 0,
+    timelock_encrypted: counts.timelock_encrypted ?? 0,
+    binary: counts.binary ?? 0,
+    other: counts.other ?? 0,
+    unknown: counts.unknown ?? 0,
+    none: counts.none ?? 0,
+    committed: slots.length - (counts.none ?? 0),
+    non_v5: slots.length - (counts.none ?? 0) - (counts.v5 ?? 0) - (counts.v6 ?? 0),
+    last_scan_at: new Date().toISOString(),
+  };
 }
 
 export default function SlotStatusBoard() {
-  const { subnet, setSubnet, presets } = useSubnet();
+  const { subnet } = useSubnet();
   const [filter, setFilter] = useState<FilterKey>("committed");
-  const [sort, setSort] = useState<SortKey>("uid_asc");
+  const [sort, setSort] = useState<SlotSortKey>("uid_asc");
   const [data, setData] = useState<SlotStatusData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [highlightUid, setHighlightUid] = useState<number | null>(null);
   const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
+  const subnetRef = useRef(subnet);
+
+  useEffect(() => {
+    setData(null);
+    setError(null);
+    setLoading(true);
+    setHighlightUid(null);
+    rowRefs.current.clear();
+    subnetRef.current = subnet;
+  }, [subnet]);
 
   const refresh = useCallback(async () => {
+    const fetchSubnet = subnet;
     try {
-      const res = await api.getSlotStatus(subnet, "all", sort, true);
+      const res = await api.getSlotStatus(fetchSubnet, "all", "uid_asc", true);
+      if (subnetRef.current !== fetchSubnet) return;
       setData(res);
+      setLastRefresh(new Date());
       setError(null);
     } catch (err) {
+      if (subnetRef.current !== fetchSubnet) return;
       setError(err instanceof Error ? err.message : "failed to load slots");
+    } finally {
+      if (subnetRef.current === fetchSubnet) setLoading(false);
     }
-  }, [subnet, sort]);
+  }, [subnet]);
 
   useEffect(() => {
     refresh();
@@ -130,10 +145,19 @@ export default function SlotStatusBoard() {
     return () => clearInterval(id);
   }, [refresh]);
 
-  const summary = data?.summary;
-  const allSlots = data?.slots ?? [];
+  const allSlots = useMemo(() => {
+    const rows = data?.slots ?? [];
+    if (rows.length === 0) return rows;
+    return sortSlotEntries(rows, "uid_asc");
+  }, [data?.slots]);
+
+  const summary = useMemo(() => {
+    if (allSlots.length > 0) return summaryFromSlots(subnet, allSlots);
+    return data?.summary;
+  }, [allSlots, data?.summary, subnet]);
+
   const displaySlots = useMemo(
-    () => sortSlots(filterSlots(allSlots, filter), sort),
+    () => sortSlotEntries(filterSlots(allSlots, filter), sort),
     [allSlots, filter, sort]
   );
 
@@ -145,7 +169,7 @@ export default function SlotStatusBoard() {
   }, []);
 
   const countFor = (key: FilterKey, s: SlotStatusSummary | undefined) => {
-    if (!s) return "—";
+    if (!s) return loading ? "…" : "—";
     const map: Record<FilterKey, number | undefined> = {
       all: s.total_slots,
       committed: s.committed,
@@ -166,49 +190,27 @@ export default function SlotStatusBoard() {
         <div>
           <h2 className="text-[12px] font-semibold text-zinc-100">miner slots · SN{subnet}</h2>
           <p className="text-[10px] text-zinc-500 mt-0.5">
-            all 256 UIDs · registered block · commit type (live chain scan)
+            {loading && !data ? "loading live chain…" : `256 UIDs · ${lastRefresh ? `updated ${Math.round((Date.now() - lastRefresh.getTime()) / 1000)}s ago` : "—"} · poll ${POLL_MS / 1000}s`}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          <label className="inline-flex items-center gap-1 text-[10px] text-zinc-500">
-            subnet
-            <select
-              value={presets.includes(subnet as (typeof presets)[number]) ? subnet : "custom"}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v !== "custom") setSubnet(Number(v));
-              }}
-              className="text-[10px] bg-zinc-900 border border-zinc-700 rounded px-1 py-0.5 text-zinc-300 mono"
-            >
-              {presets.map((n) => (
-                <option key={n} value={n}>
-                  SN{n}
-                </option>
-              ))}
-              <option value="custom">custom</option>
-            </select>
-            {!presets.includes(subnet as (typeof presets)[number]) && (
-              <input
-                type="number"
-                min={0}
-                max={65535}
-                value={subnet}
-                onChange={(e) => setSubnet(Number(e.target.value) || 0)}
-                className="w-12 text-[10px] bg-zinc-900 border border-zinc-700 rounded px-1 py-0.5 text-zinc-300 mono"
-              />
-            )}
-          </label>
           <span className="text-[9px] text-zinc-600 mono">
-            {data?.source === "chain" ? "● live chain" : "db"}
+            {data?.source === "chain" ? "● live chain" : data ? "db" : "…"}
           </span>
           <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortKey)}
+            value={EXTRA_SORTS.includes(sort) ? sort : ""}
+            onChange={(e) => {
+              const v = e.target.value as SlotSortKey;
+              if (v) setSort(v);
+            }}
             className="text-[10px] bg-zinc-900 border border-zinc-700 rounded px-1.5 py-0.5 text-zinc-300"
           >
-            {SORTS.map((s) => (
-              <option key={s.key} value={s.key}>
-                sort: {s.label}
+            <option value="" disabled>
+              more sort: {EXTRA_SORTS.includes(sort) ? sortLabel(sort) : "—"}
+            </option>
+            {EXTRA_SORTS.map((k) => (
+              <option key={k} value={k}>
+                {sortLabel(k)}
               </option>
             ))}
           </select>
@@ -219,24 +221,22 @@ export default function SlotStatusBoard() {
         <div className="px-3 py-2 border-b border-rose-500/20 bg-rose-500/5 text-[10px] text-rose-300">{error}</div>
       )}
 
-      {filter === "timelock_encrypted" && summary && summary.timelock_encrypted + (summary.binary ?? 0) === 0 && (
+      {filter === "timelock_encrypted" && summary && summary.timelock_encrypted + (summary.binary ?? 0) === 0 && !loading && (
         <div className="px-3 py-2 border-b border-violet-500/20 bg-violet-500/5 text-[10px] text-violet-200/90 leading-relaxed">
-          No <code className="mono text-violet-100">TimelockEncrypted</code> on <strong>SN{subnet}</strong> (finney) right
-          now. Check the subnet selector — explorer JSON often shows a different <code className="mono">netuid</code> than
-          SN97. On SN97, uid 5 is <strong>v4 legacy</strong> (sky blue), not encrypted. Violet slots appear after{" "}
-          <code className="mono">set_reveal_commitment</code> is on chain.
+          No <code className="mono text-violet-100">TimelockEncrypted</code> on <strong>SN{subnet}</strong> (finney) right now.
         </div>
       )}
 
       {summary && (
         <div className="px-3 py-2 border-b border-zinc-800/80 text-[10px] text-zinc-500">
-          <strong className="text-zinc-300">{summary.committed}</strong> slots have a commit on chain (
+          <strong className="text-zinc-300">{summary.committed}</strong> slots have a commit (
           <span className="text-lime-400">{summary.v6 ?? 0} v6</span>,{" "}
           <span className="text-emerald-400">{summary.v5} v5</span>,{" "}
           <span className="text-sky-400">{summary.v4} v4</span>,{" "}
-          <span className="text-violet-400">{summary.timelock_encrypted + (summary.binary ?? 0)} encrypted</span>,{" "}
-          <span className="text-amber-400">{summary.json} json</span>) ·{" "}
-          <strong className="text-zinc-400">{summary.none}</strong> with no commit
+          <span className="text-violet-400">{summary.timelock_encrypted + (summary.binary ?? 0)} enc</span>) ·{" "}
+          <strong className="text-zinc-400">{summary.none}</strong> empty · showing{" "}
+          <strong className="text-zinc-300">{displaySlots.length}</strong>
+          {filter !== "all" ? ` (${filter})` : ""}
         </div>
       )}
 
@@ -261,9 +261,9 @@ export default function SlotStatusBoard() {
         <div className="px-3 py-2.5 border-b border-zinc-800/80 w-full">
           <div
             className="w-full flex flex-wrap gap-[2px] p-1.5 bg-zinc-950/60 border border-zinc-800/70 rounded-md shadow-inner content-start"
-            title="256 UID slots — click to jump to row"
+            title="UID 0→255 left-to-right — click to jump to table row"
           >
-            {sortSlots(allSlots, "uid_asc").map((s) => (
+            {allSlots.map((s) => (
               <button
                 key={s.uid}
                 type="button"
@@ -288,22 +288,35 @@ export default function SlotStatusBoard() {
 
       <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
         <table className="tbl">
-          <thead className="sticky top-0 z-10">
+          <thead className="sticky top-0 z-10 bg-zinc-950">
             <tr>
-              <th>uid</th>
+              <SortableTh
+                label="uid"
+                direction={columnSortDirection(sort, "uid")}
+                onClick={() => setSort((s) => toggleColumnSort(s, "uid"))}
+              />
               <th>type</th>
               <th>registered</th>
-              <th>commit blk</th>
+              <SortableTh
+                label="commit blk"
+                direction={columnSortDirection(sort, "commit")}
+                onClick={() => setSort((s) => toggleColumnSort(s, "commit"))}
+              />
               <th>reveal rnd</th>
               <th>hotkey</th>
+              <SortableTh
+                label="coldkey"
+                direction={columnSortDirection(sort, "coldkey")}
+                onClick={() => setSort((s) => toggleColumnSort(s, "coldkey"))}
+              />
               <th>detail</th>
             </tr>
           </thead>
           <tbody>
             {displaySlots.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-center text-zinc-500 py-8 text-[10px]">
-                  {data ? "no slots match filter" : "loading from chain…"}
+                <td colSpan={8} className="text-center text-zinc-500 py-8 text-[10px]">
+                  {loading ? "loading from chain…" : data ? "no slots match filter" : "waiting for data…"}
                 </td>
               </tr>
             ) : (
@@ -318,7 +331,7 @@ export default function SlotStatusBoard() {
                     highlightUid === s.uid ? "bg-zinc-800/60" : ""
                   }`}
                 >
-                  <td className="mono font-medium text-zinc-200">{s.uid}</td>
+                  <td className="mono font-medium text-zinc-200 tabular-nums">{s.uid}</td>
                   <td>
                     <TypeBadge type={s.commitment_type} />
                   </td>
@@ -333,6 +346,9 @@ export default function SlotStatusBoard() {
                   </td>
                   <td className="mono text-zinc-500" title={s.hotkey}>
                     {shortAddr(s.hotkey, 5)}
+                  </td>
+                  <td className="mono text-zinc-500" title={s.coldkey ?? undefined}>
+                    {s.coldkey ? shortAddr(s.coldkey, 5) : "—"}
                   </td>
                   <td className="text-[10px] text-zinc-500 max-w-[180px] truncate">
                     {(s.commitment_type === "v5" || s.commitment_type === "v6") && s.detail ? (

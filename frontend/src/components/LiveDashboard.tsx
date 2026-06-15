@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   shortAddr,
@@ -12,7 +12,14 @@ import {
   type Registry,
   type SyncStatus,
 } from "@/lib/api";
+import {
+  commitColumnDir,
+  sortCommitRows,
+  toggleCommitSort,
+  type CommitRowSortKey,
+} from "@/lib/slotSort";
 import { useSubnet } from "@/lib/useSubnet";
+import SortableTh from "@/components/SortableTh";
 
 const LIVE_URL = "/api/v1/live/stream";
 const POLL_MS = 3000;
@@ -44,6 +51,7 @@ export default function LiveDashboard({
   const [stats, setStats] = useState<CommitmentStats | null>(initialStats);
   const [commits, setCommits] = useState<Commitment[]>(initialCommits);
   const [registry, setRegistry] = useState<Registry | null>(initialRegistry);
+  const [commitSort, setCommitSort] = useState<CommitRowSortKey>("uid_asc");
   const [lastRefresh, setLastRefresh] = useState<Date | null>(
     initialCommits.length > 0 ? new Date() : null
   );
@@ -55,6 +63,20 @@ export default function LiveDashboard({
   const [feed, setFeed] = useState<LiveEvent[]>([]);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const knownUids = useRef<Set<number>>(new Set(initialCommits.map((c) => c.uid).filter((u): u is number => u != null)));
+  const subnetRef = useRef(subnet);
+
+  useEffect(() => {
+    subnetRef.current = subnet;
+    setStats(null);
+    setCommits([]);
+    setRegistry(null);
+    setSyncStatus(null);
+    setFeed([]);
+    knownUids.current = new Set();
+    setCommitSort("uid_asc");
+  }, [subnet]);
+
+  const sortedCommits = useMemo(() => sortCommitRows(commits, commitSort), [commits, commitSort]);
 
   const flash = useCallback((uid: number | undefined) => {
     if (uid == null) return;
@@ -64,14 +86,16 @@ export default function LiveDashboard({
   }, []);
 
   const refresh = useCallback(async () => {
+    const fetchSubnet = subnet;
     const t0 = performance.now();
     try {
       const [s, c, r, sync] = await Promise.all([
-        api.getStats(subnet),
-        api.getCommitments(subnet),
-        api.getRegistry(subnet),
-        api.getSyncStatus(subnet),
+        api.getStats(fetchSubnet),
+        api.getCommitments(fetchSubnet),
+        api.getRegistry(fetchSubnet),
+        api.getSyncStatus(fetchSubnet),
       ]);
+      if (subnetRef.current !== fetchSubnet) return;
       for (const row of c.commitments) {
         if (row.uid != null && !knownUids.current.has(row.uid)) {
           flash(row.uid);
@@ -250,8 +274,8 @@ export default function LiveDashboard({
         <section className="panel xl:col-span-9 order-1 xl:order-2">
           <div className="panel-head">
             <div>
-              <h2 className="text-[12px] font-semibold text-zinc-100">v5 / v6 commits</h2>
-              <p className="text-[10px] text-zinc-500">new rows flash green</p>
+              <h2 className="text-[12px] font-semibold text-zinc-100">v5 / v6 commits · SN{subnet}</h2>
+              <p className="text-[10px] text-zinc-500">click column headers to sort · new rows flash green</p>
             </div>
             <span className="pill-v5">{commits.length} active</span>
           </div>
@@ -259,24 +283,36 @@ export default function LiveDashboard({
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>uid</th>
+                  <SortableTh
+                    label="uid"
+                    direction={commitColumnDir(commitSort, "uid")}
+                    onClick={() => setCommitSort((s) => toggleCommitSort(s, "uid"))}
+                  />
                   <th>hotkey</th>
-                  <th>coldkey</th>
+                  <SortableTh
+                    label="coldkey"
+                    direction={commitColumnDir(commitSort, "coldkey")}
+                    onClick={() => setCommitSort((s) => toggleCommitSort(s, "coldkey"))}
+                  />
                   <th>reg</th>
-                  <th>commit</th>
+                  <SortableTh
+                    label="commit"
+                    direction={commitColumnDir(commitSort, "commit")}
+                    onClick={() => setCommitSort((s) => toggleCommitSort(s, "commit"))}
+                  />
                   <th>model</th>
                   <th>hash</th>
                 </tr>
               </thead>
               <tbody>
-                {commits.length === 0 ? (
+                {sortedCommits.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="text-center text-zinc-500 py-8">
                       no model commits yet
                     </td>
                   </tr>
                 ) : (
-                  commits.map((c) => {
+                  sortedCommits.map((c) => {
                     const isNew = c.uid != null && flashUids.has(c.uid);
                     return (
                       <tr
@@ -325,8 +361,10 @@ export default function LiveDashboard({
       {/* registry */}
       <section className="panel">
         <div className="panel-head">
-          <h2 className="text-[12px] font-semibold text-zinc-100">miner registry</h2>
-          <span className="text-[10px] text-zinc-500">{registry?.total ?? 0} · v6/v5 first</span>
+          <div>
+            <h2 className="text-[12px] font-semibold text-zinc-100">miner registry · SN{subnet}</h2>
+          </div>
+          <span className="text-[10px] text-zinc-500">{registry?.total ?? 0} miners · v6/v5 first</span>
         </div>
         <div className="overflow-x-auto max-h-[360px] overflow-y-auto">
           <table className="tbl">
