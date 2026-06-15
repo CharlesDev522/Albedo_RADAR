@@ -167,6 +167,36 @@ class EncryptedMinerCommitment(Base):
     )
 
 
+class MinerSlotStatus(Base):
+    """Per-UID commitment status on a subnet — all types in one row per slot."""
+
+    __tablename__ = "miner_slot_status"
+    __table_args__ = (
+        UniqueConstraint("subnet", "uid", name="uq_slot_status_subnet_uid"),
+        Index("ix_slot_status_subnet_type", "subnet", "commitment_type"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    subnet: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    uid: Mapped[int] = mapped_column(Integer, nullable=False)
+    hotkey: Mapped[str] = mapped_column(String(64), nullable=False)
+    coldkey: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    registered_at_block: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    commitment_type: Mapped[str] = mapped_column(String(24), default="none", index=True)
+    commit_block: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    deposit: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    reveal_round: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    detail: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    reveal_string: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    encrypted_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    last_updated: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class CommitmentHistory(Base):
     """Historical v5 commitment reveals per hotkey."""
 

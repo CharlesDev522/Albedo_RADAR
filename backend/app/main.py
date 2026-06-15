@@ -17,6 +17,7 @@ from app.api.routes import (
     leaderboards,
     live,
     miners,
+    slot_status,
 )
 from app.config import get_settings
 from app.db.init_db import init_db
@@ -53,6 +54,7 @@ api_prefix = settings.api_prefix
 app.include_router(live.router, prefix=api_prefix)
 app.include_router(commitments.router, prefix=api_prefix)
 app.include_router(encrypted_commitments.router, prefix=api_prefix)
+app.include_router(slot_status.router, prefix=api_prefix)
 app.include_router(miners.router, prefix=api_prefix)
 app.include_router(leaderboards.router, prefix=api_prefix)
 app.include_router(hotkeys.router, prefix=api_prefix)

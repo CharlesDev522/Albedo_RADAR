@@ -1,5 +1,5 @@
 import LiveDashboard from "@/components/LiveDashboard";
-import EncryptedCommitsPanel from "@/components/EncryptedCommitsPanel";
+import SlotStatusBoard from "@/components/SlotStatusBoard";
 import {
   api,
   DEFAULT_SUBNET,
@@ -29,12 +29,12 @@ export default async function Page() {
 
   return (
     <div className="space-y-3">
+      <SlotStatusBoard />
       <LiveDashboard
         initialStats={stats}
         initialCommits={commits.commitments}
         initialRegistry={registry}
       />
-      <EncryptedCommitsPanel />
     </div>
   );
 }

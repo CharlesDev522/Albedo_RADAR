@@ -109,6 +109,39 @@ export interface EncryptedSyncStatus {
   note: string;
 }
 
+export interface SlotStatusEntry {
+  uid: number;
+  hotkey: string;
+  coldkey: string | null;
+  registered_at_block: number | null;
+  commitment_type: string;
+  commit_block: number | null;
+  deposit: number | null;
+  reveal_round: number | null;
+  detail: string | null;
+  last_updated: string | null;
+}
+
+export interface SlotStatusSummary {
+  subnet: number;
+  total_slots: number;
+  v5: number;
+  v4: number;
+  json: number;
+  timelock_encrypted: number;
+  other: number;
+  unknown: number;
+  none: number;
+  last_scan_at: string | null;
+}
+
+export interface SlotStatusData {
+  subnet: number;
+  slots: SlotStatusEntry[];
+  summary: SlotStatusSummary;
+  filter: string | null;
+}
+
 async function fetchApi<T>(path: string): Promise<T> {
   const res = await fetch(`${apiBase()}${path}`, { cache: "no-store" });
   if (!res.ok) {
@@ -143,6 +176,8 @@ export const api = {
     fetchApi<EncryptedCommitmentStats>(`/encrypted-commitments/stats?subnet=${subnet}`),
   getEncryptedSyncStatus: (subnet = DEFAULT_SUBNET) =>
     fetchApi<EncryptedSyncStatus>(`/encrypted-commitments/sync-status?subnet=${subnet}`),
+  getSlotStatus: (subnet = DEFAULT_SUBNET, filter = "all") =>
+    fetchApi<SlotStatusData>(`/slot-status?subnet=${subnet}&filter=${filter}`),
   getRecent: (subnet = DEFAULT_SUBNET) =>
     fetchApi<{ commits: Commitment[] }>(`/live/recent?subnet=${subnet}`),
 };

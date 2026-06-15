@@ -15,6 +15,7 @@ from app.chain_reader.commitment_scanner import (
     scan_v5_commitments,
 )
 from app.chain_reader.encrypted_commitment_scanner import scan_encrypted_commitments
+from app.chain_reader.slot_commitment_scanner import scan_slot_statuses
 from app.collectors.event_publisher import EventPublisher
 from app.collectors.subtensor_client import SubtensorClient
 from app.config import get_settings
@@ -23,6 +24,7 @@ from app.db.models import Miner, MinerCommitment, MinerStatus
 from app.db.session import AsyncSessionLocal, engine
 from app.processing.commitment_state_builder import CommitmentStateBuilder
 from app.processing.encrypted_commitment_state_builder import EncryptedCommitmentStateBuilder
+from app.processing.slot_status_builder import SlotStatusBuilder
 from sqlalchemy import func, select
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,7 @@ class CommitmentPoller:
         self.publisher = EventPublisher(self.settings)
         self.state_builder = CommitmentStateBuilder(publisher=self.publisher)
         self.encrypted_state_builder = EncryptedCommitmentStateBuilder()
+        self.slot_status_builder = SlotStatusBuilder()
         self._running = False
         self._neurons: dict[str, dict] = {}
         self._last_full_scan = 0.0
@@ -67,6 +70,23 @@ class CommitmentPoller:
             self._last_full_scan = time.monotonic()
             await self._fast_poll(netuid)
         await self._encrypted_poll(netuid)
+        await self._slot_poll(netuid)
+
+    async def _slot_poll(self, netuid: int) -> dict[str, int]:
+        """Full per-UID slot map — v5, v4, json, encrypted, none."""
+        assert self._subtensor is not None
+        slots = await scan_slot_statuses(self._subtensor, netuid, self._neurons)
+        async with AsyncSessionLocal() as session:
+            stats = await self.slot_status_builder.process_slots(session, slots, netuid)
+            await session.commit()
+        logger.info(
+            "SLOTS netuid=%d total=%d updated=%d unchanged=%d",
+            netuid,
+            len(slots),
+            stats["updated"],
+            stats["unchanged"],
+        )
+        return stats
 
     async def teardown(self) -> None:
         await self.subtensor_client.disconnect()
@@ -233,6 +253,7 @@ class CommitmentPoller:
                 stats = await self._fast_poll(netuid)
 
             await self._encrypted_poll(netuid)
+            await self._slot_poll(netuid)
             return stats
 
     async def run(self) -> None:
