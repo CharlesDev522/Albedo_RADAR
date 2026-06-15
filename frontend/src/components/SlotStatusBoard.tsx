@@ -10,15 +10,7 @@ import {
   type SlotStatusEntry,
   type SlotStatusSummary,
 } from "@/lib/api";
-import {
-  columnSortDirection,
-  sortLabel,
-  sortSlotEntries,
-  toggleColumnSort,
-  type SlotSortKey,
-} from "@/lib/slotSort";
 import { useSubnet } from "@/lib/useSubnet";
-import SortableTh from "@/components/SortableTh";
 
 const POLL_MS = 3000;
 
@@ -45,7 +37,9 @@ const FILTERS: { key: FilterKey; label: string; color: string; hint?: string }[]
   { key: "none", label: "no commit", color: "text-zinc-500 border-zinc-700 bg-zinc-800/30" },
 ];
 
-const EXTRA_SORTS: SlotSortKey[] = ["reg_desc", "reg_asc", "type"];
+function byUid(a: SlotStatusEntry, b: SlotStatusEntry) {
+  return a.uid - b.uid;
+}
 
 const TYPE_STYLES: Record<string, string> = {
   v6: "text-lime-400 border-lime-500/30 bg-lime-500/10",
@@ -105,7 +99,6 @@ function summaryFromSlots(subnet: number, slots: SlotStatusEntry[]): SlotStatusS
 export default function SlotStatusBoard() {
   const { subnet } = useSubnet();
   const [filter, setFilter] = useState<FilterKey>("committed");
-  const [sort, setSort] = useState<SlotSortKey>("uid_asc");
   const [data, setData] = useState<SlotStatusData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -147,8 +140,7 @@ export default function SlotStatusBoard() {
 
   const allSlots = useMemo(() => {
     const rows = data?.slots ?? [];
-    if (rows.length === 0) return rows;
-    return sortSlotEntries(rows, "uid_asc");
+    return [...rows].sort(byUid);
   }, [data?.slots]);
 
   const summary = useMemo(() => {
@@ -157,8 +149,8 @@ export default function SlotStatusBoard() {
   }, [allSlots, data?.summary, subnet]);
 
   const displaySlots = useMemo(
-    () => sortSlotEntries(filterSlots(allSlots, filter), sort),
-    [allSlots, filter, sort]
+    () => filterSlots(allSlots, filter).sort(byUid),
+    [allSlots, filter]
   );
 
   const jumpToUid = useCallback((uid: number) => {
@@ -197,23 +189,6 @@ export default function SlotStatusBoard() {
           <span className="text-[9px] text-zinc-600 mono">
             {data?.source === "chain" ? "● live chain" : data ? "db" : "…"}
           </span>
-          <select
-            value={EXTRA_SORTS.includes(sort) ? sort : ""}
-            onChange={(e) => {
-              const v = e.target.value as SlotSortKey;
-              if (v) setSort(v);
-            }}
-            className="text-[10px] bg-zinc-900 border border-zinc-700 rounded px-1.5 py-0.5 text-zinc-300"
-          >
-            <option value="" disabled>
-              more sort: {EXTRA_SORTS.includes(sort) ? sortLabel(sort) : "—"}
-            </option>
-            {EXTRA_SORTS.map((k) => (
-              <option key={k} value={k}>
-                {sortLabel(k)}
-              </option>
-            ))}
-          </select>
         </div>
       </div>
 
@@ -290,25 +265,13 @@ export default function SlotStatusBoard() {
         <table className="tbl">
           <thead className="sticky top-0 z-10 bg-zinc-950">
             <tr>
-              <SortableTh
-                label="uid"
-                direction={columnSortDirection(sort, "uid")}
-                onClick={() => setSort((s) => toggleColumnSort(s, "uid"))}
-              />
+              <th>uid</th>
               <th>type</th>
               <th>registered</th>
-              <SortableTh
-                label="commit blk"
-                direction={columnSortDirection(sort, "commit")}
-                onClick={() => setSort((s) => toggleColumnSort(s, "commit"))}
-              />
+              <th>commit blk</th>
               <th>reveal rnd</th>
               <th>hotkey</th>
-              <SortableTh
-                label="coldkey"
-                direction={columnSortDirection(sort, "coldkey")}
-                onClick={() => setSort((s) => toggleColumnSort(s, "coldkey"))}
-              />
+              <th>coldkey</th>
               <th>detail</th>
             </tr>
           </thead>
