@@ -251,11 +251,10 @@ export default function SlotStatusBoard() {
       </div>
 
       {allSlots.length > 0 && (
-        <div className="px-3 py-2.5 border-b border-zinc-800/80">
+        <div className="px-3 py-2.5 border-b border-zinc-800/80 w-full">
           <div
-            className="inline-grid gap-[2px] p-1.5 bg-zinc-950/60 border border-zinc-800/70 rounded-md shadow-inner"
-            style={{ gridTemplateColumns: "repeat(16, 10px)" }}
-            title="256 UID slots (16×16) — click to jump to row"
+            className="w-full flex flex-wrap gap-[2px] p-1.5 bg-zinc-950/60 border border-zinc-800/70 rounded-md shadow-inner content-start"
+            title="256 UID slots — click to jump to row"
           >
             {sortSlots(allSlots, "uid_asc").map((s) => (
               <button
@@ -263,7 +262,7 @@ export default function SlotStatusBoard() {
                 type="button"
                 title={`uid ${s.uid} · ${s.commitment_type}${s.registered_at_block ? ` · reg ${s.registered_at_block}` : ""}`}
                 onClick={() => jumpToUid(s.uid)}
-                className={`w-[10px] h-[10px] rounded-[2px] p-0 border-0 ${GRID_COLORS[s.commitment_type] ?? "bg-zinc-700"} ${
+                className={`w-[10px] h-[10px] shrink-0 rounded-[2px] p-0 border-0 ${GRID_COLORS[s.commitment_type] ?? "bg-zinc-700"} ${
                   filter !== "all" && !filterSlots([s], filter).length ? "opacity-30 saturate-50" : "opacity-100"
                 } ${highlightUid === s.uid ? "ring-2 ring-white/90 ring-offset-1 ring-offset-zinc-950 scale-110 z-10" : ""} hover:ring-1 hover:ring-white/70 hover:brightness-110 cursor-pointer transition-all duration-100`}
               />
