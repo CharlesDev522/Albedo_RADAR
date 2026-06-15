@@ -13,15 +13,12 @@ import {
   type SyncStatus,
 } from "@/lib/api";
 import {
-  dashboardColumnDir,
   sortCommits,
   sortRegistry,
-  sortLabel,
-  toggleDashboardSort,
   type DashboardSortKey,
 } from "@/lib/dashboardSort";
 import { useSubnet } from "@/lib/useSubnet";
-import SortableTh from "@/components/SortableTh";
+import TableSortBar from "@/components/TableSortBar";
 
 const LIVE_URL = "/api/v1/live/stream";
 const POLL_MS = 3000;
@@ -283,9 +280,7 @@ export default function LiveDashboard({
           <div className="panel-head">
             <div>
               <h2 className="text-[12px] font-semibold text-zinc-100">v5 / v6 commits · SN{subnet}</h2>
-              <p className="text-[10px] text-zinc-500">
-                sort: {sortLabel(commitSort)} · click column headers · new rows flash green
-              </p>
+              <p className="text-[10px] text-zinc-500">new rows flash green</p>
             </div>
             <span className="pill-v5">{commits.length} active</span>
           </div>
@@ -293,27 +288,11 @@ export default function LiveDashboard({
             <table className="tbl">
               <thead>
                 <tr>
-                  <SortableTh
-                    label="uid"
-                    direction={dashboardColumnDir(commitSort, "uid")}
-                    onClick={() => setCommitSort((s) => toggleDashboardSort(s, "uid"))}
-                  />
+                  <th>uid</th>
+                  <th>commit</th>
+                  <th>reg</th>
                   <th>hotkey</th>
-                  <SortableTh
-                    label="coldkey"
-                    direction={dashboardColumnDir(commitSort, "coldkey")}
-                    onClick={() => setCommitSort((s) => toggleDashboardSort(s, "coldkey"))}
-                  />
-                  <SortableTh
-                    label="reg"
-                    direction={dashboardColumnDir(commitSort, "reg")}
-                    onClick={() => setCommitSort((s) => toggleDashboardSort(s, "reg"))}
-                  />
-                  <SortableTh
-                    label="commit"
-                    direction={dashboardColumnDir(commitSort, "commit")}
-                    onClick={() => setCommitSort((s) => toggleDashboardSort(s, "commit"))}
-                  />
+                  <th>coldkey</th>
                   <th>model</th>
                   <th>hash</th>
                 </tr>
@@ -340,16 +319,16 @@ export default function LiveDashboard({
                           </span>
                           {isNew && <span className="ml-1 text-[9px] text-emerald-400">NEW</span>}
                         </td>
+                        <td className="mono text-zinc-300 tabular-nums">{c.commit_block.toLocaleString()}</td>
+                        <td className="mono text-zinc-500 tabular-nums">
+                          {c.registered_at_block?.toLocaleString() ?? "—"}
+                        </td>
                         <td className="mono text-emerald-400/90" title={c.hotkey}>
                           {shortAddr(c.hotkey, 6)}
                         </td>
                         <td className="mono text-zinc-500" title={c.coldkey ?? ""}>
                           {c.coldkey ? shortAddr(c.coldkey, 4) : "—"}
                         </td>
-                        <td className="mono text-zinc-500 tabular-nums">
-                          {c.registered_at_block?.toLocaleString() ?? "—"}
-                        </td>
-                        <td className="mono text-zinc-300 tabular-nums">{c.commit_block.toLocaleString()}</td>
                         <td className="max-w-[160px]">
                           <a
                             href={hippiusModelUrl(c.repo)}
@@ -369,6 +348,7 @@ export default function LiveDashboard({
               </tbody>
             </table>
           </div>
+          <TableSortBar sort={commitSort} onSort={setCommitSort} />
         </section>
       </div>
 
@@ -377,9 +357,6 @@ export default function LiveDashboard({
         <div className="panel-head">
           <div>
             <h2 className="text-[12px] font-semibold text-zinc-100">miner registry · SN{subnet}</h2>
-            <p className="text-[10px] text-zinc-500">
-              sort: {sortLabel(registrySort)} · click column headers
-            </p>
           </div>
           <span className="text-[10px] text-zinc-500">
             {registry?.total ?? 0} miners · {registry?.v6_count ?? 0} v6 · {registry?.v5_count ?? 0} v5
@@ -389,32 +366,12 @@ export default function LiveDashboard({
           <table className="tbl">
             <thead className="sticky top-0 z-10 bg-zinc-950">
               <tr>
-                <SortableTh
-                  label="uid"
-                  direction={dashboardColumnDir(registrySort, "uid")}
-                  onClick={() => setRegistrySort((s) => toggleDashboardSort(s, "uid"))}
-                />
-                <SortableTh
-                  label="st"
-                  direction={dashboardColumnDir(registrySort, "status")}
-                  onClick={() => setRegistrySort((s) => toggleDashboardSort(s, "status"))}
-                />
+                <th>uid</th>
+                <th>commit</th>
+                <th>reg</th>
+                <th>st</th>
                 <th>hotkey</th>
-                <SortableTh
-                  label="coldkey"
-                  direction={dashboardColumnDir(registrySort, "coldkey")}
-                  onClick={() => setRegistrySort((s) => toggleDashboardSort(s, "coldkey"))}
-                />
-                <SortableTh
-                  label="reg"
-                  direction={dashboardColumnDir(registrySort, "reg")}
-                  onClick={() => setRegistrySort((s) => toggleDashboardSort(s, "reg"))}
-                />
-                <SortableTh
-                  label="commit"
-                  direction={dashboardColumnDir(registrySort, "commit")}
-                  onClick={() => setRegistrySort((s) => toggleDashboardSort(s, "commit"))}
-                />
+                <th>coldkey</th>
                 <th>model</th>
               </tr>
             </thead>
@@ -434,6 +391,10 @@ export default function LiveDashboard({
                   }`}
                 >
                   <td className="mono text-zinc-200">{m.uid}</td>
+                  <td className="mono text-zinc-400 tabular-nums">
+                    {m.commit_block?.toLocaleString() ?? "—"}
+                  </td>
+                  <td className="mono text-zinc-500 tabular-nums">{m.registered_at_block?.toLocaleString() ?? "—"}</td>
                   <td>
                     {m.has_v5 ? (
                       <span className={m.version === "v6" ? "pill-v6" : "pill-v5"}>{m.version ?? "v5"}</span>
@@ -443,10 +404,6 @@ export default function LiveDashboard({
                   </td>
                   <td className="mono text-zinc-400">{shortAddr(m.hotkey, 6)}</td>
                   <td className="mono text-zinc-500">{shortAddr(m.coldkey, 4)}</td>
-                  <td className="mono text-zinc-500 tabular-nums">{m.registered_at_block?.toLocaleString() ?? "—"}</td>
-                  <td className="mono text-zinc-400 tabular-nums">
-                    {m.commit_block?.toLocaleString() ?? "—"}
-                  </td>
                   <td className="text-[10px] truncate max-w-[180px]">
                     {m.repo ? (
                       <a
@@ -468,6 +425,7 @@ export default function LiveDashboard({
             </tbody>
           </table>
         </div>
+        <TableSortBar sort={registrySort} onSort={setRegistrySort} showStatus />
         {waiting.length > 0 && (
           <div className="px-3 py-2 border-t border-zinc-800/80 text-[10px] text-zinc-600">
             {waiting.length} miners without v5/v6
