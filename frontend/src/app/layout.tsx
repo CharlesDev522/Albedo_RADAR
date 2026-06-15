@@ -11,7 +11,7 @@ const mono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "MinerWatch · SN97",
-  description: "v5 commitment tracker for Bittensor subnet 97",
+  description: "v5/v6 model commitment tracker for Bittensor subnet 97",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -26,7 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
               <div className="min-w-0">
                 <h1 className="text-[13px] font-semibold text-zinc-100 tracking-tight">MinerWatch</h1>
-                <p className="text-[10px] text-zinc-500 truncate">subnet 97 · v5 commitments</p>
+                <p className="text-[10px] text-zinc-500 truncate">subnet 97 · v5/v6 commitments</p>
               </div>
             </div>
             <div className="flex items-center gap-3 text-[10px] text-zinc-500 shrink-0">

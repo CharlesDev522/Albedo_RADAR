@@ -46,6 +46,10 @@
     @apply pill border-emerald-500/30 bg-emerald-500/10 text-emerald-400;
   }
 
+  .pill-v6 {
+    @apply pill border-lime-500/30 bg-lime-500/10 text-lime-400;
+  }
+
   .pill-none {
     @apply pill border-zinc-700 bg-zinc-800/50 text-zinc-500;
   }

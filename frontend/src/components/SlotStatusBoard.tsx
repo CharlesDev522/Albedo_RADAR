@@ -17,6 +17,7 @@ const POLL_MS = 5000;
 type FilterKey =
   | "all"
   | "committed"
+  | "v6"
   | "v5"
   | "non_v5"
   | "timelock_encrypted"
@@ -29,8 +30,9 @@ type SortKey = "uid_asc" | "uid_desc" | "reg_asc" | "reg_desc" | "commit_asc" | 
 const FILTERS: { key: FilterKey; label: string; color: string; hint?: string }[] = [
   { key: "all", label: "all 256", color: "text-zinc-300 border-zinc-600" },
   { key: "committed", label: "has commit", color: "text-zinc-200 border-zinc-500 bg-zinc-800/40", hint: "any on-chain commit" },
+  { key: "v6", label: "v6", color: "text-lime-400 border-lime-500/40 bg-lime-500/10" },
   { key: "v5", label: "v5", color: "text-emerald-400 border-emerald-500/40 bg-emerald-500/10" },
-  { key: "non_v5", label: "non-v5", color: "text-sky-300 border-sky-500/40 bg-sky-500/10", hint: "v4 / json / encrypted" },
+  { key: "non_v5", label: "non-v5/v6", color: "text-sky-300 border-sky-500/40 bg-sky-500/10", hint: "v4 / json / encrypted" },
   { key: "timelock_encrypted", label: "encrypted", color: "text-violet-300 border-violet-500/40 bg-violet-500/10", hint: "TimelockEncrypted" },
   { key: "v4", label: "v4 legacy", color: "text-sky-300 border-sky-500/40 bg-sky-500/10" },
   { key: "json", label: "json", color: "text-amber-300 border-amber-500/40 bg-amber-500/10" },
@@ -48,6 +50,7 @@ const SORTS: { key: SortKey; label: string }[] = [
 ];
 
 const TYPE_STYLES: Record<string, string> = {
+  v6: "text-lime-400 border-lime-500/30 bg-lime-500/10",
   v5: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10",
   timelock_encrypted: "text-violet-300 border-violet-500/30 bg-violet-500/10",
   binary: "text-violet-300 border-violet-500/30 bg-violet-500/10",
@@ -59,6 +62,7 @@ const TYPE_STYLES: Record<string, string> = {
 };
 
 const GRID_COLORS: Record<string, string> = {
+  v6: "bg-lime-500",
   v5: "bg-emerald-500",
   timelock_encrypted: "bg-violet-500",
   binary: "bg-violet-600",
@@ -72,7 +76,8 @@ const GRID_COLORS: Record<string, string> = {
 function filterSlots(slots: SlotStatusEntry[], filter: FilterKey): SlotStatusEntry[] {
   if (filter === "all") return slots;
   if (filter === "committed") return slots.filter((s) => s.commitment_type !== "none");
-  if (filter === "non_v5") return slots.filter((s) => s.commitment_type !== "none" && s.commitment_type !== "v5");
+  if (filter === "non_v5")
+    return slots.filter((s) => s.commitment_type !== "none" && s.commitment_type !== "v5" && s.commitment_type !== "v6");
   if (filter === "timelock_encrypted")
     return slots.filter((s) => s.commitment_type === "timelock_encrypted" || s.commitment_type === "binary");
   return slots.filter((s) => s.commitment_type === filter);
@@ -144,6 +149,7 @@ export default function SlotStatusBoard() {
     const map: Record<FilterKey, number | undefined> = {
       all: s.total_slots,
       committed: s.committed,
+      v6: s.v6 ?? 0,
       v5: s.v5,
       non_v5: s.non_v5,
       timelock_encrypted: s.timelock_encrypted + (s.binary ?? 0),
@@ -225,6 +231,7 @@ export default function SlotStatusBoard() {
       {summary && (
         <div className="px-3 py-2 border-b border-zinc-800/80 text-[10px] text-zinc-500">
           <strong className="text-zinc-300">{summary.committed}</strong> slots have a commit on chain (
+          <span className="text-lime-400">{summary.v6 ?? 0} v6</span>,{" "}
           <span className="text-emerald-400">{summary.v5} v5</span>,{" "}
           <span className="text-sky-400">{summary.v4} v4</span>,{" "}
           <span className="text-violet-400">{summary.timelock_encrypted + (summary.binary ?? 0)} encrypted</span>,{" "}
@@ -328,12 +335,12 @@ export default function SlotStatusBoard() {
                     {shortAddr(s.hotkey, 5)}
                   </td>
                   <td className="text-[10px] text-zinc-500 max-w-[180px] truncate">
-                    {s.commitment_type === "v5" && s.detail ? (
+                    {(s.commitment_type === "v5" || s.commitment_type === "v6") && s.detail ? (
                       <a
                         href={hippiusModelUrl(s.detail)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-emerald-400/80 hover:underline"
+                        className={`${s.commitment_type === "v6" ? "text-lime-400/80" : "text-emerald-400/80"} hover:underline`}
                       >
                         {shortRepo(s.detail, 28)}
                       </a>

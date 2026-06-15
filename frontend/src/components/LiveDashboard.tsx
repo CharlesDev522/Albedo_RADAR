@@ -133,8 +133,9 @@ export default function LiveDashboard({
     };
   }, [subnet, flash, refresh]);
 
-  const v5Miners = registry?.miners.filter((m) => m.has_v5) ?? [];
   const waiting = registry?.miners.filter((m) => !m.has_v5) ?? [];
+  const v6Count = registry?.v6_count ?? commits.filter((c) => c.version === "v6" || c.reveal_string?.startsWith("v6|")).length;
+  const v5Count = registry?.v5_count ?? commits.filter((c) => (c.version ?? "v5") === "v5" || c.reveal_string?.startsWith("v5|")).length;
 
   return (
     <div className="space-y-3">
@@ -146,7 +147,7 @@ export default function LiveDashboard({
       )}
       {!apiError && syncStatus && !syncStatus.in_sync && (
         <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[11px] text-amber-300">
-          Chain has <strong>{syncStatus.onchain_v5_count}</strong> v5 commits (uids{" "}
+          Chain has <strong>{syncStatus.onchain_v5_count}</strong> model commits (v5/v6 · uids{" "}
           {syncStatus.onchain_uids.join(", ") || "—"}) but DB has{" "}
           <strong>{syncStatus.db_v5_count}</strong>
           {syncStatus.missing_in_db.length > 0 && (
@@ -158,7 +159,7 @@ export default function LiveDashboard({
       )}
       {!apiError && commits.length === 0 && stats?.committed_miners === 0 && (
         <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[11px] text-amber-300">
-          No v5 commits in database yet — check{" "}
+          No v5/v6 commits in database yet — check{" "}
           <code className="mono text-amber-100">docker compose logs collector</code> and{" "}
           <code className="mono text-amber-100">GET /api/v1/commitments/onchain</code>.
         </div>
@@ -195,8 +196,13 @@ export default function LiveDashboard({
       {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         <Kpi label="miners" value={String(stats?.total_neurons ?? "—")} />
-        <Kpi label="v5 committed" value={String(stats?.committed_miners ?? "—")} accent />
-        <Kpi label="no v5" value={String(stats?.uncommitted_miners ?? "—")} warn={(stats?.uncommitted_miners ?? 0) > 0} />
+        <Kpi label="model committed" value={String(stats?.committed_miners ?? "—")} accent />
+        <Kpi
+          label="v6 / v5"
+          value={`${v6Count} / ${v5Count}`}
+          accent
+        />
+        <Kpi label="no commit" value={String(stats?.uncommitted_miners ?? "—")} warn={(stats?.uncommitted_miners ?? 0) > 0} />
         <Kpi label="coverage" value={stats ? `${stats.coverage_pct}%` : "—"} />
         <Kpi label="latest blk" value={stats?.latest_commit_block?.toLocaleString() ?? "—"} mono />
         <Kpi label="scan" value={stats?.last_scan_at ? fmtTime(stats.last_scan_at) : "—"} small />
@@ -244,7 +250,7 @@ export default function LiveDashboard({
         <section className="panel xl:col-span-9 order-1 xl:order-2">
           <div className="panel-head">
             <div>
-              <h2 className="text-[12px] font-semibold text-zinc-100">v5 commits</h2>
+              <h2 className="text-[12px] font-semibold text-zinc-100">v5 / v6 commits</h2>
               <p className="text-[10px] text-zinc-500">new rows flash green</p>
             </div>
             <span className="pill-v5">{commits.length} active</span>
@@ -266,7 +272,7 @@ export default function LiveDashboard({
                 {commits.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="text-center text-zinc-500 py-8">
-                      no v5 commits yet
+                      no model commits yet
                     </td>
                   </tr>
                 ) : (
@@ -279,6 +285,9 @@ export default function LiveDashboard({
                       >
                         <td className="mono font-medium text-zinc-200">
                           {c.uid ?? "—"}
+                          <span className={`ml-1 text-[8px] uppercase ${(c.version ?? (c.reveal_string?.startsWith("v6|") ? "v6" : "v5")) === "v6" ? "text-lime-400" : "text-emerald-400"}`}>
+                            {c.version ?? (c.reveal_string?.startsWith("v6|") ? "v6" : "v5")}
+                          </span>
                           {isNew && <span className="ml-1 text-[9px] text-emerald-400">NEW</span>}
                         </td>
                         <td className="mono text-emerald-400/90" title={c.hotkey}>
@@ -317,7 +326,7 @@ export default function LiveDashboard({
       <section className="panel">
         <div className="panel-head">
           <h2 className="text-[12px] font-semibold text-zinc-100">miner registry</h2>
-          <span className="text-[10px] text-zinc-500">{registry?.total ?? 0} · v5 first</span>
+          <span className="text-[10px] text-zinc-500">{registry?.total ?? 0} · v6/v5 first</span>
         </div>
         <div className="overflow-x-auto max-h-[360px] overflow-y-auto">
           <table className="tbl">
@@ -340,7 +349,13 @@ export default function LiveDashboard({
                   }`}
                 >
                   <td className="mono text-zinc-200">{m.uid}</td>
-                  <td>{m.has_v5 ? <span className="pill-v5">v5</span> : <span className="pill-none">—</span>}</td>
+                  <td>
+                    {m.has_v5 ? (
+                      <span className={m.version === "v6" ? "pill-v6" : "pill-v5"}>{m.version ?? "v5"}</span>
+                    ) : (
+                      <span className="pill-none">—</span>
+                    )}
+                  </td>
                   <td className="mono text-zinc-400">{shortAddr(m.hotkey, 6)}</td>
                   <td className="mono text-zinc-500">{shortAddr(m.coldkey, 4)}</td>
                   <td className="mono text-zinc-500 tabular-nums">{m.registered_at_block?.toLocaleString() ?? "—"}</td>
@@ -366,7 +381,7 @@ export default function LiveDashboard({
         </div>
         {waiting.length > 0 && (
           <div className="px-3 py-2 border-t border-zinc-800/80 text-[10px] text-zinc-600">
-            {waiting.length} miners without v5
+            {waiting.length} miners without v5/v6
           </div>
         )}
       </section>

@@ -76,6 +76,7 @@ class CommitmentStateBuilder:
                     existing.commit_block = commit.block_number
                 existing.block_hash = commit.block_hash or existing.block_hash
                 existing.reveal_string = commit.reveal_string
+                existing.version = commit.commit_payload.get("version", existing.version)
                 existing.repo = commit.commit_payload["repo"]
                 existing.digest = commit.commit_payload["digest"]
                 existing.model_uri = commit.model_uri
@@ -189,7 +190,7 @@ class CommitmentStateBuilder:
             commit_block=commit.block_number,
             block_hash=commit.block_hash,
             reveal_string=commit.reveal_string,
-            version="v5",
+            version=commit.commit_payload.get("version", "v5"),
             repo=commit.commit_payload["repo"],
             digest=commit.commit_payload["digest"],
             model_uri=commit.model_uri,
@@ -260,5 +261,6 @@ class CommitmentStateBuilder:
                 "model_uri": commit.model_uri,
                 "payload_hash": commit.payload_hash,
                 "commit_source": commit.commit_source,
+                "version": commit.commit_payload.get("version"),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })

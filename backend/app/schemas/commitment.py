@@ -58,6 +58,7 @@ class MinerRegistryEntry(BaseModel):
     coldkey: str
     registered_at_block: int | None
     has_v5: bool
+    version: str | None = None
     commit_block: int | None = None
     repo: str | None = None
     model_uri: str | None = None
@@ -69,6 +70,7 @@ class MinerRegistryResponse(BaseModel):
     subnet: int
     miners: list[MinerRegistryEntry]
     total: int
+    v6_count: int = 0
     v5_count: int
     uncommitted_count: int
 

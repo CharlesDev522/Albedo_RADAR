@@ -21,6 +21,7 @@ export interface Commitment {
   registered_at_block: number | null;
   commit_block: number;
   reveal_string: string;
+  version?: string;
   repo: string;
   digest: string;
   model_uri: string;
@@ -45,6 +46,7 @@ export interface RegistryMiner {
   coldkey: string;
   registered_at_block: number | null;
   has_v5: boolean;
+  version: string | null;
   commit_block: number | null;
   repo: string | null;
   model_uri: string | null;
@@ -55,6 +57,9 @@ export interface RegistryMiner {
 export interface SyncStatus {
   subnet: number;
   onchain_v5_count: number;
+  onchain_v6_only?: number;
+  onchain_v5_only?: number;
+  onchain_model_count?: number;
   db_v5_count: number;
   in_sync: boolean;
   onchain_uids: number[];
@@ -67,6 +72,7 @@ export interface Registry {
   subnet: number;
   miners: RegistryMiner[];
   total: number;
+  v6_count?: number;
   v5_count: number;
   uncommitted_count: number;
 }
@@ -125,6 +131,7 @@ export interface SlotStatusEntry {
 export interface SlotStatusSummary {
   subnet: number;
   total_slots: number;
+  v6: number;
   v5: number;
   v4: number;
   json: number;

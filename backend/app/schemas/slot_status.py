@@ -23,6 +23,7 @@ class SlotStatusEntry(BaseModel):
 class SlotStatusSummary(BaseModel):
     subnet: int
     total_slots: int
+    v6: int = 0
     v5: int = 0
     v4: int = 0
     json: int = 0

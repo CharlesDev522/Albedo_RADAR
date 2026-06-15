@@ -142,6 +142,7 @@ async def miner_registry(
 
     entries: list[MinerRegistryEntry] = []
     v5_count = 0
+    v6_count = 0
     seen_uids: set[int] = set()
 
     for m in miners:
@@ -149,7 +150,10 @@ async def miner_registry(
         c = commits_by_uid.get(m.uid)
         has_v5 = c is not None
         if has_v5:
-            v5_count += 1
+            if c and c.version == "v6":
+                v6_count += 1
+            else:
+                v5_count += 1
         entries.append(
             MinerRegistryEntry(
                 uid=m.uid,
@@ -157,6 +161,7 @@ async def miner_registry(
                 coldkey=m.coldkey,
                 registered_at_block=m.registered_at_block,
                 has_v5=has_v5,
+                version=c.version if c else None,
                 commit_block=c.commit_block if c else None,
                 repo=c.repo if c else None,
                 model_uri=c.model_uri if c else None,
@@ -168,7 +173,10 @@ async def miner_registry(
     # Include v5 commits even if miner row missing (e.g. collector partial sync)
     for c in all_commits:
         if c.uid is not None and c.uid not in seen_uids:
-            v5_count += 1
+            if c.version == "v6":
+                v6_count += 1
+            else:
+                v5_count += 1
             entries.append(
                 MinerRegistryEntry(
                     uid=c.uid,
@@ -176,6 +184,7 @@ async def miner_registry(
                     coldkey=c.coldkey,
                     registered_at_block=c.registered_at_block,
                     has_v5=True,
+                    version=c.version,
                     commit_block=c.commit_block,
                     repo=c.repo,
                     model_uri=c.model_uri,
@@ -190,6 +199,7 @@ async def miner_registry(
         subnet=subnet,
         miners=entries,
         total=len(entries),
+        v6_count=v6_count,
         v5_count=v5_count,
         uncommitted_count=sum(1 for e in entries if not e.has_v5),
     )
@@ -271,22 +281,28 @@ async def sync_status(
 
     onchain_uids = sorted({c.uid for c in commits if c.uid is not None})
     missing_in_db = sorted(set(onchain_uids) - set(db_uids))
+    onchain_v5 = sum(1 for c in commits if c.commit_payload.get("version") == "v5")
+    onchain_v6 = sum(1 for c in commits if c.commit_payload.get("version") == "v6")
 
     return {
         "subnet": subnet,
         "onchain_v5_count": len(commits),
+        "onchain_model_count": len(commits),
+        "onchain_v5_only": onchain_v5,
+        "onchain_v6_only": onchain_v6,
         "db_v5_count": db_count,
         "in_sync": len(missing_in_db) == 0 and db_count >= len(commits),
         "onchain_uids": onchain_uids,
         "db_uids": db_uids,
         "missing_in_db": missing_in_db,
         "repos": [c.commit_payload.get("repo") for c in commits],
+        "versions": [c.commit_payload.get("version") for c in commits],
     }
 
 
 @router.get("/onchain")
 async def onchain_v5_count(subnet: int = Query(default=97, ge=0)) -> dict:
-    """Debug: v5 commits on chain right now vs database (helps diagnose sync gaps)."""
+    """Debug: v5/v6 model commits on chain right now."""
     from bittensor.core.async_subtensor import AsyncSubtensor
 
     from app.chain_reader.commitment_scanner import _neuron_index, scan_v5_active_fast
@@ -298,7 +314,11 @@ async def onchain_v5_count(subnet: int = Query(default=97, ge=0)) -> dict:
     return {
         "subnet": subnet,
         "onchain_v5_count": len(commits),
+        "onchain_model_count": len(commits),
+        "onchain_v5_only": sum(1 for c in commits if c.commit_payload.get("version") == "v5"),
+        "onchain_v6_only": sum(1 for c in commits if c.commit_payload.get("version") == "v6"),
         "uids": sorted({c.uid for c in commits if c.uid is not None}),
         "hotkeys": [c.hotkey for c in commits],
         "repos": [c.commit_payload.get("repo") for c in commits],
+        "versions": [c.commit_payload.get("version") for c in commits],
     }

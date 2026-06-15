@@ -13,7 +13,7 @@ from app.chain_reader.commitment_decoder import (
     iter_commitment_of_raw,
     parse_timelock_encrypted,
 )
-from app.chain_reader.commitment_scanner import _neuron_index, parse_v5
+from app.chain_reader.commitment_scanner import _neuron_index, parse_model_commit
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +109,7 @@ async def scan_encrypted_onchain_debug(subtensor: Any, netuid: int) -> dict[str,
     """Debug helper: count TimelockEncrypted vs plaintext kinds on CommitmentOf."""
     timelock = 0
     v5_plain = 0
+    v6_plain = 0
     other_plain = 0
     async for hotkey, raw in iter_commitment_of_raw(subtensor, netuid):
         decoded = decode_commitment_of_raw(raw)
@@ -116,7 +117,10 @@ async def scan_encrypted_onchain_debug(subtensor: Any, netuid: int) -> dict[str,
             timelock += 1
             continue
         if decoded.kind == CommitmentKind.PLAINTEXT and decoded.reveal_string:
-            if parse_v5(decoded.reveal_string, hotkey):
+            parsed = parse_model_commit(decoded.reveal_string, hotkey)
+            if parsed and parsed.get("version") == "v6":
+                v6_plain += 1
+            elif parsed and parsed.get("version") == "v5":
                 v5_plain += 1
             else:
                 other_plain += 1
@@ -124,5 +128,6 @@ async def scan_encrypted_onchain_debug(subtensor: Any, netuid: int) -> dict[str,
         "subnet": netuid,
         "timelock_encrypted": timelock,
         "plaintext_v5": v5_plain,
+        "plaintext_v6": v6_plain,
         "plaintext_other": other_plain,
     }

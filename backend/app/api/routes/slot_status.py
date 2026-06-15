@@ -16,6 +16,7 @@ settings = get_settings()
 
 VALID_FILTERS = {
     "all",
+    "v6",
     "v5",
     "v4",
     "json",
@@ -128,7 +129,7 @@ def _filter_rows(rows: list, filt: str) -> list:
     if filt == "committed":
         return [r for r in rows if r.commitment_type != "none"]
     if filt == "non_v5":
-        return [r for r in rows if r.commitment_type not in ("none", "v5")]
+        return [r for r in rows if r.commitment_type not in ("none", "v5", "v6")]
     if filt == "timelock_encrypted":
         return [r for r in rows if r.commitment_type in ("timelock_encrypted", "binary")]
     if filt in VALID_FILTERS:
@@ -194,6 +195,7 @@ async def onchain_slots(subnet: int = Query(default=97, ge=0)) -> dict:
         "subnet": subnet,
         "total_slots": len(slots),
         "breakdown": counts,
+        "v6_uids": sorted(s.uid for s in slots if s.commitment_type.value == "v6"),
         "v5_uids": sorted(s.uid for s in slots if s.commitment_type.value == "v5"),
         "encrypted_uids": sorted(
             s.uid for s in slots if s.commitment_type.value == "timelock_encrypted"
@@ -228,6 +230,7 @@ def _summary_from_rows(subnet: int, rows: list) -> SlotStatusSummary:
     return SlotStatusSummary(
         subnet=subnet,
         total_slots=len(rows),
+        v6=counts.get("v6", 0),
         v5=counts.get("v5", 0),
         v4=counts.get("v4", 0),
         json=counts.get("json", 0),
@@ -237,6 +240,6 @@ def _summary_from_rows(subnet: int, rows: list) -> SlotStatusSummary:
         unknown=counts.get("unknown", 0),
         none=counts.get("none", 0),
         committed=len(rows) - counts.get("none", 0),
-        non_v5=len(rows) - counts.get("none", 0) - counts.get("v5", 0),
+        non_v5=len(rows) - counts.get("none", 0) - counts.get("v5", 0) - counts.get("v6", 0),
         last_scan_at=last_scan or datetime.now(timezone.utc),
     )
