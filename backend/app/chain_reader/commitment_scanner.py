@@ -1,8 +1,9 @@
 """Bittensor chain reading — discover v5 model commits on a subnet.
 
 Scans two on-chain sources:
-  - ``CommitmentOf`` — current active commitment per hotkey (where new v5 commits appear first)
-  - ``RevealedCommitments`` — historical reveal log with block numbers
+  - ``CommitmentOf`` — current active commitment per hotkey (TimelockEncrypted parsed
+    from raw storage first; only plaintext is returned for v5 merge)
+  - ``RevealedCommitments`` — historical reveal log (timelock ciphertext absent until reveal)
 
 A v5 commitment is: ``v5|<repo>|<sha256:digest>``
 """
@@ -14,6 +15,8 @@ import json
 import logging
 from dataclasses import dataclass
 from typing import Any
+
+from app.chain_reader.commitment_decoder import decode_revealed_payload, iter_active_plaintext
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +63,10 @@ def payload_hash(payload: dict[str, Any]) -> str:
 
 
 def _decode_commitment_pair(pair: tuple[Any, Any]) -> tuple[str, list[tuple[int, str]]]:
-    """Return (hotkey_ss58, [(block, payload), ...]) for one RevealedCommitments row."""
+    """Return (hotkey_ss58, [(block, payload), ...]) for one RevealedCommitments row.
+
+    TimelockEncrypted entries are not present until revealed — plaintext decode only.
+    """
     key, data = pair
     if not isinstance(key, str):
         key = str(getattr(key, "value", key))
@@ -70,15 +76,9 @@ def _decode_commitment_pair(pair: tuple[Any, Any]) -> tuple[str, list[tuple[int,
         text, block = entry
         if not isinstance(text, str):
             text = str(text)
-        if text.startswith(("0x", "0X")):
-            raw = bytes.fromhex(text[2:])
-        else:
-            raw = text.encode("latin-1")
-        if not raw:
-            continue
-        mode = raw[0] & 0b11
-        offset = 1 if mode == 0 else 2 if mode == 1 else 4
-        out.append((int(block), raw[offset:].decode("utf-8", errors="ignore")))
+        payload = decode_revealed_payload(text)
+        if payload:
+            out.append((int(block), payload))
     return key, out
 
 
@@ -102,12 +102,8 @@ async def _iter_revealed(subtensor: Any, netuid: int) -> list[tuple[str, int, st
 
 
 async def _iter_active_commitments(subtensor: Any, netuid: int) -> dict[str, str]:
-    """Read current CommitmentOf per hotkey via SDK decoder."""
-    try:
-        return await subtensor.get_all_commitments(netuid)
-    except Exception:
-        logger.warning("get_all_commitments(%d) failed", netuid, exc_info=True)
-        return {}
+    """Read current CommitmentOf plaintext per hotkey (skips TimelockEncrypted)."""
+    return await iter_active_plaintext(subtensor, netuid)
 
 
 def _latest_v5_per_hotkey(entries: list[tuple[str, int, str]]) -> dict[str, tuple[int, str]]:

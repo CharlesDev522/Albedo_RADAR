@@ -12,7 +12,7 @@ from app.chain_reader.commitment_classifier import (
     classify_commitment_raw,
 )
 from app.chain_reader.commitment_scanner import _neuron_index
-from app.chain_reader.encrypted_commitment_scanner import _iter_commitment_of_raw
+from app.chain_reader.commitment_decoder import iter_commitment_of_raw
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ async def scan_slot_statuses(
         }
 
     commitments_by_hotkey: dict[str, ClassifiedCommitment] = {}
-    async for hotkey, raw in _iter_commitment_of_raw(subtensor, netuid):
+    async for hotkey, raw in iter_commitment_of_raw(subtensor, netuid):
         classified = classify_commitment_raw(raw, hotkey)
         if classified is not None:
             commitments_by_hotkey[hotkey] = classified
