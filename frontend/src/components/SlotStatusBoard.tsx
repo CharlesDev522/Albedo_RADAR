@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
-  DEFAULT_SUBNET,
   hippiusModelUrl,
   shortAddr,
   shortRepo,
@@ -11,6 +10,7 @@ import {
   type SlotStatusEntry,
   type SlotStatusSummary,
 } from "@/lib/api";
+import { useSubnet } from "@/lib/useSubnet";
 
 const POLL_MS = 5000;
 
@@ -101,12 +101,13 @@ function sortSlots(slots: SlotStatusEntry[], sort: SortKey): SlotStatusEntry[] {
 }
 
 export default function SlotStatusBoard() {
-  const subnet = DEFAULT_SUBNET;
+  const { subnet, setSubnet, presets } = useSubnet();
   const [filter, setFilter] = useState<FilterKey>("committed");
   const [sort, setSort] = useState<SortKey>("uid_asc");
   const [data, setData] = useState<SlotStatusData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<"grid" | "table">("table");
+  const [highlightUid, setHighlightUid] = useState<number | null>(null);
+  const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
 
   const refresh = useCallback(async () => {
     try {
@@ -130,6 +131,13 @@ export default function SlotStatusBoard() {
     () => sortSlots(filterSlots(allSlots, filter), sort),
     [allSlots, filter, sort]
   );
+
+  const jumpToUid = useCallback((uid: number) => {
+    setHighlightUid(uid);
+    requestAnimationFrame(() => {
+      rowRefs.current.get(uid)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  }, []);
 
   const countFor = (key: FilterKey, s: SlotStatusSummary | undefined) => {
     if (!s) return "—";
@@ -155,7 +163,35 @@ export default function SlotStatusBoard() {
             all 256 UIDs · registered block · commit type (live chain scan)
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <label className="inline-flex items-center gap-1 text-[10px] text-zinc-500">
+            subnet
+            <select
+              value={presets.includes(subnet as (typeof presets)[number]) ? subnet : "custom"}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v !== "custom") setSubnet(Number(v));
+              }}
+              className="text-[10px] bg-zinc-900 border border-zinc-700 rounded px-1 py-0.5 text-zinc-300 mono"
+            >
+              {presets.map((n) => (
+                <option key={n} value={n}>
+                  SN{n}
+                </option>
+              ))}
+              <option value="custom">custom</option>
+            </select>
+            {!presets.includes(subnet as (typeof presets)[number]) && (
+              <input
+                type="number"
+                min={0}
+                max={65535}
+                value={subnet}
+                onChange={(e) => setSubnet(Number(e.target.value) || 0)}
+                className="w-12 text-[10px] bg-zinc-900 border border-zinc-700 rounded px-1 py-0.5 text-zinc-300 mono"
+              />
+            )}
+          </label>
           <span className="text-[9px] text-zinc-600 mono">
             {data?.source === "chain" ? "● live chain" : "db"}
           </span>
@@ -170,25 +206,20 @@ export default function SlotStatusBoard() {
               </option>
             ))}
           </select>
-          <button
-            type="button"
-            onClick={() => setView("grid")}
-            className={`px-2 py-0.5 text-[10px] rounded border ${view === "grid" ? "border-zinc-500 text-zinc-200" : "border-zinc-800 text-zinc-600"}`}
-          >
-            grid
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("table")}
-            className={`px-2 py-0.5 text-[10px] rounded border ${view === "table" ? "border-zinc-500 text-zinc-200" : "border-zinc-800 text-zinc-600"}`}
-          >
-            table
-          </button>
         </div>
       </div>
 
       {error && (
         <div className="px-3 py-2 border-b border-rose-500/20 bg-rose-500/5 text-[10px] text-rose-300">{error}</div>
+      )}
+
+      {filter === "timelock_encrypted" && summary && summary.timelock_encrypted + (summary.binary ?? 0) === 0 && (
+        <div className="px-3 py-2 border-b border-violet-500/20 bg-violet-500/5 text-[10px] text-violet-200/90 leading-relaxed">
+          No <code className="mono text-violet-100">TimelockEncrypted</code> on <strong>SN{subnet}</strong> (finney) right
+          now. Check the subnet selector — explorer JSON often shows a different <code className="mono">netuid</code> than
+          SN97. On SN97, uid 5 is <strong>v4 legacy</strong> (sky blue), not encrypted. Violet slots appear after{" "}
+          <code className="mono">set_reveal_commitment</code> is on chain.
+        </div>
       )}
 
       {summary && (
@@ -219,20 +250,31 @@ export default function SlotStatusBoard() {
         ))}
       </div>
 
-      {view === "grid" && allSlots.length > 0 && (
-        <div className="px-3 py-3 border-b border-zinc-800/80">
+      {allSlots.length > 0 && (
+        <div className="px-3 py-2 border-b border-zinc-800/80">
           <div
-            className="grid gap-0.5"
-            style={{ gridTemplateColumns: "repeat(16, minmax(0, 1fr))" }}
+            className="inline-grid gap-px p-px bg-zinc-800/60 rounded"
+            style={{ gridTemplateColumns: "repeat(32, 4px)" }}
+            title="256 UID slots — click to jump to row"
           >
             {sortSlots(allSlots, "uid_asc").map((s) => (
-              <div
+              <button
                 key={s.uid}
-                title={`uid ${s.uid} · ${s.commitment_type} · reg ${s.registered_at_block ?? "?"}`}
-                className={`aspect-square rounded-sm ${GRID_COLORS[s.commitment_type] ?? "bg-zinc-700"} ${
-                  filter !== "all" && !filterSlots([s], filter).length ? "opacity-15" : "opacity-90"
-                } hover:opacity-100 hover:ring-1 hover:ring-white/30 cursor-default`}
+                type="button"
+                title={`uid ${s.uid} · ${s.commitment_type}${s.registered_at_block ? ` · reg ${s.registered_at_block}` : ""}`}
+                onClick={() => jumpToUid(s.uid)}
+                className={`w-[4px] h-[4px] rounded-[0.5px] p-0 border-0 ${GRID_COLORS[s.commitment_type] ?? "bg-zinc-700"} ${
+                  filter !== "all" && !filterSlots([s], filter).length ? "opacity-25" : "opacity-100"
+                } ${highlightUid === s.uid ? "ring-1 ring-white scale-150 z-10" : ""} hover:ring-1 hover:ring-white/60 hover:scale-125 cursor-pointer transition-transform`}
               />
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1.5 text-[8px] text-zinc-600">
+            {Object.entries(GRID_COLORS).map(([k, c]) => (
+              <span key={k} className="inline-flex items-center gap-0.5">
+                <span className={`w-1 h-1 rounded-[0.5px] ${c}`} />
+                {k === "timelock_encrypted" ? "enc" : k === "none" ? "empty" : k}
+              </span>
             ))}
           </div>
         </div>
@@ -260,7 +302,16 @@ export default function SlotStatusBoard() {
               </tr>
             ) : (
               displaySlots.map((s) => (
-                <tr key={s.uid} className={s.commitment_type === "none" ? "opacity-50" : ""}>
+                <tr
+                  key={s.uid}
+                  ref={(el) => {
+                    if (el) rowRefs.current.set(s.uid, el);
+                    else rowRefs.current.delete(s.uid);
+                  }}
+                  className={`${s.commitment_type === "none" ? "opacity-50" : ""} ${
+                    highlightUid === s.uid ? "bg-zinc-800/60" : ""
+                  }`}
+                >
                   <td className="mono font-medium text-zinc-200">{s.uid}</td>
                   <td>
                     <TypeBadge type={s.commitment_type} />

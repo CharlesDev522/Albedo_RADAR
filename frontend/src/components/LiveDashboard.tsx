@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
-  DEFAULT_SUBNET,
   shortAddr,
   shortHash,
   shortRepo,
@@ -13,6 +12,7 @@ import {
   type Registry,
   type SyncStatus,
 } from "@/lib/api";
+import { useSubnet } from "@/lib/useSubnet";
 
 const LIVE_URL = "/api/v1/live/stream";
 const POLL_MS = 3000;
@@ -40,7 +40,7 @@ export default function LiveDashboard({
   initialCommits = [],
   initialRegistry = null,
 }: LiveDashboardProps) {
-  const subnet = DEFAULT_SUBNET;
+  const { subnet } = useSubnet();
   const [stats, setStats] = useState<CommitmentStats | null>(initialStats);
   const [commits, setCommits] = useState<Commitment[]>(initialCommits);
   const [registry, setRegistry] = useState<Registry | null>(initialRegistry);

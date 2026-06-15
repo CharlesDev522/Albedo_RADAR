@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import LiveDashboard from "@/components/LiveDashboard";
 import SlotStatusBoard from "@/components/SlotStatusBoard";
 import {
@@ -18,8 +19,20 @@ async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   }
 }
 
-export default async function Page() {
-  const subnet = DEFAULT_SUBNET;
+function parseSubnet(raw: string | undefined): number {
+  if (!raw) return DEFAULT_SUBNET;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0 || n > 65535) return DEFAULT_SUBNET;
+  return n;
+}
+
+export default async function Page({
+  searchParams,
+}: {
+  searchParams?: Promise<{ subnet?: string }>;
+}) {
+  const params = (await searchParams) ?? {};
+  const subnet = parseSubnet(params.subnet);
 
   const [stats, commits, registry] = await Promise.all([
     safe(() => api.getStats(subnet), null),
@@ -29,12 +42,16 @@ export default async function Page() {
 
   return (
     <div className="space-y-3">
-      <SlotStatusBoard />
-      <LiveDashboard
-        initialStats={stats}
-        initialCommits={commits.commitments}
-        initialRegistry={registry}
-      />
+      <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading slots…</div>}>
+        <SlotStatusBoard />
+      </Suspense>
+      <Suspense fallback={null}>
+        <LiveDashboard
+          initialStats={stats}
+          initialCommits={commits.commitments}
+          initialRegistry={registry}
+        />
+      </Suspense>
     </div>
   );
 }
