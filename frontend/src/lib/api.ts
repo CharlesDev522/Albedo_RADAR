@@ -129,9 +129,12 @@ export interface SlotStatusSummary {
   v4: number;
   json: number;
   timelock_encrypted: number;
+  binary?: number;
   other: number;
   unknown: number;
   none: number;
+  committed: number;
+  non_v5: number;
   last_scan_at: string | null;
 }
 
@@ -140,6 +143,8 @@ export interface SlotStatusData {
   slots: SlotStatusEntry[];
   summary: SlotStatusSummary;
   filter: string | null;
+  sort: string | null;
+  source: string;
 }
 
 async function fetchApi<T>(path: string): Promise<T> {
@@ -176,8 +181,10 @@ export const api = {
     fetchApi<EncryptedCommitmentStats>(`/encrypted-commitments/stats?subnet=${subnet}`),
   getEncryptedSyncStatus: (subnet = DEFAULT_SUBNET) =>
     fetchApi<EncryptedSyncStatus>(`/encrypted-commitments/sync-status?subnet=${subnet}`),
-  getSlotStatus: (subnet = DEFAULT_SUBNET, filter = "all") =>
-    fetchApi<SlotStatusData>(`/slot-status?subnet=${subnet}&filter=${filter}`),
+  getSlotStatus: (subnet = DEFAULT_SUBNET, filter = "all", sort = "uid_asc", live = false) =>
+    fetchApi<SlotStatusData>(
+      `/slot-status?subnet=${subnet}&filter=${filter}&sort=${sort}${live ? "&live=true" : ""}`
+    ),
   getRecent: (subnet = DEFAULT_SUBNET) =>
     fetchApi<{ commits: Commitment[] }>(`/live/recent?subnet=${subnet}`),
 };

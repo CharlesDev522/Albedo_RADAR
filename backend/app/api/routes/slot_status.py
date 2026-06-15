@@ -25,6 +25,19 @@ VALID_FILTERS = {
     "unknown",
     "none",
     "committed",
+    "non_v5",
+    "legacy",
+    "binary",
+}
+
+VALID_SORTS = {
+    "uid_asc",
+    "uid_desc",
+    "reg_asc",
+    "reg_desc",
+    "commit_asc",
+    "commit_desc",
+    "type",
 }
 
 
@@ -32,32 +45,81 @@ VALID_FILTERS = {
 async def list_slot_status(
     subnet: int = Query(default=97, ge=0),
     filter_type: str = Query(default="all", alias="filter"),
+    sort: str = Query(default="uid_asc"),
+    live: bool = Query(default=False, description="Force live chain scan"),
     db: AsyncSession = Depends(get_db),
 ) -> SlotStatusResponse:
     """All miner UID slots with commitment type — v5, encrypted, v4, json, none, etc."""
     filt = filter_type.lower()
     if filt == "encrypted":
         filt = "timelock_encrypted"
+    if filt == "legacy":
+        filt = "non_v5"
 
-    result = await db.execute(
-        select(MinerSlotStatus)
-        .where(MinerSlotStatus.subnet == subnet)
-        .order_by(MinerSlotStatus.uid.asc())
-    )
-    all_rows = list(result.scalars().all())
-
-    if not all_rows:
-        all_rows = await _live_slot_rows(subnet)
-
+    all_rows = await _load_slot_rows(db, subnet, force_live=live)
     summary = _summary_from_rows(subnet, all_rows)
-    display = _filter_rows(all_rows, filt)
+    display = _sort_rows(_filter_rows(all_rows, filt), sort)
 
     return SlotStatusResponse(
         subnet=subnet,
         slots=[SlotStatusEntry.model_validate(r) for r in display],
         summary=summary,
         filter=filter_type,
+        sort=sort,
+        source="chain" if live or len(all_rows) >= 200 else "db",
     )
+
+
+async def _load_slot_rows(db: AsyncSession, subnet: int, force_live: bool = False) -> list:
+    result = await db.execute(
+        select(MinerSlotStatus)
+        .where(MinerSlotStatus.subnet == subnet)
+        .order_by(MinerSlotStatus.uid.asc())
+    )
+    db_rows = list(result.scalars().all())
+
+    use_live = force_live or len(db_rows) < 200
+    if not use_live and db_rows:
+        last = max((r.last_updated for r in db_rows if r.last_updated), default=None)
+        if last is None or (datetime.now(timezone.utc) - last).total_seconds() > 60:
+            use_live = True
+
+    if use_live:
+        try:
+            return await _live_slot_rows(subnet)
+        except Exception:
+            if db_rows:
+                return db_rows
+            raise
+
+    return db_rows
+
+
+def _sort_rows(rows: list, sort: str) -> list:
+    if sort not in VALID_SORTS:
+        sort = "uid_asc"
+
+    def reg_key(r):
+        return r.registered_at_block if r.registered_at_block is not None else -1
+
+    def commit_key(r):
+        return r.commit_block if r.commit_block is not None else -1
+
+    if sort == "uid_asc":
+        return sorted(rows, key=lambda r: r.uid)
+    if sort == "uid_desc":
+        return sorted(rows, key=lambda r: r.uid, reverse=True)
+    if sort == "reg_asc":
+        return sorted(rows, key=lambda r: (reg_key(r), r.uid))
+    if sort == "reg_desc":
+        return sorted(rows, key=lambda r: (reg_key(r), r.uid), reverse=True)
+    if sort == "commit_asc":
+        return sorted(rows, key=lambda r: (commit_key(r), r.uid))
+    if sort == "commit_desc":
+        return sorted(rows, key=lambda r: (commit_key(r), r.uid), reverse=True)
+    if sort == "type":
+        return sorted(rows, key=lambda r: (r.commitment_type, r.uid))
+    return rows
 
 
 def _filter_rows(rows: list, filt: str) -> list:
@@ -65,6 +127,10 @@ def _filter_rows(rows: list, filt: str) -> list:
         return rows
     if filt == "committed":
         return [r for r in rows if r.commitment_type != "none"]
+    if filt == "non_v5":
+        return [r for r in rows if r.commitment_type not in ("none", "v5")]
+    if filt == "timelock_encrypted":
+        return [r for r in rows if r.commitment_type in ("timelock_encrypted", "binary")]
     if filt in VALID_FILTERS:
         return [r for r in rows if r.commitment_type == filt]
     return rows
@@ -166,8 +232,11 @@ def _summary_from_rows(subnet: int, rows: list) -> SlotStatusSummary:
         v4=counts.get("v4", 0),
         json=counts.get("json", 0),
         timelock_encrypted=counts.get("timelock_encrypted", 0),
+        binary=counts.get("binary", 0),
         other=counts.get("other", 0),
         unknown=counts.get("unknown", 0),
         none=counts.get("none", 0),
+        committed=len(rows) - counts.get("none", 0),
+        non_v5=len(rows) - counts.get("none", 0) - counts.get("v5", 0),
         last_scan_at=last_scan or datetime.now(timezone.utc),
     )

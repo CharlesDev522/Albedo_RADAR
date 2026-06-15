@@ -19,6 +19,7 @@ class CommitmentType(str, Enum):
     V4 = "v4"
     JSON = "json"
     TIMELOCK_ENCRYPTED = "timelock_encrypted"
+    BINARY = "binary"  # non-printable Raw bytes (opaque / ciphertext-like)
     OTHER = "other"
     UNKNOWN = "unknown"
 
@@ -45,6 +46,25 @@ def _extract_repo(text: str) -> str | None:
         if len(parts) >= 2 and "/" in parts[1]:
             return parts[1]
     return None
+
+
+def _raw_payload_text(f0: Any) -> str | None:
+    if not isinstance(f0, dict):
+        return None
+    for key, val in f0.items():
+        if str(key).startswith("Raw") and isinstance(val, str):
+            try:
+                return bytes.fromhex(val.removeprefix("0x")).decode("utf-8", errors="ignore")
+            except Exception:
+                return None
+    return None
+
+
+def _is_mostly_binary(data: bytes) -> bool:
+    if not data:
+        return True
+    printable = sum(1 for b in data if 32 <= b < 127 or b in (9, 10, 13))
+    return printable / len(data) < 0.75
 
 
 def classify_commitment_raw(raw: dict[str, Any], hotkey: str = "") -> ClassifiedCommitment | None:
@@ -75,14 +95,51 @@ def classify_commitment_raw(raw: dict[str, Any], hotkey: str = "") -> Classified
     try:
         decoded = decode_metadata(raw)
     except Exception:
-        return ClassifiedCommitment(
-            commitment_type=CommitmentType.UNKNOWN,
-            commit_block=commit_block,
-            deposit=deposit,
-            reveal_string=None,
-            detail=str(list(f0.keys()) if isinstance(f0, dict) else f0)[:120],
-            payload_hash=_payload_hash(str(f0)),
-        )
+        # TimelockEncrypted and other dict payloads make decode_metadata fail
+        raw_text = _raw_payload_text(f0)
+        if raw_text and raw_text.startswith(("v5|", "v4|", "{")):
+            decoded = raw_text
+        else:
+            timelock = parse_timelock_encrypted(f0)
+            if timelock is not None:
+                encrypted_hex, reveal_round = timelock
+                enc_hash = hashlib.sha256(f"{encrypted_hex}|{reveal_round}".encode()).hexdigest()
+                return ClassifiedCommitment(
+                    commitment_type=CommitmentType.TIMELOCK_ENCRYPTED,
+                    commit_block=commit_block,
+                    deposit=deposit,
+                    reveal_string=None,
+                    detail=f"round:{reveal_round}",
+                    reveal_round=reveal_round,
+                    encrypted_hash=enc_hash,
+                    payload_hash=enc_hash,
+                )
+            if isinstance(f0, dict):
+                for key, val in f0.items():
+                    if str(key).startswith("Raw") and isinstance(val, str):
+                        try:
+                            blob = bytes.fromhex(val.removeprefix("0x"))
+                            if _is_mostly_binary(blob):
+                                h = hashlib.sha256(blob).hexdigest()
+                                return ClassifiedCommitment(
+                                    commitment_type=CommitmentType.BINARY,
+                                    commit_block=commit_block,
+                                    deposit=deposit,
+                                    reveal_string=None,
+                                    detail=f"opaque:{h[:12]}",
+                                    encrypted_hash=h,
+                                    payload_hash=h,
+                                )
+                        except Exception:
+                            pass
+            return ClassifiedCommitment(
+                commitment_type=CommitmentType.UNKNOWN,
+                commit_block=commit_block,
+                deposit=deposit,
+                reveal_string=None,
+                detail=str(list(f0.keys()) if isinstance(f0, dict) else f0)[:120],
+                payload_hash=_payload_hash(str(f0)),
+            )
 
     if not decoded or not decoded.strip():
         return ClassifiedCommitment(
@@ -149,6 +206,7 @@ def commitment_type_label(ct: CommitmentType) -> str:
         CommitmentType.V4: "v4",
         CommitmentType.JSON: "json",
         CommitmentType.TIMELOCK_ENCRYPTED: "encrypted",
+        CommitmentType.BINARY: "binary",
         CommitmentType.OTHER: "other",
         CommitmentType.UNKNOWN: "unknown",
     }[ct]

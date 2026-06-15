@@ -27,9 +27,12 @@ class SlotStatusSummary(BaseModel):
     v4: int = 0
     json: int = 0
     timelock_encrypted: int = 0
+    binary: int = 0
     other: int = 0
     unknown: int = 0
     none: int = 0
+    committed: int = 0
+    non_v5: int = 0
     last_scan_at: datetime | None = None
 
 
@@ -38,3 +41,5 @@ class SlotStatusResponse(BaseModel):
     slots: list[SlotStatusEntry]
     summary: SlotStatusSummary
     filter: str | None = None
+    sort: str | None = None
+    source: str = "db"
