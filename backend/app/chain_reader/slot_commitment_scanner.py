@@ -6,14 +6,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from app.chain_reader.chain_snapshot import ChainSnapshot
 from app.chain_reader.commitment_classifier import (
     ClassifiedCommitment,
     CommitmentType,
     classify_commitment_raw,
     classify_plaintext_reveal,
 )
-from app.chain_reader.commitment_scanner import _iter_revealed, _neuron_index
-from app.chain_reader.commitment_decoder import iter_commitment_of_raw
+from app.chain_reader.commitment_scanner import _neuron_index, parse_model_commit
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +21,12 @@ logger = logging.getLogger(__name__)
 def _latest_revealed_per_hotkey(
     entries: list[tuple[str, int, str]],
 ) -> dict[str, ClassifiedCommitment]:
-    """Highest-block v6 reveal per hotkey from RevealedCommitments history."""
+    """Highest-block valid v6 reveal per hotkey from RevealedCommitments history."""
     latest: dict[str, ClassifiedCommitment] = {}
     for hotkey, block, payload in entries:
-        if not payload.startswith("v6|"):
+        if parse_model_commit(payload, hotkey) is None:
             continue
-        classified = classify_plaintext_reveal(payload, block, 0)
+        classified = classify_plaintext_reveal(payload, block, 0, hotkey)
         if classified.commitment_type != CommitmentType.V6:
             continue
         prev = latest.get(hotkey)
@@ -39,14 +39,12 @@ def _merge_slot_classifications(
     active: dict[str, ClassifiedCommitment],
     revealed: dict[str, ClassifiedCommitment],
 ) -> dict[str, ClassifiedCommitment]:
-    """Merge active CommitmentOf with v6 RevealedCommitments."""
     merged = dict(active)
     for hotkey, rev in revealed.items():
         act = merged.get(hotkey)
         if act is None:
             merged[hotkey] = rev
             continue
-        # Pending ciphertext is the current slot state — do not replace with older reveals.
         if act.commitment_type in (CommitmentType.TIMELOCK_ENCRYPTED, CommitmentType.BINARY):
             continue
         if rev.reveal_string and act.reveal_string and rev.reveal_string == act.reveal_string:
@@ -75,15 +73,12 @@ class SlotStatus:
     encrypted_hash: str | None
 
 
-async def scan_slot_statuses(
-    subtensor: Any,
-    netuid: int,
-    neurons: dict[str, dict[str, Any]] | None = None,
+def scan_slots_from_snapshot(
+    snapshot: ChainSnapshot,
+    neurons: dict[str, dict[str, Any]],
 ) -> list[SlotStatus]:
-    """Return one SlotStatus per registered neuron (typically 256 UIDs)."""
-    if neurons is None:
-        neurons = await _neuron_index(subtensor, netuid)
-
+    """Build slot statuses from a pre-loaded chain snapshot."""
+    netuid = snapshot.netuid
     uid_to_neuron: dict[int, dict[str, Any]] = {}
     for hotkey, info in neurons.items():
         uid_to_neuron[int(info["uid"])] = {
@@ -93,14 +88,14 @@ async def scan_slot_statuses(
         }
 
     commitments_by_hotkey: dict[str, ClassifiedCommitment] = {}
-    async for hotkey, raw in iter_commitment_of_raw(subtensor, netuid):
+    for hotkey, raw in snapshot.commitment_of.items():
         classified = classify_commitment_raw(raw, hotkey)
         if classified is not None:
             commitments_by_hotkey[hotkey] = classified
 
-    revealed_entries = await _iter_revealed(subtensor, netuid)
-    revealed_by_hotkey = _latest_revealed_per_hotkey(revealed_entries)
-    commitments_by_hotkey = _merge_slot_classifications(commitments_by_hotkey, revealed_by_hotkey)
+    if snapshot.revealed is not None:
+        revealed_by_hotkey = _latest_revealed_per_hotkey(snapshot.revealed)
+        commitments_by_hotkey = _merge_slot_classifications(commitments_by_hotkey, revealed_by_hotkey)
 
     slots: list[SlotStatus] = []
     for uid in sorted(uid_to_neuron.keys()):
@@ -145,10 +140,29 @@ async def scan_slot_statuses(
                 )
             )
 
-    counts = {}
+    counts: dict[str, int] = {}
     for s in slots:
         k = s.commitment_type.value
         counts[k] = counts.get(k, 0) + 1
-
     logger.info("slot scan netuid=%d slots=%d breakdown=%s", netuid, len(slots), counts)
     return slots
+
+
+async def scan_slot_statuses(
+    subtensor: Any,
+    netuid: int,
+    neurons: dict[str, dict[str, Any]] | None = None,
+    snapshot: ChainSnapshot | None = None,
+) -> list[SlotStatus]:
+    """Return one SlotStatus per registered neuron (typically 256 UIDs)."""
+    from app.chain_reader.chain_snapshot import load_chain_snapshot
+
+    if neurons is None:
+        neurons = await _neuron_index(subtensor, netuid)
+    if snapshot is None:
+        snapshot = await load_chain_snapshot(subtensor, netuid, include_revealed=True)
+    elif snapshot.revealed is None:
+        from app.chain_reader.commitment_scanner import _iter_revealed
+
+        snapshot.revealed = await _iter_revealed(subtensor, netuid)
+    return scan_slots_from_snapshot(snapshot, neurons)

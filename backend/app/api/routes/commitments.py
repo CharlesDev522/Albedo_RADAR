@@ -260,51 +260,74 @@ async def get_commitment_history(
 @router.get("/sync-status")
 async def sync_status(
     subnet: int = Query(default=97, ge=0),
+    live: bool = Query(default=False, description="Run on-chain scan (slow)"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Compare on-chain v6 commits vs database — shows if collector is behind."""
+    """Compare on-chain v6 commits vs database. Default is DB-only (fast)."""
+    db_rows = (
+        await db.execute(
+            select(MinerCommitment).where(
+                MinerCommitment.subnet == subnet,
+                MinerCommitment.version == "v6",
+            )
+        )
+    ).scalars().all()
+
+    db_count = len(db_rows)
+    db_uids = sorted({r.uid for r in db_rows if r.uid is not None})
+    db_hotkeys = {r.hotkey: r.payload_hash for r in db_rows}
+    last_db_update = max((r.last_updated for r in db_rows if r.last_updated), default=None)
+
+    if not live:
+        return {
+            "subnet": subnet,
+            "onchain_v6_count": None,
+            "db_v6_count": db_count,
+            "in_sync": None,
+            "onchain_uids": [],
+            "db_uids": db_uids,
+            "missing_in_db": [],
+            "stale_in_db": [],
+            "repos": [r.repo for r in db_rows],
+            "last_db_update": last_db_update.isoformat() if last_db_update else None,
+            "mode": "db",
+        }
+
     from bittensor.core.async_subtensor import AsyncSubtensor
 
-    from app.chain_reader.commitment_scanner import _neuron_index, scan_v6_active_fast
-
-    db_count = (
-        await db.execute(
-            select(func.count())
-            .select_from(MinerCommitment)
-            .where(MinerCommitment.subnet == subnet, _V6_ONLY)
-        )
-    ).scalar() or 0
-
-    db_uids = sorted(
-        (
-            await db.execute(
-                select(MinerCommitment.uid)
-                .where(
-                    MinerCommitment.subnet == subnet,
-                    MinerCommitment.uid.isnot(None),
-                    _V6_ONLY,
-                )
-                .order_by(MinerCommitment.uid.asc())
-            )
-        ).scalars().all()
-    )
+    from app.chain_reader.chain_snapshot import load_chain_snapshot
+    from app.chain_reader.commitment_scanner import _neuron_index, scan_v6_from_snapshot
 
     async with AsyncSubtensor(network=settings.bittensor_network) as st:
         neurons = await _neuron_index(st, subnet)
-        commits = await scan_v6_active_fast(st, subnet, neurons)
+        snapshot = await load_chain_snapshot(st, subnet, include_revealed=True)
+        commits = await scan_v6_from_snapshot(
+            snapshot, neurons, st, include_revealed=True, fetch_block_hashes=False
+        )
 
     onchain_uids = sorted({c.uid for c in commits if c.uid is not None})
-    missing_in_db = sorted(set(onchain_uids) - set(db_uids))
+    onchain_map = {c.hotkey: c.payload_hash for c in commits}
+    missing_in_db = sorted(
+        hk for hk, h in onchain_map.items() if db_hotkeys.get(hk) != h
+    )
+    stale_in_db = sorted(set(db_hotkeys) - set(onchain_map))
 
     return {
         "subnet": subnet,
         "onchain_v6_count": len(commits),
         "db_v6_count": db_count,
-        "in_sync": len(missing_in_db) == 0 and db_count >= len(commits),
+        "in_sync": not missing_in_db and not stale_in_db,
         "onchain_uids": onchain_uids,
         "db_uids": db_uids,
-        "missing_in_db": missing_in_db,
+        "missing_in_db": [
+            c.uid for c in commits if c.hotkey in missing_in_db and c.uid is not None
+        ],
+        "stale_in_db": [
+            r.uid for r in db_rows if r.hotkey in stale_in_db and r.uid is not None
+        ],
         "repos": [c.commit_payload.get("repo") for c in commits],
+        "last_db_update": last_db_update.isoformat() if last_db_update else None,
+        "mode": "live",
     }
 
 

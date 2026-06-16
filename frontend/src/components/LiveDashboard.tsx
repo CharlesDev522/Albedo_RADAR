@@ -50,13 +50,16 @@ export default function LiveDashboard() {
           which proxies to the FastAPI service (check <code className="mono text-rose-100">API_URL</code> in frontend container).
         </div>
       )}
-      {!apiError && syncStatus && !syncStatus.in_sync && (
+      {!apiError && syncStatus && syncStatus.in_sync === false && (
         <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[11px] text-amber-300">
-          Chain has <strong>{syncStatus.onchain_v6_count}</strong> v6 commits (uids{" "}
+          Chain has <strong>{syncStatus.onchain_v6_count ?? "—"}</strong> v6 commits (uids{" "}
           {syncStatus.onchain_uids.join(", ") || "—"}) but DB has{" "}
           <strong>{syncStatus.db_v6_count}</strong>
           {syncStatus.missing_in_db.length > 0 && (
             <> — missing uids: {syncStatus.missing_in_db.join(", ")}</>
+          )}
+          {(syncStatus.stale_in_db?.length ?? 0) > 0 && (
+            <> — stale in DB: {syncStatus.stale_in_db?.join(", ")}</>
           )}
           . Collector should catch up within ~10s — check{" "}
           <code className="mono text-amber-100">docker compose logs collector --tail 20</code>.

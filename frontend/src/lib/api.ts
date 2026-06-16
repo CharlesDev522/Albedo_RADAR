@@ -56,13 +56,16 @@ export interface RegistryMiner {
 
 export interface SyncStatus {
   subnet: number;
-  onchain_v6_count: number;
+  onchain_v6_count: number | null;
   db_v6_count: number;
-  in_sync: boolean;
+  in_sync: boolean | null;
   onchain_uids: number[];
   db_uids: number[];
   missing_in_db: number[];
+  stale_in_db?: number[];
   repos: string[];
+  mode?: "db" | "live";
+  last_db_update?: string | null;
 }
 
 export interface Registry {
@@ -171,8 +174,8 @@ export const api = {
     ),
   getRegistry: (subnet = DEFAULT_SUBNET) =>
     fetchApi<Registry>(`/commitments/registry?subnet=${subnet}`),
-  getSyncStatus: (subnet = DEFAULT_SUBNET) =>
-    fetchApi<SyncStatus>(`/commitments/sync-status?subnet=${subnet}`),
+  getSyncStatus: (subnet = DEFAULT_SUBNET, live = false) =>
+    fetchApi<SyncStatus>(`/commitments/sync-status?subnet=${subnet}${live ? "&live=true" : ""}`),
   getEncryptedCommitments: (subnet = DEFAULT_SUBNET) =>
     fetchApi<{ commitments: EncryptedCommitment[]; total: number; pending_count: number }>(
       `/encrypted-commitments?subnet=${subnet}&status=pending&limit=200`

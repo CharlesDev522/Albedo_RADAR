@@ -21,9 +21,11 @@ import { useSubnet } from "@/lib/useSubnet";
 
 const LIVE_URL = "/api/v1/live/stream";
 export const DASHBOARD_POLL_MS = 3000;
+const SYNC_POLL_MS = 30_000;
 
 export interface LiveEvent {
   type: string;
+  subnet?: number;
   uid?: number;
   hotkey?: string;
   coldkey?: string;
@@ -66,6 +68,7 @@ interface DashboardSyncProviderProps {
   initialCommits?: Commitment[];
   initialRegistry?: Registry | null;
   initialSlotData?: SlotStatusData | null;
+  initialSyncStatus?: SyncStatus | null;
 }
 
 export function DashboardSyncProvider({
@@ -74,12 +77,13 @@ export function DashboardSyncProvider({
   initialCommits = [],
   initialRegistry = null,
   initialSlotData = null,
+  initialSyncStatus = null,
 }: DashboardSyncProviderProps) {
   const { subnet } = useSubnet();
   const [stats, setStats] = useState<CommitmentStats | null>(initialStats);
   const [commits, setCommits] = useState<Commitment[]>(initialCommits);
   const [registry, setRegistry] = useState<Registry | null>(initialRegistry);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(initialSyncStatus);
   const [slotData, setSlotData] = useState<SlotStatusData | null>(initialSlotData);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(
     initialCommits.length > 0 || initialSlotData ? new Date() : null
@@ -97,6 +101,8 @@ export function DashboardSyncProvider({
   );
   const subnetRef = useRef(subnet);
   const refreshInFlight = useRef(false);
+  const refreshQueued = useRef(false);
+  const hydratedRef = useRef(initialCommits.length > 0 || !!initialSlotData);
 
   const flash = useCallback((uid: number | undefined) => {
     if (uid == null) return;
@@ -105,18 +111,20 @@ export function DashboardSyncProvider({
     flashTimer.current = setTimeout(() => setFlashUids(new Set()), 6000);
   }, []);
 
-  const refresh = useCallback(async () => {
-    if (refreshInFlight.current) return;
+  const refreshCore = useCallback(async () => {
+    if (refreshInFlight.current) {
+      refreshQueued.current = true;
+      return;
+    }
     refreshInFlight.current = true;
 
     const fetchSubnet = subnet;
     const t0 = performance.now();
     try {
-      const [s, c, r, sync, slots] = await Promise.all([
+      const [s, c, r, slots] = await Promise.all([
         api.getStats(fetchSubnet),
         api.getCommitments(fetchSubnet),
         api.getRegistry(fetchSubnet),
-        api.getSyncStatus(fetchSubnet),
         api.getSlotStatus(fetchSubnet, "all", "uid_asc", false),
       ]);
       if (subnetRef.current !== fetchSubnet) return;
@@ -133,7 +141,6 @@ export function DashboardSyncProvider({
       setStats(s);
       setCommits(c.commitments);
       setRegistry(r);
-      setSyncStatus(sync);
       setSlotData(slots);
       setLastRefresh(new Date());
       setLatencyMs(Math.round(performance.now() - t0));
@@ -145,8 +152,26 @@ export function DashboardSyncProvider({
     } finally {
       refreshInFlight.current = false;
       if (subnetRef.current === fetchSubnet) setLoading(false);
+      if (refreshQueued.current) {
+        refreshQueued.current = false;
+        void refreshCore();
+      }
     }
   }, [subnet, flash]);
+
+  const refreshSync = useCallback(async () => {
+    const fetchSubnet = subnet;
+    try {
+      const sync = await api.getSyncStatus(fetchSubnet, false);
+      if (subnetRef.current === fetchSubnet) setSyncStatus(sync);
+    } catch {
+      /* sync metadata is non-critical */
+    }
+  }, [subnet]);
+
+  const refresh = useCallback(async () => {
+    await Promise.all([refreshCore(), refreshSync()]);
+  }, [refreshCore, refreshSync]);
 
   useEffect(() => {
     subnetRef.current = subnet;
@@ -159,13 +184,23 @@ export function DashboardSyncProvider({
     setApiError(null);
     setLoading(true);
     knownUids.current = new Set();
+    hydratedRef.current = false;
   }, [subnet]);
 
   useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, DASHBOARD_POLL_MS);
-    return () => clearInterval(interval);
-  }, [refresh]);
+    if (hydratedRef.current) {
+      hydratedRef.current = false;
+      void refreshSync();
+    } else {
+      void refresh();
+    }
+    const interval = setInterval(refreshCore, DASHBOARD_POLL_MS);
+    const syncInterval = setInterval(refreshSync, SYNC_POLL_MS);
+    return () => {
+      clearInterval(interval);
+      clearInterval(syncInterval);
+    };
+  }, [refresh, refreshCore, refreshSync]);
 
   useEffect(() => {
     let es: EventSource | null = null;
@@ -179,9 +214,10 @@ export function DashboardSyncProvider({
       es.addEventListener("commit", (e) => {
         try {
           const data: LiveEvent = JSON.parse(e.data);
+          if (data.subnet != null && data.subnet !== subnet) return;
           setFeed((prev) => [data, ...prev].slice(0, 30));
           flash(data.uid);
-          refresh();
+          void refreshCore();
         } catch {
           /* ignore */
         }
@@ -199,7 +235,7 @@ export function DashboardSyncProvider({
       es?.close();
       clearTimeout(retryTimer);
     };
-  }, [subnet, flash, refresh]);
+  }, [subnet, flash, refreshCore]);
 
   return (
     <DashboardSyncContext.Provider

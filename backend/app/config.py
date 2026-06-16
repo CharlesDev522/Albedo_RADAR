@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     poll_interval_seconds: int = 3
     metagraph_sync_interval_seconds: int = 60
     full_scan_interval_seconds: int = 300
+    slot_scan_interval_seconds: int = 30
     mechid: int = 0
 
     # Database

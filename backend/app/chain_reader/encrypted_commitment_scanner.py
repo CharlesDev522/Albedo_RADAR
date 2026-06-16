@@ -10,17 +10,14 @@ from app.chain_reader.commitment_decoder import (
     CommitmentKind,
     decode_commitment_of_raw,
     encrypted_payload_hash,
-    iter_commitment_of_raw,
     parse_timelock_encrypted,
 )
 from app.chain_reader.commitment_scanner import _neuron_index, parse_model_commit
+from app.chain_reader.chain_snapshot import ChainSnapshot
 
 logger = logging.getLogger(__name__)
 
 TIMELOCK_KIND = "TimelockEncrypted"
-
-# Re-export for callers that imported from here previously.
-_iter_commitment_of_raw = iter_commitment_of_raw
 
 
 @dataclass(frozen=True)
@@ -39,7 +36,6 @@ class EncryptedCommit:
 
 
 def is_plaintext_commitment(field: Any, hotkey: str = "") -> bool:
-    """True if field decodes to readable JSON/other text (not TimelockEncrypted)."""
     if parse_timelock_encrypted(field) is not None:
         return False
     if not isinstance(field, dict):
@@ -55,32 +51,25 @@ def is_plaintext_commitment(field: Any, hotkey: str = "") -> bool:
     return False
 
 
-async def scan_encrypted_commitments(
-    subtensor: Any,
+def scan_encrypted_from_map(
     netuid: int,
-    neurons: dict[str, dict[str, Any]] | None = None,
+    commitment_of: dict[str, dict[str, Any]],
+    neurons: dict[str, dict[str, Any]],
 ) -> list[EncryptedCommit]:
-    """Return active TimelockEncrypted commitments (parsed from raw CommitmentOf first)."""
-    if neurons is None:
-        neurons = await _neuron_index(subtensor, netuid)
-
+    """Return active TimelockEncrypted from a pre-loaded CommitmentOf map."""
     commits: list[EncryptedCommit] = []
-
-    async for hotkey, raw in iter_commitment_of_raw(subtensor, netuid):
+    for hotkey, raw in commitment_of.items():
         decoded = decode_commitment_of_raw(raw)
         if decoded.kind != CommitmentKind.TIMELOCK_ENCRYPTED:
             continue
         if not decoded.encrypted_hex or decoded.reveal_round is None:
             continue
-
         neuron = neurons.get(hotkey)
         uid = neuron["uid"] if neuron else None
         coldkey = neuron["coldkey"] if neuron else None
         reg_block = neuron["registered_at_block"] if neuron else None
-
         if uid is None:
             logger.info("encrypted commit for hotkey without uid mapping: %s", hotkey)
-
         commits.append(
             EncryptedCommit(
                 netuid=netuid,
@@ -95,7 +84,6 @@ async def scan_encrypted_commitments(
                 payload_hash=encrypted_payload_hash(decoded.encrypted_hex, decoded.reveal_round),
             )
         )
-
     logger.info(
         "encrypted scan netuid=%d: timelock=%d uids=%s",
         netuid,
@@ -105,12 +93,27 @@ async def scan_encrypted_commitments(
     return commits
 
 
-async def scan_encrypted_onchain_debug(subtensor: Any, netuid: int) -> dict[str, Any]:
-    """Debug helper: count TimelockEncrypted vs plaintext kinds on CommitmentOf."""
+async def scan_encrypted_commitments(
+    subtensor: Any,
+    netuid: int,
+    neurons: dict[str, dict[str, Any]] | None = None,
+    snapshot: ChainSnapshot | None = None,
+) -> list[EncryptedCommit]:
+    if neurons is None:
+        neurons = await _neuron_index(subtensor, netuid)
+    if snapshot is None:
+        from app.chain_reader.chain_snapshot import load_chain_snapshot
+
+        snapshot = await load_chain_snapshot(subtensor, netuid, include_revealed=False)
+    return scan_encrypted_from_map(netuid, snapshot.commitment_of, neurons)
+
+
+def encrypted_breakdown_from_map(commitment_of: dict[str, dict[str, Any]]) -> dict[str, int]:
+    """Count commitment kinds without a second chain scan."""
     timelock = 0
     v6_plain = 0
     other_plain = 0
-    async for hotkey, raw in iter_commitment_of_raw(subtensor, netuid):
+    for hotkey, raw in commitment_of.items():
         decoded = decode_commitment_of_raw(raw)
         if decoded.kind == CommitmentKind.TIMELOCK_ENCRYPTED:
             timelock += 1
@@ -122,8 +125,20 @@ async def scan_encrypted_onchain_debug(subtensor: Any, netuid: int) -> dict[str,
             else:
                 other_plain += 1
     return {
-        "subnet": netuid,
         "timelock_encrypted": timelock,
         "plaintext_v6": v6_plain,
         "plaintext_other": other_plain,
     }
+
+
+async def scan_encrypted_onchain_debug(
+    subtensor: Any,
+    netuid: int,
+    snapshot: ChainSnapshot | None = None,
+) -> dict[str, Any]:
+    if snapshot is None:
+        from app.chain_reader.chain_snapshot import load_chain_snapshot
+
+        snapshot = await load_chain_snapshot(subtensor, netuid, include_revealed=False)
+    counts = encrypted_breakdown_from_map(snapshot.commitment_of)
+    return {"subnet": netuid, **counts}

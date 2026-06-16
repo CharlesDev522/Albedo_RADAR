@@ -64,24 +64,6 @@ function filterSlots(slots: SlotStatusEntry[], filter: FilterKey): SlotStatusEnt
   return slots.filter((s) => s.commitment_type === filter);
 }
 
-function summaryFromSlots(subnet: number, slots: SlotStatusEntry[]): SlotStatusSummary {
-  const counts: Record<string, number> = {};
-  for (const s of slots) counts[s.commitment_type] = (counts[s.commitment_type] ?? 0) + 1;
-  return {
-    subnet,
-    total_slots: slots.length,
-    v6: counts.v6 ?? 0,
-    json: counts.json ?? 0,
-    timelock_encrypted: counts.timelock_encrypted ?? 0,
-    binary: counts.binary ?? 0,
-    other: (counts.other ?? 0) + (counts.unknown ?? 0),
-    unknown: counts.unknown ?? 0,
-    none: counts.none ?? 0,
-    committed: slots.length - (counts.none ?? 0),
-    last_scan_at: new Date().toISOString(),
-  };
-}
-
 export default function SlotStatusBoard() {
   const { subnet } = useSubnet();
   const { slotData, lastRefresh, loading, apiError } = useDashboardSync();
@@ -94,10 +76,7 @@ export default function SlotStatusBoard() {
     return [...rows].sort(byUid);
   }, [slotData?.slots]);
 
-  const summary = useMemo(() => {
-    if (allSlots.length > 0) return summaryFromSlots(subnet, allSlots);
-    return slotData?.summary;
-  }, [allSlots, slotData?.summary, subnet]);
+  const summary = useMemo(() => slotData?.summary, [slotData?.summary]);
 
   const displaySlots = useMemo(
     () => filterSlots(allSlots, filter).sort(byUid),

@@ -53,16 +53,28 @@ def _classify_plaintext(
     decoded: str,
     commit_block: int,
     deposit: int,
+    hotkey: str = "",
 ) -> ClassifiedCommitment:
     if decoded.startswith("v6|"):
-        repo = _extract_repo(decoded)
+        from app.chain_reader.commitment_scanner import parse_model_commit, payload_hash as model_payload_hash
+
+        parsed = parse_model_commit(decoded, hotkey)
+        if parsed is None:
+            return ClassifiedCommitment(
+                commitment_type=CommitmentType.OTHER,
+                commit_block=commit_block,
+                deposit=deposit,
+                reveal_string=decoded,
+                detail=decoded[:120],
+                payload_hash=_payload_hash(decoded),
+            )
         return ClassifiedCommitment(
             commitment_type=CommitmentType.V6,
             commit_block=commit_block,
             deposit=deposit,
             reveal_string=decoded,
-            detail=repo,
-            payload_hash=_payload_hash(decoded),
+            detail=parsed["repo"],
+            payload_hash=model_payload_hash(parsed),
         )
 
     if decoded.startswith("{"):
@@ -95,9 +107,10 @@ def classify_plaintext_reveal(
     decoded: str,
     commit_block: int,
     deposit: int = 0,
+    hotkey: str = "",
 ) -> ClassifiedCommitment:
     """Classify a plaintext reveal string (from CommitmentOf or RevealedCommitments)."""
-    return _classify_plaintext(decoded, commit_block, deposit)
+    return _classify_plaintext(decoded, commit_block, deposit, hotkey)
 
 
 def classify_commitment_raw(raw: dict[str, Any], hotkey: str = "") -> ClassifiedCommitment | None:
@@ -142,7 +155,9 @@ def classify_commitment_raw(raw: dict[str, Any], hotkey: str = "") -> Classified
         )
 
     if decoded_of.kind == CommitmentKind.PLAINTEXT and decoded_of.reveal_string:
-        return _classify_plaintext(decoded_of.reveal_string, decoded_of.commit_block, decoded_of.deposit)
+        return _classify_plaintext(
+            decoded_of.reveal_string, decoded_of.commit_block, decoded_of.deposit, hotkey
+        )
 
     return ClassifiedCommitment(
         commitment_type=CommitmentType.UNKNOWN,

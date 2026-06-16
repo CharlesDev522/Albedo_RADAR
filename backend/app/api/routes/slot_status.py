@@ -75,7 +75,7 @@ async def _load_slot_rows(db: AsyncSession, subnet: int, force_live: bool = Fals
     )
     db_rows = list(result.scalars().all())
 
-    use_live = force_live or len(db_rows) < 200
+    use_live = force_live
 
     if use_live:
         try:

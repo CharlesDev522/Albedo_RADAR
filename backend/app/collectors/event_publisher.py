@@ -20,6 +20,10 @@ class EventPublisher:
     STREAM_KEY = "minerwatch:events"
     LIVE_CHANNEL = "minerwatch:live"
     STATE_KEY = "minerwatch:commit_state"
+    STATE_KEY_PREFIX = "minerwatch:commit_state:"
+
+    def state_key_for_subnet(self, subnet: int) -> str:
+        return f"{self.STATE_KEY_PREFIX}{subnet}"
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -74,4 +78,7 @@ class EventPublisher:
             return
         message = json.dumps(payload, separators=(",", ":"))
         await self._redis.publish(self.LIVE_CHANNEL, message)
+        subnet = payload.get("subnet")
+        if subnet is not None:
+            await self._redis.set(self.state_key_for_subnet(int(subnet)), message, ex=3600)
         await self._redis.set(self.STATE_KEY, message, ex=3600)

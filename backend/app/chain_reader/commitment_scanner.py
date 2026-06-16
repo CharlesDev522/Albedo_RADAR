@@ -1,27 +1,27 @@
-"""Bittensor chain reading — discover v6 model commits on a subnet.
-
-Scans two on-chain sources:
-  - ``CommitmentOf`` — current active commitment per hotkey (TimelockEncrypted parsed
-    from raw storage first; only plaintext is returned for model-commit merge)
-  - ``RevealedCommitments`` — historical reveal log (timelock ciphertext absent until reveal)
-
-Model commitments: ``v6|<repo>|<sha256:digest>``
-"""
+"""Bittensor chain reading — discover v6 model commits on a subnet."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import re
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
-from app.chain_reader.commitment_decoder import decode_revealed_payload, iter_active_plaintext
+from app.chain_reader.commitment_decoder import (
+    CommitmentKind,
+    decode_commitment_of_raw,
+    decode_revealed_payload,
+)
+from app.chain_reader.chain_snapshot import ChainSnapshot
 
 logger = logging.getLogger(__name__)
 
-_BLOCK_HASH_CACHE: dict[int, str] = {}
+_BLOCK_HASH_CACHE: OrderedDict[int, str] = OrderedDict()
+_BLOCK_HASH_CACHE_MAX = 10_000
 
 MODEL_COMMIT_VERSIONS = frozenset({"v6"})
 _MODEL_COMMIT_RE = re.compile(r"^v6\|")
@@ -80,11 +80,34 @@ def payload_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def _decode_commitment_pair(pair: tuple[Any, Any]) -> tuple[str, list[tuple[int, str]]]:
-    """Return (hotkey_ss58, [(block, payload), ...]) for one RevealedCommitments row.
+def timelock_hotkeys_from_map(commitment_of: dict[str, dict[str, Any]]) -> set[str]:
+    """Hotkeys with active TimelockEncrypted on CommitmentOf."""
+    blocked: set[str] = set()
+    for hotkey, raw in commitment_of.items():
+        decoded = decode_commitment_of_raw(raw)
+        if decoded.kind == CommitmentKind.TIMELOCK_ENCRYPTED:
+            blocked.add(hotkey)
+    return blocked
 
-    TimelockEncrypted entries are not present until revealed — plaintext decode only.
-    """
+
+def active_v6_from_map(
+    commitment_of: dict[str, dict[str, Any]],
+) -> dict[str, tuple[int, str]]:
+    """Active plaintext v6 per hotkey: (on-chain commit_block, reveal_string)."""
+    active: dict[str, tuple[int, str]] = {}
+    for hotkey, raw in commitment_of.items():
+        decoded = decode_commitment_of_raw(raw)
+        if decoded.kind != CommitmentKind.PLAINTEXT or not decoded.reveal_string:
+            continue
+        parsed = parse_model_commit(decoded.reveal_string, hotkey)
+        if parsed is None:
+            continue
+        block = decoded.commit_block or 0
+        active[hotkey] = (block, decoded.reveal_string)
+    return active
+
+
+def _decode_commitment_pair(pair: tuple[Any, Any]) -> tuple[str, list[tuple[int, str]]]:
     key, data = pair
     if not isinstance(key, str):
         key = str(getattr(key, "value", key))
@@ -101,7 +124,6 @@ def _decode_commitment_pair(pair: tuple[Any, Any]) -> tuple[str, list[tuple[int,
 
 
 async def _iter_revealed(subtensor: Any, netuid: int) -> list[tuple[str, int, str]]:
-    """Read Commitments.RevealedCommitments with robust decoding."""
     results: list[tuple[str, int, str]] = []
     query = await subtensor.query_map(
         module="Commitments",
@@ -119,15 +141,9 @@ async def _iter_revealed(subtensor: Any, netuid: int) -> list[tuple[str, int, st
     return results
 
 
-async def _iter_active_commitments(subtensor: Any, netuid: int) -> dict[str, str]:
-    """Read current CommitmentOf plaintext per hotkey (skips TimelockEncrypted)."""
-    return await iter_active_plaintext(subtensor, netuid)
-
-
 def _latest_model_commits_per_hotkey(
     entries: list[tuple[str, int, str]],
 ) -> dict[str, tuple[int, str]]:
-    """Return the highest-block v6 reveal per hotkey from revealed history."""
     latest: dict[str, tuple[int, str]] = {}
     for hotkey, block, data in entries:
         if parse_model_commit(data, hotkey) is None:
@@ -139,18 +155,21 @@ def _latest_model_commits_per_hotkey(
 
 
 def _merge_model_commit_sources(
-    active: dict[str, str],
+    active: dict[str, tuple[int, str]],
     revealed: dict[str, tuple[int, str]],
-    current_block: int,
+    timelock_hotkeys: set[str],
 ) -> dict[str, tuple[int, str, str]]:
-    """Merge active CommitmentOf and RevealedCommitments into latest v6 commit per hotkey."""
+    """Merge active + revealed v6; timelock-active hotkeys skip stale revealed fallback."""
     merged: dict[str, tuple[int, str, str]] = {}
 
-    for hotkey, text in active.items():
-        if parse_model_commit(text, hotkey) is not None:
-            merged[hotkey] = (current_block, text, "active")
+    for hotkey, (block, text) in active.items():
+        if hotkey in timelock_hotkeys:
+            continue
+        merged[hotkey] = (block, text, "active")
 
     for hotkey, (block, data) in revealed.items():
+        if hotkey in timelock_hotkeys:
+            continue
         if hotkey in merged:
             existing_block, existing_data, _ = merged[hotkey]
             if data == existing_data or block >= existing_block:
@@ -163,26 +182,35 @@ def _merge_model_commit_sources(
 
 async def _block_hash(subtensor: Any, block: int) -> str | None:
     if block in _BLOCK_HASH_CACHE:
+        _BLOCK_HASH_CACHE.move_to_end(block)
         return _BLOCK_HASH_CACHE[block]
     try:
         bh = str(await subtensor.get_block_hash(block))
         _BLOCK_HASH_CACHE[block] = bh
+        _BLOCK_HASH_CACHE.move_to_end(block)
+        while len(_BLOCK_HASH_CACHE) > _BLOCK_HASH_CACHE_MAX:
+            _BLOCK_HASH_CACHE.popitem(last=False)
         return bh
     except Exception:
         logger.debug("get_block_hash(%d) failed", block, exc_info=True)
         return None
 
 
+async def _block_hashes_batch(subtensor: Any, blocks: set[int]) -> dict[int, str | None]:
+    unique = sorted(b for b in blocks if b > 0)
+    if not unique:
+        return {}
+    results = await asyncio.gather(*[_block_hash(subtensor, b) for b in unique])
+    return dict(zip(unique, results))
+
+
 async def _neuron_index(subtensor: Any, netuid: int) -> dict[str, dict[str, Any]]:
-    """Map hotkey -> {uid, coldkey, registered_at_block} from metagraph."""
     from bittensor.core.metagraph import async_metagraph
 
     try:
         metagraph = await async_metagraph(netuid=netuid, lite=True, subtensor=subtensor)
         await metagraph.sync(subtensor=subtensor)
-
         reg_blocks: list[int] = list(getattr(metagraph, "block_at_registration", []) or [])
-
         index: dict[str, dict[str, Any]] = {}
         for i, neuron in enumerate(metagraph.neurons):
             if getattr(neuron, "is_null", False):
@@ -198,36 +226,28 @@ async def _neuron_index(subtensor: Any, netuid: int) -> dict[str, dict[str, Any]
         return {}
 
 
-async def scan_v6_commitments(subtensor: Any, netuid: int) -> list[Commit]:
-    """Read active + revealed commitments and return latest v6 Commit per hotkey."""
-    current_block = await subtensor.get_current_block()
-    active = await _iter_active_commitments(subtensor, netuid)
-    revealed_entries = await _iter_revealed(subtensor, netuid)
-    revealed_model = _latest_model_commits_per_hotkey(revealed_entries)
-    merged = _merge_model_commit_sources(active, revealed_model, current_block)
-    neurons = await _neuron_index(subtensor, netuid)
-
+def _commits_from_merged(
+    netuid: int,
+    merged: dict[str, tuple[int, str, str]],
+    neurons: dict[str, dict[str, Any]],
+    block_hashes: dict[int, str | None],
+) -> list[Commit]:
     commits: list[Commit] = []
-    n_active_model = sum(1 for t in active.values() if is_model_commit(str(t)))
-
     for hotkey, (block, data, source) in merged.items():
         parsed = parse_model_commit(data, hotkey)
         if parsed is None:
             continue
-
         neuron = neurons.get(hotkey)
         uid = neuron["uid"] if neuron else None
         coldkey = neuron["coldkey"] if neuron else None
         reg_block = neuron["registered_at_block"] if neuron else None
-
         if uid is None:
             logger.warning("v6 commit for unregistered/unknown hotkey=%s", hotkey)
-
         commits.append(
             Commit(
                 netuid=netuid,
                 block_number=block,
-                block_hash=await _block_hash(subtensor, block),
+                block_hash=block_hashes.get(block),
                 uid=uid,
                 hotkey=hotkey,
                 coldkey=coldkey,
@@ -239,57 +259,76 @@ async def scan_v6_commitments(subtensor: Any, netuid: int) -> list[Commit]:
                 commit_source=source,
             )
         )
+    return commits
 
+
+async def scan_v6_from_snapshot(
+    snapshot: ChainSnapshot,
+    neurons: dict[str, dict[str, Any]],
+    subtensor: Any | None = None,
+    *,
+    include_revealed: bool = True,
+    fetch_block_hashes: bool = False,
+) -> list[Commit]:
+    """Build v6 commit list from a pre-loaded chain snapshot."""
+    timelock = timelock_hotkeys_from_map(snapshot.commitment_of)
+    active = active_v6_from_map(snapshot.commitment_of)
+
+    revealed_model: dict[str, tuple[int, str]] = {}
+    if include_revealed and snapshot.revealed is not None:
+        revealed_model = _latest_model_commits_per_hotkey(snapshot.revealed)
+
+    merged = _merge_model_commit_sources(active, revealed_model, timelock)
+
+    block_hashes: dict[int, str | None] = {}
+    if fetch_block_hashes and subtensor is not None and merged:
+        blocks = {block for block, _, _ in merged.values()}
+        block_hashes = await _block_hashes_batch(subtensor, blocks)
+
+    commits = _commits_from_merged(snapshot.netuid, merged, neurons, block_hashes)
     logger.info(
-        "scan netuid=%d: active_model=%d revealed_model=%d merged=%d commits=%d (v6=%d)",
-        netuid,
-        n_active_model,
+        "v6 scan netuid=%d active=%d revealed=%d timelock_blocked=%d commits=%d",
+        snapshot.netuid,
+        len(active),
         len(revealed_model),
-        len(merged),
-        len(commits),
+        len(timelock),
         len(commits),
     )
     return commits
+
+
+async def scan_v6_commitments(
+    subtensor: Any,
+    netuid: int,
+    neurons: dict[str, dict[str, Any]] | None = None,
+) -> list[Commit]:
+    """Full scan: active + revealed with block hashes."""
+    from app.chain_reader.chain_snapshot import load_chain_snapshot
+
+    if neurons is None:
+        neurons = await _neuron_index(subtensor, netuid)
+    snapshot = await load_chain_snapshot(subtensor, netuid, include_revealed=True)
+    return await scan_v6_from_snapshot(
+        snapshot, neurons, subtensor, include_revealed=True, fetch_block_hashes=True
+    )
 
 
 async def scan_v6_active_fast(
     subtensor: Any,
     netuid: int,
     neurons: dict[str, dict[str, Any]],
+    snapshot: ChainSnapshot | None = None,
 ) -> list[Commit]:
-    """Fast path: CommitmentOf only (~1-2s). Used for near-instant new-commit detection."""
-    current_block = await subtensor.get_current_block()
-    active = await _iter_active_commitments(subtensor, netuid)
-    commits: list[Commit] = []
+    """Fast path: CommitmentOf only from snapshot (no revealed, no block-hash RPCs)."""
+    from app.chain_reader.chain_snapshot import load_chain_snapshot
 
-    for hotkey, text in active.items():
-        data = str(text)
-        parsed = parse_model_commit(data, hotkey)
-        if parsed is None:
-            continue
-        neuron = neurons.get(hotkey)
-        uid = neuron["uid"] if neuron else None
-        coldkey = neuron["coldkey"] if neuron else None
-        reg_block = neuron["registered_at_block"] if neuron else None
-        commits.append(
-            Commit(
-                netuid=netuid,
-                block_number=current_block,
-                block_hash=None,
-                uid=uid,
-                hotkey=hotkey,
-                coldkey=coldkey,
-                registered_at_block=reg_block,
-                commit_payload=parsed,
-                reveal_string=data,
-                model_uri=f"{parsed['repo']}@{parsed['digest']}",
-                payload_hash=payload_hash(parsed),
-                commit_source="active",
-            )
-        )
-    return commits
+    if snapshot is None:
+        snapshot = await load_chain_snapshot(subtensor, netuid, include_revealed=False)
+    return await scan_v6_from_snapshot(
+        snapshot, neurons, include_revealed=False, fetch_block_hashes=False
+    )
 
 
-# Backwards-compatible aliases (deprecated)
+# Backwards-compatible aliases
 scan_v5_commitments = scan_v6_commitments
 scan_v5_active_fast = scan_v6_active_fast

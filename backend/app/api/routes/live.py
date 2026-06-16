@@ -32,17 +32,29 @@ async def live_stream(subnet: int = Query(default=97)):
         pubsub = redis.pubsub()
         await pubsub.subscribe(EventPublisher.LIVE_CHANNEL)
 
-        # Send last known state immediately on connect
-        cached = await redis.get(EventPublisher.STATE_KEY)
+        # Send last known state for this subnet on connect
+        cached = await redis.get(EventPublisher.STATE_KEY_PREFIX + str(subnet))
+        if not cached:
+            cached = await redis.get(EventPublisher.STATE_KEY)
         if cached:
-            yield f"event: commit\ndata: {cached}\n\n"
+            try:
+                payload = json.loads(cached)
+                if payload.get("subnet") == subnet:
+                    yield f"event: commit\ndata: {cached}\n\n"
+            except json.JSONDecodeError:
+                pass
         yield f"event: connected\ndata: {json.dumps({'subnet': subnet, 'status': 'live'})}\n\n"
 
         try:
             while True:
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15.0)
                 if message and message["type"] == "message":
-                    yield f"event: commit\ndata: {message['data']}\n\n"
+                    try:
+                        payload = json.loads(message["data"])
+                        if payload.get("subnet") == subnet:
+                            yield f"event: commit\ndata: {message['data']}\n\n"
+                    except json.JSONDecodeError:
+                        pass
                 else:
                     # heartbeat keeps connection alive
                     yield f"event: ping\ndata: {json.dumps({'ts': time.time()})}\n\n"
@@ -70,7 +82,7 @@ async def recent_commits(
     """Lightweight poll endpoint — returns newest v6 commits (for fallback refresh)."""
     result = await db.execute(
         select(MinerCommitment)
-        .where(MinerCommitment.subnet == subnet)
+        .where(MinerCommitment.subnet == subnet, MinerCommitment.version == "v6")
         .order_by(MinerCommitment.last_updated.desc())
         .limit(limit)
     )

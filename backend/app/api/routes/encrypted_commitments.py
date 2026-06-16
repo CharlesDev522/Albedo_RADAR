@@ -236,16 +236,19 @@ async def onchain_encrypted(subnet: int = Query(default=97, ge=0)) -> dict:
     """Debug: TimelockEncrypted on chain right now."""
     from bittensor.core.async_subtensor import AsyncSubtensor
 
+    from app.chain_reader.chain_snapshot import load_chain_snapshot
     from app.chain_reader.commitment_scanner import _neuron_index
     from app.chain_reader.encrypted_commitment_scanner import (
-        scan_encrypted_commitments,
-        scan_encrypted_onchain_debug,
+        encrypted_breakdown_from_map,
+        scan_encrypted_from_map,
     )
 
     async with AsyncSubtensor(network=settings.bittensor_network) as st:
         neurons = await _neuron_index(st, subnet)
-        commits = await scan_encrypted_commitments(st, subnet, neurons)
-        breakdown = await scan_encrypted_onchain_debug(st, subnet)
+        snapshot = await load_chain_snapshot(st, subnet, include_revealed=False)
+        commits = scan_encrypted_from_map(subnet, snapshot.commitment_of, neurons)
+        breakdown = encrypted_breakdown_from_map(snapshot.commitment_of)
+        breakdown["subnet"] = subnet
 
     return {
         **breakdown,

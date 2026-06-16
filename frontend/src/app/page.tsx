@@ -36,19 +36,22 @@ export default async function Page({
   const params = (await searchParams) ?? {};
   const subnet = parseSubnet(params.subnet);
 
-  const [stats, commits, registry, slotData] = await Promise.all([
+  const [stats, commits, registry, slotData, syncStatus] = await Promise.all([
     safe(() => api.getStats(subnet), null),
     safe(() => api.getCommitments(subnet), { commitments: [] as Commitment[], total: 0 }),
     safe(() => api.getRegistry(subnet), null),
     safe(() => api.getSlotStatus(subnet, "all", "uid_asc", false), null as SlotStatusData | null),
+    safe(() => api.getSyncStatus(subnet, false), null),
   ]);
 
   return (
     <DashboardSyncProvider
+      key={subnet}
       initialStats={stats}
       initialCommits={commits.commitments}
       initialRegistry={registry}
       initialSlotData={slotData}
+      initialSyncStatus={syncStatus}
     >
       <div className="space-y-3">
         <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading slots…</div>}>

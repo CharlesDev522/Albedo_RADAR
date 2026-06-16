@@ -70,10 +70,7 @@ class CommitmentStateBuilder:
                 existing.uid = commit.uid
                 existing.coldkey = commit.coldkey
                 existing.registered_at_block = commit.registered_at_block
-                if commit.block_number and commit.commit_source == "revealed":
-                    existing.commit_block = commit.block_number
-                elif commit.block_number and existing.commit_block == 0:
-                    existing.commit_block = commit.block_number
+                self._apply_block_and_source(existing, commit)
                 existing.block_hash = commit.block_hash or existing.block_hash
                 existing.reveal_string = commit.reveal_string
                 existing.version = commit.commit_payload.get("version", existing.version)
@@ -82,7 +79,6 @@ class CommitmentStateBuilder:
                 existing.model_uri = commit.model_uri
                 existing.payload_hash = commit.payload_hash
                 existing.commit_payload = commit.commit_payload
-                existing.commit_source = commit.commit_source
                 existing.miner_id = miner.id if miner else None
                 existing.last_updated = datetime.now(timezone.utc)
                 await self._record_history(session, commit)
@@ -99,21 +95,19 @@ class CommitmentStateBuilder:
                 )
                 stats["updated"] += 1
             else:
-                # Same payload — refresh uid/coldkey only; do NOT bump commit_block every poll
                 existing.uid = commit.uid
                 existing.coldkey = commit.coldkey
                 existing.registered_at_block = commit.registered_at_block
                 existing.miner_id = miner.id if miner else None
-                existing.commit_source = commit.commit_source
                 if (
                     commit.commit_source == "revealed"
                     and commit.block_number
                     and commit.block_number > existing.commit_block
                 ):
                     existing.commit_block = commit.block_number
+                    existing.commit_source = "revealed"
                 stats["unchanged"] += 1
 
-        # Mark miners on subnet without v6 commitment
         if snapshot:
             for neuron in snapshot.neurons:
                 if neuron.hotkey not in commit_by_hotkey:
@@ -130,6 +124,46 @@ class CommitmentStateBuilder:
 
         await session.flush()
         return stats
+
+    async def prune_absent_v6(
+        self,
+        session: AsyncSession,
+        netuid: int,
+        present_hotkeys: set[str],
+        *,
+        retain_hotkeys: set[str] | None = None,
+    ) -> int:
+        """Drop v6 rows absent from a full on-chain scan (e.g. deregistered miners)."""
+        keep = present_hotkeys | (retain_hotkeys or set())
+        result = await session.execute(
+            select(MinerCommitment).where(
+                MinerCommitment.subnet == netuid,
+                MinerCommitment.version == "v6",
+            )
+        )
+        removed = 0
+        for row in result.scalars().all():
+            if row.hotkey not in keep:
+                await session.delete(row)
+                removed += 1
+        if removed:
+            logger.info("pruned %d stale v6 rows netuid=%d", removed, netuid)
+            await session.flush()
+        return removed
+
+    @staticmethod
+    def _apply_block_and_source(existing: MinerCommitment, commit: Commit) -> None:
+        """Never downgrade revealed metadata with a fast active poll."""
+        if not commit.block_number or commit.block_number <= 0:
+            return
+        if commit.commit_source == "revealed":
+            if commit.block_number >= existing.commit_block:
+                existing.commit_block = commit.block_number
+            existing.commit_source = "revealed"
+        elif existing.commit_source != "revealed":
+            if commit.block_number > existing.commit_block:
+                existing.commit_block = commit.block_number
+            existing.commit_source = "active"
 
     async def _sync_miner_registry(self, session: AsyncSession, snapshot: MetagraphSnapshot) -> None:
         """Keep a lightweight miner registry for uid/coldkey/registration lookups."""

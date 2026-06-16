@@ -77,3 +77,22 @@ class SlotStatusBuilder:
 
         await session.flush()
         return stats
+
+    async def prune_absent_uids(
+        self,
+        session: AsyncSession,
+        netuid: int,
+        active_uids: set[int],
+    ) -> int:
+        """Remove slot rows for UIDs no longer in the metagraph."""
+        result = await session.execute(
+            select(MinerSlotStatus).where(MinerSlotStatus.subnet == netuid)
+        )
+        removed = 0
+        for row in result.scalars().all():
+            if row.uid not in active_uids:
+                await session.delete(row)
+                removed += 1
+        if removed:
+            await session.flush()
+        return removed
