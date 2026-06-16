@@ -115,6 +115,15 @@ def _classify_plaintext(
     )
 
 
+def classify_plaintext_reveal(
+    decoded: str,
+    commit_block: int,
+    deposit: int = 0,
+) -> ClassifiedCommitment:
+    """Classify a plaintext reveal string (from CommitmentOf or RevealedCommitments)."""
+    return _classify_plaintext(decoded, commit_block, deposit)
+
+
 def classify_commitment_raw(raw: dict[str, Any], hotkey: str = "") -> ClassifiedCommitment | None:
     """Classify a raw CommitmentOf record. TimelockEncrypted is parsed before plaintext."""
     decoded_of = decode_commitment_of_raw(raw)

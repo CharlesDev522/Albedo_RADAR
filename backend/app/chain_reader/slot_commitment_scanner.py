@@ -10,11 +10,48 @@ from app.chain_reader.commitment_classifier import (
     ClassifiedCommitment,
     CommitmentType,
     classify_commitment_raw,
+    classify_plaintext_reveal,
 )
-from app.chain_reader.commitment_scanner import _neuron_index
+from app.chain_reader.commitment_scanner import _iter_revealed, _neuron_index
 from app.chain_reader.commitment_decoder import iter_commitment_of_raw
 
 logger = logging.getLogger(__name__)
+
+
+def _latest_revealed_per_hotkey(
+    entries: list[tuple[str, int, str]],
+) -> dict[str, ClassifiedCommitment]:
+    """Highest-block classified reveal per hotkey from RevealedCommitments history."""
+    latest: dict[str, ClassifiedCommitment] = {}
+    for hotkey, block, payload in entries:
+        classified = classify_plaintext_reveal(payload, block, 0)
+        prev = latest.get(hotkey)
+        if prev is None or block > prev.commit_block:
+            latest[hotkey] = classified
+    return latest
+
+
+def _merge_slot_classifications(
+    active: dict[str, ClassifiedCommitment],
+    revealed: dict[str, ClassifiedCommitment],
+) -> dict[str, ClassifiedCommitment]:
+    """Merge active CommitmentOf with RevealedCommitments — same sources as v5/v6 commits table."""
+    merged = dict(active)
+    for hotkey, rev in revealed.items():
+        act = merged.get(hotkey)
+        if act is None:
+            merged[hotkey] = rev
+            continue
+        # Pending ciphertext is the current slot state — do not replace with older reveals.
+        if act.commitment_type in (CommitmentType.TIMELOCK_ENCRYPTED, CommitmentType.BINARY):
+            continue
+        if rev.reveal_string and act.reveal_string and rev.reveal_string == act.reveal_string:
+            if rev.commit_block >= act.commit_block:
+                merged[hotkey] = rev
+            continue
+        if rev.commit_block >= act.commit_block:
+            merged[hotkey] = rev
+    return merged
 
 
 @dataclass(frozen=True)
@@ -56,6 +93,10 @@ async def scan_slot_statuses(
         classified = classify_commitment_raw(raw, hotkey)
         if classified is not None:
             commitments_by_hotkey[hotkey] = classified
+
+    revealed_entries = await _iter_revealed(subtensor, netuid)
+    revealed_by_hotkey = _latest_revealed_per_hotkey(revealed_entries)
+    commitments_by_hotkey = _merge_slot_classifications(commitments_by_hotkey, revealed_by_hotkey)
 
     slots: list[SlotStatus] = []
     for uid in sorted(uid_to_neuron.keys()):
