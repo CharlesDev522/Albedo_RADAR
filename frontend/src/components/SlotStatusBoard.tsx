@@ -1,18 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
-  api,
   hippiusModelUrl,
   shortAddr,
   shortRepo,
-  type SlotStatusData,
   type SlotStatusEntry,
   type SlotStatusSummary,
 } from "@/lib/api";
+import { DASHBOARD_POLL_MS, useDashboardSync } from "@/lib/DashboardSyncContext";
 import { useSubnet } from "@/lib/useSubnet";
-
-const POLL_MS = 3000;
 
 type FilterKey =
   | "all"
@@ -98,55 +95,20 @@ function summaryFromSlots(subnet: number, slots: SlotStatusEntry[]): SlotStatusS
 
 export default function SlotStatusBoard() {
   const { subnet } = useSubnet();
+  const { slotData, lastRefresh, loading, apiError } = useDashboardSync();
   const [filter, setFilter] = useState<FilterKey>("committed");
-  const [data, setData] = useState<SlotStatusData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [highlightUid, setHighlightUid] = useState<number | null>(null);
   const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
-  const subnetRef = useRef(subnet);
-
-  useEffect(() => {
-    setData(null);
-    setError(null);
-    setLoading(true);
-    setHighlightUid(null);
-    rowRefs.current.clear();
-    subnetRef.current = subnet;
-  }, [subnet]);
-
-  const refresh = useCallback(async () => {
-    const fetchSubnet = subnet;
-    try {
-      const res = await api.getSlotStatus(fetchSubnet, "all", "uid_asc", true);
-      if (subnetRef.current !== fetchSubnet) return;
-      setData(res);
-      setLastRefresh(new Date());
-      setError(null);
-    } catch (err) {
-      if (subnetRef.current !== fetchSubnet) return;
-      setError(err instanceof Error ? err.message : "failed to load slots");
-    } finally {
-      if (subnetRef.current === fetchSubnet) setLoading(false);
-    }
-  }, [subnet]);
-
-  useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, POLL_MS);
-    return () => clearInterval(id);
-  }, [refresh]);
 
   const allSlots = useMemo(() => {
-    const rows = data?.slots ?? [];
+    const rows = slotData?.slots ?? [];
     return [...rows].sort(byUid);
-  }, [data?.slots]);
+  }, [slotData?.slots]);
 
   const summary = useMemo(() => {
     if (allSlots.length > 0) return summaryFromSlots(subnet, allSlots);
-    return data?.summary;
-  }, [allSlots, data?.summary, subnet]);
+    return slotData?.summary;
+  }, [allSlots, slotData?.summary, subnet]);
 
   const displaySlots = useMemo(
     () => filterSlots(allSlots, filter).sort(byUid),
@@ -182,18 +144,18 @@ export default function SlotStatusBoard() {
         <div>
           <h2 className="text-[12px] font-semibold text-zinc-100">miner slots · SN{subnet}</h2>
           <p className="text-[10px] text-zinc-500 mt-0.5">
-            {loading && !data ? "loading live chain…" : `256 UIDs · ${lastRefresh ? `updated ${Math.round((Date.now() - lastRefresh.getTime()) / 1000)}s ago` : "—"} · poll ${POLL_MS / 1000}s`}
+            {loading && !slotData ? "loading…" : `256 UIDs · ${lastRefresh ? `updated ${Math.round((Date.now() - lastRefresh.getTime()) / 1000)}s ago` : "—"} · sync ${DASHBOARD_POLL_MS / 1000}s`}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <span className="text-[9px] text-zinc-600 mono">
-            {data?.source === "chain" ? "● live chain" : data ? "db" : "…"}
+            {slotData?.source === "chain" ? "● live chain" : slotData ? "db · synced" : "…"}
           </span>
         </div>
       </div>
 
-      {error && (
-        <div className="px-3 py-2 border-b border-rose-500/20 bg-rose-500/5 text-[10px] text-rose-300">{error}</div>
+      {apiError && (
+        <div className="px-3 py-2 border-b border-rose-500/20 bg-rose-500/5 text-[10px] text-rose-300">{apiError}</div>
       )}
 
       {filter === "timelock_encrypted" && summary && summary.timelock_encrypted + (summary.binary ?? 0) === 0 && !loading && (
@@ -279,7 +241,7 @@ export default function SlotStatusBoard() {
             {displaySlots.length === 0 ? (
               <tr>
                 <td colSpan={8} className="text-center text-zinc-500 py-8 text-[10px]">
-                  {loading ? "loading from chain…" : data ? "no slots match filter" : "waiting for data…"}
+                  {loading ? "loading…" : slotData ? "no slots match filter" : "waiting for data…"}
                 </td>
               </tr>
             ) : (

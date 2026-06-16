@@ -66,7 +66,7 @@ async def list_slot_status(
         summary=summary,
         filter=filter_type,
         sort=sort,
-        source="chain" if live or len(all_rows) >= 200 else "db",
+        source="chain" if live else "db",
     )
 
 
@@ -79,10 +79,6 @@ async def _load_slot_rows(db: AsyncSession, subnet: int, force_live: bool = Fals
     db_rows = list(result.scalars().all())
 
     use_live = force_live or len(db_rows) < 200
-    if not use_live and db_rows:
-        last = max((r.last_updated for r in db_rows if r.last_updated), default=None)
-        if last is None or (datetime.now(timezone.utc) - last).total_seconds() > 60:
-            use_live = True
 
     if use_live:
         try:

@@ -1,12 +1,14 @@
 import { Suspense } from "react";
 import LiveDashboard from "@/components/LiveDashboard";
 import SlotStatusBoard from "@/components/SlotStatusBoard";
+import { DashboardSyncProvider } from "@/lib/DashboardSyncContext";
 import {
   api,
   DEFAULT_SUBNET,
   type Commitment,
   type CommitmentStats,
   type Registry,
+  type SlotStatusData,
 } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -34,24 +36,28 @@ export default async function Page({
   const params = (await searchParams) ?? {};
   const subnet = parseSubnet(params.subnet);
 
-  const [stats, commits, registry] = await Promise.all([
+  const [stats, commits, registry, slotData] = await Promise.all([
     safe(() => api.getStats(subnet), null),
     safe(() => api.getCommitments(subnet), { commitments: [] as Commitment[], total: 0 }),
     safe(() => api.getRegistry(subnet), null),
+    safe(() => api.getSlotStatus(subnet, "all", "uid_asc", false), null as SlotStatusData | null),
   ]);
 
   return (
-    <div className="space-y-3">
-      <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading slots…</div>}>
-        <SlotStatusBoard />
-      </Suspense>
-      <Suspense fallback={null}>
-        <LiveDashboard
-          initialStats={stats}
-          initialCommits={commits.commitments}
-          initialRegistry={registry}
-        />
-      </Suspense>
-    </div>
+    <DashboardSyncProvider
+      initialStats={stats}
+      initialCommits={commits.commitments}
+      initialRegistry={registry}
+      initialSlotData={slotData}
+    >
+      <div className="space-y-3">
+        <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading slots…</div>}>
+          <SlotStatusBoard />
+        </Suspense>
+        <Suspense fallback={null}>
+          <LiveDashboard />
+        </Suspense>
+      </div>
+    </DashboardSyncProvider>
   );
 }
