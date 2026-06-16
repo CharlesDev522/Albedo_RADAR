@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    description="Real-time v5 commitment tracking and miner intelligence for Bittensor subnet 97",
+    description="Real-time v6 commitment tracking and miner intelligence for Bittensor subnet 97",
     version=__version__,
     lifespan=lifespan,
 )

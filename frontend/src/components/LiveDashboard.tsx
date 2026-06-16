@@ -39,9 +39,8 @@ export default function LiveDashboard() {
     [registry?.miners, registrySort]
   );
 
-  const waiting = registry?.miners.filter((m) => !m.has_v5) ?? [];
-  const v6Count = registry?.v6_count ?? commits.filter((c) => c.version === "v6" || c.reveal_string?.startsWith("v6|")).length;
-  const v5Count = registry?.v5_count ?? commits.filter((c) => (c.version ?? "v5") === "v5" || c.reveal_string?.startsWith("v5|")).length;
+  const waiting = registry?.miners.filter((m) => !m.has_v6) ?? [];
+  const v6Count = registry?.v6_count ?? commits.length;
 
   return (
     <div className="space-y-3">
@@ -53,9 +52,9 @@ export default function LiveDashboard() {
       )}
       {!apiError && syncStatus && !syncStatus.in_sync && (
         <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[11px] text-amber-300">
-          Chain has <strong>{syncStatus.onchain_v5_count}</strong> model commits (v5/v6 · uids{" "}
+          Chain has <strong>{syncStatus.onchain_v6_count}</strong> v6 commits (uids{" "}
           {syncStatus.onchain_uids.join(", ") || "—"}) but DB has{" "}
-          <strong>{syncStatus.db_v5_count}</strong>
+          <strong>{syncStatus.db_v6_count}</strong>
           {syncStatus.missing_in_db.length > 0 && (
             <> — missing uids: {syncStatus.missing_in_db.join(", ")}</>
           )}
@@ -65,12 +64,11 @@ export default function LiveDashboard() {
       )}
       {!apiError && commits.length === 0 && stats?.committed_miners === 0 && (
         <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[11px] text-amber-300">
-          No v5/v6 commits in database yet — check{" "}
+          No v6 commits in database yet — check{" "}
           <code className="mono text-amber-100">docker compose logs collector</code> and{" "}
           <code className="mono text-amber-100">GET /api/v1/commitments/onchain</code>.
         </div>
       )}
-      {/* status bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-zinc-500">
         <div className="flex items-center gap-3">
           <span
@@ -95,19 +93,14 @@ export default function LiveDashboard() {
           )}
         </div>
         <span className="mono text-zinc-600">
-          chain {syncStatus?.onchain_v5_count ?? "—"} · db {syncStatus?.db_v5_count ?? stats?.committed_miners ?? "—"} · sync ~{DASHBOARD_POLL_MS / 1000}s
+          chain {syncStatus?.onchain_v6_count ?? "—"} · db {syncStatus?.db_v6_count ?? stats?.committed_miners ?? "—"} · sync ~{DASHBOARD_POLL_MS / 1000}s
         </span>
       </div>
 
-      {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         <Kpi label="miners" value={String(stats?.total_neurons ?? "—")} />
-        <Kpi label="model committed" value={String(stats?.committed_miners ?? "—")} accent />
-        <Kpi
-          label="v6 / v5"
-          value={`${v6Count} / ${v5Count}`}
-          accent
-        />
+        <Kpi label="v6 committed" value={String(stats?.committed_miners ?? "—")} accent />
+        <Kpi label="v6 active" value={String(v6Count)} accent />
         <Kpi label="no commit" value={String(stats?.uncommitted_miners ?? "—")} warn={(stats?.uncommitted_miners ?? 0) > 0} />
         <Kpi label="coverage" value={stats ? `${stats.coverage_pct}%` : "—"} />
         <Kpi label="latest blk" value={stats?.latest_commit_block?.toLocaleString() ?? "—"} mono />
@@ -115,23 +108,22 @@ export default function LiveDashboard() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
-        {/* live feed */}
         <aside className="panel xl:col-span-3 order-2 xl:order-1">
           <div className="panel-head">
             <h2 className="text-[12px] font-semibold text-zinc-100">live feed</h2>
-            <span className="pill-v5">instant</span>
+            <span className="pill-v6">instant</span>
           </div>
           <div className="max-h-[320px] overflow-y-auto divide-y divide-zinc-800/50">
             {feed.length === 0 ? (
               <p className="px-3 py-4 text-[10px] text-zinc-500">waiting for new commits…</p>
             ) : (
               feed.map((e, i) => (
-                <div key={`${e.hotkey}-${i}`} className="px-3 py-2 bg-emerald-500/5">
+                <div key={`${e.hotkey}-${i}`} className="px-3 py-2 bg-lime-500/5">
                   <div className="flex justify-between gap-2">
-                    <span className="pill-v5 text-[9px]">{e.type?.replace("commitment_", "")}</span>
+                    <span className="pill-v6 text-[9px]">{e.type?.replace("commitment_", "")}</span>
                     <span className="text-[9px] text-zinc-600">{e.timestamp ? fmtTime(e.timestamp) : "now"}</span>
                   </div>
-                  <p className="mono text-[11px] text-emerald-400 mt-1">uid {e.uid ?? "?"}</p>
+                  <p className="mono text-[11px] text-lime-400 mt-1">uid {e.uid ?? "?"}</p>
                   <p className="text-[10px] text-zinc-500 truncate mt-0.5">
                     {e.repo ? (
                       <a
@@ -152,14 +144,13 @@ export default function LiveDashboard() {
           </div>
         </aside>
 
-        {/* commits table */}
         <section className="panel xl:col-span-9 order-1 xl:order-2">
           <div className="panel-head">
             <div>
-              <h2 className="text-[12px] font-semibold text-zinc-100">v5 / v6 commits · SN{subnet}</h2>
+              <h2 className="text-[12px] font-semibold text-zinc-100">v6 commits · SN{subnet}</h2>
               <p className="text-[10px] text-zinc-500">new rows flash green</p>
             </div>
-            <span className="pill-v5">{commits.length} active</span>
+            <span className="pill-v6">{commits.length} active</span>
           </div>
           <div className="overflow-x-auto">
             <table className="tbl">
@@ -178,7 +169,7 @@ export default function LiveDashboard() {
                 {sortedCommits.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="text-center text-zinc-500 py-8">
-                      no model commits yet
+                      no v6 commits yet
                     </td>
                   </tr>
                 ) : (
@@ -187,20 +178,18 @@ export default function LiveDashboard() {
                     return (
                       <tr
                         key={c.id}
-                        className={isNew ? "bg-emerald-500/15 ring-1 ring-emerald-500/40" : ""}
+                        className={isNew ? "bg-lime-500/15 ring-1 ring-lime-500/40" : ""}
                       >
                         <td className="mono font-medium text-zinc-200">
                           {c.uid ?? "—"}
-                          <span className={`ml-1 text-[8px] uppercase ${(c.version ?? (c.reveal_string?.startsWith("v6|") ? "v6" : "v5")) === "v6" ? "text-lime-400" : "text-emerald-400"}`}>
-                            {c.version ?? (c.reveal_string?.startsWith("v6|") ? "v6" : "v5")}
-                          </span>
-                          {isNew && <span className="ml-1 text-[9px] text-emerald-400">NEW</span>}
+                          <span className="ml-1 text-[8px] uppercase text-lime-400">v6</span>
+                          {isNew && <span className="ml-1 text-[9px] text-lime-400">NEW</span>}
                         </td>
                         <td className="mono text-zinc-300 tabular-nums">{c.commit_block.toLocaleString()}</td>
                         <td className="mono text-zinc-500 tabular-nums">
                           {c.registered_at_block?.toLocaleString() ?? "—"}
                         </td>
-                        <td className="mono text-emerald-400/90" title={c.hotkey}>
+                        <td className="mono text-lime-400/90" title={c.hotkey}>
                           {shortAddr(c.hotkey, 6)}
                         </td>
                         <td className="mono text-zinc-500" title={c.coldkey ?? ""}>
@@ -229,14 +218,13 @@ export default function LiveDashboard() {
         </section>
       </div>
 
-      {/* registry */}
       <section className="panel">
         <div className="panel-head">
           <div>
             <h2 className="text-[12px] font-semibold text-zinc-100">miner registry · SN{subnet}</h2>
           </div>
           <span className="text-[10px] text-zinc-500">
-            {registry?.total ?? 0} miners · {registry?.v6_count ?? 0} v6 · {registry?.v5_count ?? 0} v5
+            {registry?.total ?? 0} miners · {registry?.v6_count ?? 0} v6
           </span>
         </div>
         <div className="overflow-x-auto max-h-[360px] overflow-y-auto">
@@ -263,8 +251,8 @@ export default function LiveDashboard() {
               sortedRegistry.map((m) => (
                 <tr
                   key={m.uid}
-                  className={`${m.has_v5 ? "" : "opacity-50"} ${
-                    flashUids.has(m.uid) ? "bg-emerald-500/10" : ""
+                  className={`${m.has_v6 ? "" : "opacity-50"} ${
+                    flashUids.has(m.uid) ? "bg-lime-500/10" : ""
                   }`}
                 >
                   <td className="mono text-zinc-200">{m.uid}</td>
@@ -273,8 +261,8 @@ export default function LiveDashboard() {
                   </td>
                   <td className="mono text-zinc-500 tabular-nums">{m.registered_at_block?.toLocaleString() ?? "—"}</td>
                   <td>
-                    {m.has_v5 ? (
-                      <span className={m.version === "v6" ? "pill-v6" : "pill-v5"}>{m.version ?? "v5"}</span>
+                    {m.has_v6 ? (
+                      <span className="pill-v6">v6</span>
                     ) : (
                       <span className="pill-none">—</span>
                     )}
@@ -305,7 +293,7 @@ export default function LiveDashboard() {
         <TableSortBar sort={registrySort} onSort={setRegistrySort} showStatus />
         {waiting.length > 0 && (
           <div className="px-3 py-2 border-t border-zinc-800/80 text-[10px] text-zinc-600">
-            {waiting.length} miners without v5/v6
+            {waiting.length} miners without v6
           </div>
         )}
       </section>
@@ -344,7 +332,7 @@ function Kpi({
       <p
         className={`${small ? "text-[11px] font-normal text-zinc-400" : "stat-value"} ${
           mono ? "mono" : ""
-        } ${accent ? "text-emerald-400" : ""} ${warn ? "text-amber-400" : ""}`}
+        } ${accent ? "text-lime-400" : ""} ${warn ? "text-amber-400" : ""}`}
       >
         {value}
       </p>

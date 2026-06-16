@@ -48,7 +48,7 @@ async def list_encrypted_commitments(
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> EncryptedCommitmentListResponse:
-    """List TimelockEncrypted miners — ciphertext on chain, not yet readable as v5."""
+    """List TimelockEncrypted miners — ciphertext on chain, not yet readable as v6."""
     query = select(EncryptedMinerCommitment).where(EncryptedMinerCommitment.subnet == subnet)
     if status == "pending":
         query = query.where(EncryptedMinerCommitment.status == EncryptedCommitmentStatus.PENDING)
@@ -227,7 +227,7 @@ async def encrypted_sync_status(
         "onchain_uids": onchain_uids,
         "db_uids": db_uids,
         "missing_in_db": missing_in_db,
-        "note": "TimelockEncrypted only — not v4, not v5 plaintext",
+        "note": "TimelockEncrypted only — not v6 plaintext",
     }
 
 

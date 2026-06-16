@@ -39,7 +39,7 @@ class EncryptedCommit:
 
 
 def is_plaintext_commitment(field: Any, hotkey: str = "") -> bool:
-    """True if field decodes to readable v4/v5/JSON text (not TimelockEncrypted)."""
+    """True if field decodes to readable JSON/other text (not TimelockEncrypted)."""
     if parse_timelock_encrypted(field) is not None:
         return False
     if not isinstance(field, dict):
@@ -108,7 +108,6 @@ async def scan_encrypted_commitments(
 async def scan_encrypted_onchain_debug(subtensor: Any, netuid: int) -> dict[str, Any]:
     """Debug helper: count TimelockEncrypted vs plaintext kinds on CommitmentOf."""
     timelock = 0
-    v5_plain = 0
     v6_plain = 0
     other_plain = 0
     async for hotkey, raw in iter_commitment_of_raw(subtensor, netuid):
@@ -120,14 +119,11 @@ async def scan_encrypted_onchain_debug(subtensor: Any, netuid: int) -> dict[str,
             parsed = parse_model_commit(decoded.reveal_string, hotkey)
             if parsed and parsed.get("version") == "v6":
                 v6_plain += 1
-            elif parsed and parsed.get("version") == "v5":
-                v5_plain += 1
             else:
                 other_plain += 1
     return {
         "subnet": netuid,
         "timelock_encrypted": timelock,
-        "plaintext_v5": v5_plain,
         "plaintext_v6": v6_plain,
         "plaintext_other": other_plain,
     }

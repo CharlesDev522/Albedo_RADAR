@@ -52,7 +52,7 @@ export default function EncryptedCommitsPanel() {
         <div>
           <h2 className="text-[12px] font-semibold text-zinc-100">TimelockEncrypted commits</h2>
           <p className="text-[10px] text-zinc-500 mt-0.5">
-            Ciphertext on chain — <strong className="text-zinc-400">not v4, not v5</strong>, cannot read model/repo until reveal
+            Ciphertext on chain — <strong className="text-zinc-400">not v6 plaintext</strong>, cannot read model/repo until reveal
           </p>
         </div>
         <span className="inline-flex px-2 py-0.5 rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-300 text-[10px]">
@@ -102,7 +102,7 @@ export default function EncryptedCommitsPanel() {
                       no TimelockEncrypted miners on subnet {subnet} on chain right now
                       <br />
                       <span className="text-zinc-600">
-                        (v5 table above only shows revealed plaintext — encrypted miners appear here after{" "}
+                        (v6 table above only shows revealed plaintext — encrypted miners appear here after{" "}
                         <code className="mono">set_reveal_commitment</code>)
                       </span>
                     </>
@@ -138,7 +138,7 @@ export default function EncryptedCommitsPanel() {
 
       {lastRefresh && (
         <div className="px-3 py-2 border-t border-zinc-800/80 text-[10px] text-zinc-600">
-          refreshed {Math.round((Date.now() - lastRefresh.getTime()) / 1000)}s ago · after drand reveal, plaintext may appear in v5 table
+          refreshed {Math.round((Date.now() - lastRefresh.getTime()) / 1000)}s ago · after drand reveal, plaintext may appear in v6 table
         </div>
       )}
     </section>

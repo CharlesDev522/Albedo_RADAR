@@ -25,7 +25,7 @@ settings = get_settings()
 
 @router.get("/stream")
 async def live_stream(subnet: int = Query(default=97)):
-    """SSE stream — pushes instantly when collector detects new/updated v5 commits."""
+    """SSE stream — pushes instantly when collector detects new/updated v6 commits."""
 
     async def event_generator():
         redis = aioredis.from_url(settings.redis_url, decode_responses=True)
@@ -67,7 +67,7 @@ async def recent_commits(
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Lightweight poll endpoint — returns newest v5 commits (for fallback refresh)."""
+    """Lightweight poll endpoint — returns newest v6 commits (for fallback refresh)."""
     result = await db.execute(
         select(MinerCommitment)
         .where(MinerCommitment.subnet == subnet)

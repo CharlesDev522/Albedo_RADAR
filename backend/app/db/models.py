@@ -89,7 +89,7 @@ class Miner(Base):
 
 
 class MinerCommitment(Base):
-    """Latest v5 on-chain model commitment per miner hotkey."""
+    """Latest v6 on-chain model commitment per miner hotkey."""
 
     __tablename__ = "miner_commitments"
     __table_args__ = (
@@ -111,7 +111,7 @@ class MinerCommitment(Base):
     commit_block: Mapped[int] = mapped_column(BigInteger, nullable=False)
     block_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     reveal_string: Mapped[str] = mapped_column(Text, nullable=False)
-    version: Mapped[str] = mapped_column(String(8), default="v5")
+    version: Mapped[str] = mapped_column(String(8), default="v6")
     repo: Mapped[str] = mapped_column(String(512), nullable=False)
     digest: Mapped[str] = mapped_column(String(128), nullable=False)
     model_uri: Mapped[str] = mapped_column(String(640), nullable=False)
@@ -133,7 +133,7 @@ class EncryptedCommitmentStatus(str, enum.Enum):
 
 
 class EncryptedMinerCommitment(Base):
-    """TimelockEncrypted commitment — ciphertext on chain before v5 reveal."""
+    """TimelockEncrypted commitment — ciphertext on chain before v6 reveal."""
 
     __tablename__ = "encrypted_miner_commitments"
     __table_args__ = (
@@ -198,7 +198,7 @@ class MinerSlotStatus(Base):
 
 
 class CommitmentHistory(Base):
-    """Historical v5 commitment reveals per hotkey."""
+    """Historical v6 commitment reveals per hotkey."""
 
     __tablename__ = "commitment_history"
     __table_args__ = (

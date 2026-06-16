@@ -15,7 +15,7 @@ export default function HeaderBar() {
           </div>
           <div className="min-w-0">
             <h1 className="text-[13px] font-semibold text-zinc-100 tracking-tight">MinerWatch</h1>
-            <p className="text-[10px] text-zinc-500 truncate">SN{subnet} · v5/v6 commitments</p>
+            <p className="text-[10px] text-zinc-500 truncate">SN{subnet} · v6 commitments</p>
           </div>
         </div>
         <div className="flex items-center gap-3 text-[10px] text-zinc-500 shrink-0">

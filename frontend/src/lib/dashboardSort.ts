@@ -1,6 +1,6 @@
 import type { RegistryMiner } from "@/lib/api";
 
-/** Sort keys for v5/v6 commits table and miner registry. */
+/** Sort keys for v6 commits table and miner registry. */
 export type DashboardSortKey =
   | "uid_asc"
   | "uid_desc"
@@ -95,14 +95,14 @@ export function sortRegistry(miners: RegistryMiner[], sort: DashboardSortKey): R
     case "committed_first":
       return copy.sort(
         (a, b) =>
-          Number(b.has_v5) - Number(a.has_v5) ||
+          Number(b.has_v6) - Number(a.has_v6) ||
           numKey(b.commit_block, false) - numKey(a.commit_block, false) ||
           a.uid - b.uid
       );
     case "uncommitted_first":
       return copy.sort(
         (a, b) =>
-          Number(a.has_v5) - Number(b.has_v5) ||
+          Number(a.has_v6) - Number(b.has_v6) ||
           numKey(a.commit_block, true) - numKey(b.commit_block, true) ||
           a.uid - b.uid
       );

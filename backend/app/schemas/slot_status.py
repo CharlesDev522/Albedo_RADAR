@@ -24,8 +24,6 @@ class SlotStatusSummary(BaseModel):
     subnet: int
     total_slots: int
     v6: int = 0
-    v5: int = 0
-    v4: int = 0
     json: int = 0
     timelock_encrypted: int = 0
     binary: int = 0
@@ -33,7 +31,6 @@ class SlotStatusSummary(BaseModel):
     unknown: int = 0
     none: int = 0
     committed: int = 0
-    non_v5: int = 0
     last_scan_at: datetime | None = None
 
 

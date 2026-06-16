@@ -15,22 +15,18 @@ type FilterKey =
   | "all"
   | "committed"
   | "v6"
-  | "v5"
-  | "non_v5"
   | "timelock_encrypted"
-  | "v4"
   | "json"
+  | "other"
   | "none";
 
 const FILTERS: { key: FilterKey; label: string; color: string; hint?: string }[] = [
   { key: "all", label: "all 256", color: "text-zinc-300 border-zinc-600" },
   { key: "committed", label: "has commit", color: "text-zinc-200 border-zinc-500 bg-zinc-800/40", hint: "any on-chain commit" },
   { key: "v6", label: "v6", color: "text-lime-400 border-lime-500/40 bg-lime-500/10" },
-  { key: "v5", label: "v5", color: "text-emerald-400 border-emerald-500/40 bg-emerald-500/10" },
-  { key: "non_v5", label: "non-v5/v6", color: "text-sky-300 border-sky-500/40 bg-sky-500/10", hint: "v4 / json / encrypted" },
   { key: "timelock_encrypted", label: "encrypted", color: "text-violet-300 border-violet-500/40 bg-violet-500/10", hint: "TimelockEncrypted" },
-  { key: "v4", label: "v4 legacy", color: "text-sky-300 border-sky-500/40 bg-sky-500/10" },
   { key: "json", label: "json", color: "text-amber-300 border-amber-500/40 bg-amber-500/10" },
+  { key: "other", label: "other", color: "text-orange-300 border-orange-500/40 bg-orange-500/10" },
   { key: "none", label: "no commit", color: "text-zinc-500 border-zinc-700 bg-zinc-800/30" },
 ];
 
@@ -40,10 +36,8 @@ function byUid(a: SlotStatusEntry, b: SlotStatusEntry) {
 
 const TYPE_STYLES: Record<string, string> = {
   v6: "text-lime-400 border-lime-500/30 bg-lime-500/10",
-  v5: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10",
   timelock_encrypted: "text-violet-300 border-violet-500/30 bg-violet-500/10",
   binary: "text-violet-300 border-violet-500/30 bg-violet-500/10",
-  v4: "text-sky-300 border-sky-500/30 bg-sky-500/10",
   json: "text-amber-300 border-amber-500/30 bg-amber-500/10",
   other: "text-orange-300 border-orange-500/30 bg-orange-500/10",
   unknown: "text-rose-300 border-rose-500/30 bg-rose-500/10",
@@ -52,10 +46,8 @@ const TYPE_STYLES: Record<string, string> = {
 
 const GRID_COLORS: Record<string, string> = {
   v6: "bg-lime-500",
-  v5: "bg-emerald-500",
   timelock_encrypted: "bg-violet-500",
   binary: "bg-violet-600",
-  v4: "bg-sky-500",
   json: "bg-amber-500",
   other: "bg-orange-500",
   unknown: "bg-rose-500",
@@ -65,10 +57,10 @@ const GRID_COLORS: Record<string, string> = {
 function filterSlots(slots: SlotStatusEntry[], filter: FilterKey): SlotStatusEntry[] {
   if (filter === "all") return slots;
   if (filter === "committed") return slots.filter((s) => s.commitment_type !== "none");
-  if (filter === "non_v5")
-    return slots.filter((s) => s.commitment_type !== "none" && s.commitment_type !== "v5" && s.commitment_type !== "v6");
   if (filter === "timelock_encrypted")
     return slots.filter((s) => s.commitment_type === "timelock_encrypted" || s.commitment_type === "binary");
+  if (filter === "other")
+    return slots.filter((s) => s.commitment_type === "other" || s.commitment_type === "unknown");
   return slots.filter((s) => s.commitment_type === filter);
 }
 
@@ -79,16 +71,13 @@ function summaryFromSlots(subnet: number, slots: SlotStatusEntry[]): SlotStatusS
     subnet,
     total_slots: slots.length,
     v6: counts.v6 ?? 0,
-    v5: counts.v5 ?? 0,
-    v4: counts.v4 ?? 0,
     json: counts.json ?? 0,
     timelock_encrypted: counts.timelock_encrypted ?? 0,
     binary: counts.binary ?? 0,
-    other: counts.other ?? 0,
+    other: (counts.other ?? 0) + (counts.unknown ?? 0),
     unknown: counts.unknown ?? 0,
     none: counts.none ?? 0,
     committed: slots.length - (counts.none ?? 0),
-    non_v5: slots.length - (counts.none ?? 0) - (counts.v5 ?? 0) - (counts.v6 ?? 0),
     last_scan_at: new Date().toISOString(),
   };
 }
@@ -128,11 +117,9 @@ export default function SlotStatusBoard() {
       all: s.total_slots,
       committed: s.committed,
       v6: s.v6 ?? 0,
-      v5: s.v5,
-      non_v5: s.non_v5,
       timelock_encrypted: s.timelock_encrypted + (s.binary ?? 0),
-      v4: s.v4,
       json: s.json,
+      other: s.other,
       none: s.none,
     };
     return String(map[key] ?? 0);
@@ -168,9 +155,8 @@ export default function SlotStatusBoard() {
         <div className="px-3 py-2 border-b border-zinc-800/80 text-[10px] text-zinc-500">
           <strong className="text-zinc-300">{summary.committed}</strong> slots have a commit (
           <span className="text-lime-400">{summary.v6 ?? 0} v6</span>,{" "}
-          <span className="text-emerald-400">{summary.v5} v5</span>,{" "}
-          <span className="text-sky-400">{summary.v4} v4</span>,{" "}
-          <span className="text-violet-400">{summary.timelock_encrypted + (summary.binary ?? 0)} enc</span>) ·{" "}
+          <span className="text-violet-400">{summary.timelock_encrypted + (summary.binary ?? 0)} enc</span>,{" "}
+          <span className="text-amber-400">{summary.json} json</span>) ·{" "}
           <strong className="text-zinc-400">{summary.none}</strong> empty · showing{" "}
           <strong className="text-zinc-300">{displaySlots.length}</strong>
           {filter !== "all" ? ` (${filter})` : ""}
@@ -276,12 +262,12 @@ export default function SlotStatusBoard() {
                     {s.coldkey ? shortAddr(s.coldkey, 5) : "—"}
                   </td>
                   <td className="text-[10px] text-zinc-500 max-w-[180px] truncate">
-                    {(s.commitment_type === "v5" || s.commitment_type === "v6") && s.detail ? (
+                    {s.commitment_type === "v6" && s.detail ? (
                       <a
                         href={hippiusModelUrl(s.detail)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className={`${s.commitment_type === "v6" ? "text-lime-400/80" : "text-emerald-400/80"} hover:underline`}
+                        className="text-lime-400/80 hover:underline"
                       >
                         {shortRepo(s.detail, 28)}
                       </a>

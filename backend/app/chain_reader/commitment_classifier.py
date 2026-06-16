@@ -1,4 +1,4 @@
-"""Classify any CommitmentOf entry — v6, v5, v4, json, TimelockEncrypted, other, none."""
+"""Classify any CommitmentOf entry — v6, json, TimelockEncrypted, other, none."""
 
 from __future__ import annotations
 
@@ -18,8 +18,6 @@ from app.chain_reader.commitment_decoder import (
 class CommitmentType(str, Enum):
     NONE = "none"
     V6 = "v6"
-    V5 = "v5"
-    V4 = "v4"
     JSON = "json"
     TIMELOCK_ENCRYPTED = "timelock_encrypted"
     BINARY = "binary"
@@ -60,28 +58,6 @@ def _classify_plaintext(
         repo = _extract_repo(decoded)
         return ClassifiedCommitment(
             commitment_type=CommitmentType.V6,
-            commit_block=commit_block,
-            deposit=deposit,
-            reveal_string=decoded,
-            detail=repo,
-            payload_hash=_payload_hash(decoded),
-        )
-
-    if decoded.startswith("v5|"):
-        repo = _extract_repo(decoded)
-        return ClassifiedCommitment(
-            commitment_type=CommitmentType.V5,
-            commit_block=commit_block,
-            deposit=deposit,
-            reveal_string=decoded,
-            detail=repo,
-            payload_hash=_payload_hash(decoded),
-        )
-
-    if decoded.startswith("v4|"):
-        repo = _extract_repo(decoded)
-        return ClassifiedCommitment(
-            commitment_type=CommitmentType.V4,
             commit_block=commit_block,
             deposit=deposit,
             reveal_string=decoded,
@@ -182,8 +158,6 @@ def commitment_type_label(ct: CommitmentType) -> str:
     return {
         CommitmentType.NONE: "no commit",
         CommitmentType.V6: "v6",
-        CommitmentType.V5: "v5",
-        CommitmentType.V4: "v4",
         CommitmentType.JSON: "json",
         CommitmentType.TIMELOCK_ENCRYPTED: "encrypted",
         CommitmentType.BINARY: "binary",

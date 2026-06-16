@@ -1,4 +1,4 @@
-"""Pydantic schemas for v5 commitment API."""
+"""Pydantic schemas for v6 commitment API."""
 
 from datetime import datetime
 from typing import Any
@@ -57,7 +57,7 @@ class MinerRegistryEntry(BaseModel):
     hotkey: str
     coldkey: str
     registered_at_block: int | None
-    has_v5: bool
+    has_v6: bool
     version: str | None = None
     commit_block: int | None = None
     repo: str | None = None
@@ -71,7 +71,6 @@ class MinerRegistryResponse(BaseModel):
     miners: list[MinerRegistryEntry]
     total: int
     v6_count: int = 0
-    v5_count: int
     uncommitted_count: int
 
 

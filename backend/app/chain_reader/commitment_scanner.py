@@ -1,11 +1,11 @@
-"""Bittensor chain reading — discover v5/v6 model commits on a subnet.
+"""Bittensor chain reading — discover v6 model commits on a subnet.
 
 Scans two on-chain sources:
   - ``CommitmentOf`` — current active commitment per hotkey (TimelockEncrypted parsed
     from raw storage first; only plaintext is returned for model-commit merge)
   - ``RevealedCommitments`` — historical reveal log (timelock ciphertext absent until reveal)
 
-Model commitments: ``v5|<repo>|<sha256:digest>`` or ``v6|<repo>|<sha256:digest>``
+Model commitments: ``v6|<repo>|<sha256:digest>``
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 _BLOCK_HASH_CACHE: dict[int, str] = {}
 
-MODEL_COMMIT_VERSIONS = frozenset({"v5", "v6"})
-_MODEL_COMMIT_RE = re.compile(r"^v[56]\|")
+MODEL_COMMIT_VERSIONS = frozenset({"v6"})
+_MODEL_COMMIT_RE = re.compile(r"^v6\|")
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class Commit:
 
 
 def parse_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
-    """Parse a v5 or v6 reveal into a payload dict, or None if not well-formed."""
+    """Parse a v6 reveal into a payload dict, or None if not well-formed."""
     if not data or not _MODEL_COMMIT_RE.match(data):
         return None
     parts = data.split("|")
@@ -61,14 +61,6 @@ def parse_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
         "digest": digest,
         "author_hotkey": chain_hotkey,
     }
-
-
-def parse_v5(data: str, chain_hotkey: str) -> dict[str, Any] | None:
-    """Parse v5 only — prefer :func:`parse_model_commit` for v5 and v6."""
-    parsed = parse_model_commit(data, chain_hotkey)
-    if parsed is None or parsed["version"] != "v5":
-        return None
-    return parsed
 
 
 def parse_v6(data: str, chain_hotkey: str) -> dict[str, Any] | None:
@@ -135,7 +127,7 @@ async def _iter_active_commitments(subtensor: Any, netuid: int) -> dict[str, str
 def _latest_model_commits_per_hotkey(
     entries: list[tuple[str, int, str]],
 ) -> dict[str, tuple[int, str]]:
-    """Return the highest-block v5/v6 reveal per hotkey from revealed history."""
+    """Return the highest-block v6 reveal per hotkey from revealed history."""
     latest: dict[str, tuple[int, str]] = {}
     for hotkey, block, data in entries:
         if parse_model_commit(data, hotkey) is None:
@@ -151,7 +143,7 @@ def _merge_model_commit_sources(
     revealed: dict[str, tuple[int, str]],
     current_block: int,
 ) -> dict[str, tuple[int, str, str]]:
-    """Merge active CommitmentOf and RevealedCommitments into latest model commit per hotkey."""
+    """Merge active CommitmentOf and RevealedCommitments into latest v6 commit per hotkey."""
     merged: dict[str, tuple[int, str, str]] = {}
 
     for hotkey, text in active.items():
@@ -206,8 +198,8 @@ async def _neuron_index(subtensor: Any, netuid: int) -> dict[str, dict[str, Any]
         return {}
 
 
-async def scan_v5_commitments(subtensor: Any, netuid: int) -> list[Commit]:
-    """Read active + revealed commitments and return latest v5/v6 Commit per hotkey."""
+async def scan_v6_commitments(subtensor: Any, netuid: int) -> list[Commit]:
+    """Read active + revealed commitments and return latest v6 Commit per hotkey."""
     current_block = await subtensor.get_current_block()
     active = await _iter_active_commitments(subtensor, netuid)
     revealed_entries = await _iter_revealed(subtensor, netuid)
@@ -229,9 +221,7 @@ async def scan_v5_commitments(subtensor: Any, netuid: int) -> list[Commit]:
         reg_block = neuron["registered_at_block"] if neuron else None
 
         if uid is None:
-            logger.warning(
-                "%s commit for unregistered/unknown hotkey=%s", parsed["version"], hotkey
-            )
+            logger.warning("v6 commit for unregistered/unknown hotkey=%s", hotkey)
 
         commits.append(
             Commit(
@@ -250,22 +240,19 @@ async def scan_v5_commitments(subtensor: Any, netuid: int) -> list[Commit]:
             )
         )
 
-    n_v5 = sum(1 for c in commits if c.commit_payload.get("version") == "v5")
-    n_v6 = sum(1 for c in commits if c.commit_payload.get("version") == "v6")
     logger.info(
-        "scan netuid=%d: active_model=%d revealed_model=%d merged=%d commits=%d (v5=%d v6=%d)",
+        "scan netuid=%d: active_model=%d revealed_model=%d merged=%d commits=%d (v6=%d)",
         netuid,
         n_active_model,
         len(revealed_model),
         len(merged),
         len(commits),
-        n_v5,
-        n_v6,
+        len(commits),
     )
     return commits
 
 
-async def scan_v5_active_fast(
+async def scan_v6_active_fast(
     subtensor: Any,
     netuid: int,
     neurons: dict[str, dict[str, Any]],
@@ -301,3 +288,8 @@ async def scan_v5_active_fast(
             )
         )
     return commits
+
+
+# Backwards-compatible aliases (deprecated)
+scan_v5_commitments = scan_v6_commitments
+scan_v5_active_fast = scan_v6_active_fast

@@ -70,7 +70,7 @@ class EncryptedCommitmentStateBuilder:
                 existing.status = EncryptedCommitmentStatus.PENDING
                 stats["unchanged"] += 1
 
-        # No longer TimelockEncrypted on chain — likely revealed to plaintext v5
+        # No longer TimelockEncrypted on chain — likely revealed to plaintext v6
         active_result = await session.execute(
             select(EncryptedMinerCommitment).where(
                 EncryptedMinerCommitment.subnet == netuid,

@@ -1,4 +1,4 @@
-"""Continuous v5 commitment poller — fast active scan + periodic full sync."""
+"""Continuous v6 commitment poller — fast active scan + periodic full sync."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from bittensor.core.async_subtensor import AsyncSubtensor
 
 from app.chain_reader.commitment_scanner import (
     _neuron_index,
-    scan_v5_active_fast,
-    scan_v5_commitments,
+    scan_v6_active_fast,
+    scan_v6_commitments,
 )
 from app.chain_reader.encrypted_commitment_scanner import scan_encrypted_commitments
 from app.chain_reader.slot_commitment_scanner import scan_slot_statuses
@@ -46,7 +46,7 @@ class CommitmentPoller:
         self._last_full_scan = 0.0
         self._last_metagraph_sync = 0.0
         self._poll_lock = asyncio.Lock()
-        self._seen_v5_hotkeys: set[str] = set()
+        self._seen_v6_hotkeys: set[str] = set()
 
     async def setup(self) -> None:
         await init_db(engine)
@@ -73,7 +73,7 @@ class CommitmentPoller:
         await self._slot_poll(netuid)
 
     async def _slot_poll(self, netuid: int) -> dict[str, int]:
-        """Full per-UID slot map — v5, v4, json, encrypted, none."""
+        """Full per-UID slot map — v6, json, encrypted, none."""
         assert self._subtensor is not None
         slots = await scan_slot_statuses(self._subtensor, netuid, self._neurons)
         async with AsyncSessionLocal() as session:
@@ -123,16 +123,16 @@ class CommitmentPoller:
             await session.commit()
 
     async def _fast_poll(self, netuid: int) -> dict[str, int]:
-        """~1-2s: scan CommitmentOf only, detect new v5 commits instantly."""
+        """~1-2s: scan CommitmentOf only, detect new v6 commits instantly."""
         assert self._subtensor is not None
         t0 = time.monotonic()
-        commits = await scan_v5_active_fast(self._subtensor, netuid, self._neurons)
+        commits = await scan_v6_active_fast(self._subtensor, netuid, self._neurons)
 
-        new_hotkeys = {c.hotkey for c in commits} - self._seen_v5_hotkeys
+        new_hotkeys = {c.hotkey for c in commits} - self._seen_v6_hotkeys
         needs_neuron_refresh = any(c.uid is None for c in commits) or bool(new_hotkeys)
         if needs_neuron_refresh:
             self._neurons = await _neuron_index(self._subtensor, netuid)
-            commits = await scan_v5_active_fast(self._subtensor, netuid, self._neurons)
+            commits = await scan_v6_active_fast(self._subtensor, netuid, self._neurons)
 
         async with AsyncSessionLocal() as session:
             stats = await self.state_builder.process_commits(session, commits, snapshot=None)
@@ -140,24 +140,24 @@ class CommitmentPoller:
                 await session.execute(
                     select(func.count())
                     .select_from(MinerCommitment)
-                    .where(MinerCommitment.subnet == netuid)
+                    .where(MinerCommitment.subnet == netuid, MinerCommitment.version == "v6")
                 )
             ).scalar() or 0
             await session.commit()
 
-        self._seen_v5_hotkeys = {c.hotkey for c in commits}
+        self._seen_v6_hotkeys = {c.hotkey for c in commits}
         await self._sync_miners_from_cache(netuid, commits)
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         if stats["new"] > 0:
             logger.warning(
-                "NEW v5 commit(s) netuid=%d count=%d uids=%s",
+                "NEW v6 commit(s) netuid=%d count=%d uids=%s",
                 netuid,
                 stats["new"],
                 sorted({c.uid for c in commits if c.uid is not None}),
             )
         logger.info(
-            "FAST netuid=%d v5=%d new=%d updated=%d unchanged=%d db=%d %dms uids=%s",
+            "FAST netuid=%d v6=%d new=%d updated=%d unchanged=%d db=%d %dms uids=%s",
             netuid,
             len(commits),
             stats["new"],
@@ -217,7 +217,7 @@ class CommitmentPoller:
         self._neurons = await _neuron_index(self._subtensor, netuid)
         self._last_metagraph_sync = time.monotonic()
 
-        commits = await scan_v5_commitments(self._subtensor, netuid)
+        commits = await scan_v6_commitments(self._subtensor, netuid)
         snapshot = await self.subtensor_client.get_subnet_snapshot(netuid)
 
         async with AsyncSessionLocal() as session:
@@ -226,7 +226,7 @@ class CommitmentPoller:
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         logger.info(
-            "FULL netuid=%d v5=%d new=%d updated=%d unchanged=%d %dms uids=%s",
+            "FULL netuid=%d v6=%d new=%d updated=%d unchanged=%d %dms uids=%s",
             netuid,
             len(commits),
             stats["new"],

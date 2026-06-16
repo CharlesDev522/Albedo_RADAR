@@ -1,4 +1,4 @@
-"""Process v5 commitment scans into persistent state."""
+"""Process v6 commitment scans into persistent state."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class CommitmentStateBuilder:
-    """Upserts latest v5 commitments and records history on changes."""
+    """Upserts latest v6 commitments and records history on changes."""
 
     def __init__(self, publisher: EventPublisher | None = None) -> None:
         self.publisher = publisher
@@ -113,7 +113,7 @@ class CommitmentStateBuilder:
                     existing.commit_block = commit.block_number
                 stats["unchanged"] += 1
 
-        # Mark miners on subnet without v5 commitment
+        # Mark miners on subnet without v6 commitment
         if snapshot:
             for neuron in snapshot.neurons:
                 if neuron.hotkey not in commit_by_hotkey:
@@ -190,7 +190,7 @@ class CommitmentStateBuilder:
             commit_block=commit.block_number,
             block_hash=commit.block_hash,
             reveal_string=commit.reveal_string,
-            version=commit.commit_payload.get("version", "v5"),
+            version=commit.commit_payload.get("version", "v6"),
             repo=commit.commit_payload["repo"],
             digest=commit.commit_payload["digest"],
             model_uri=commit.model_uri,

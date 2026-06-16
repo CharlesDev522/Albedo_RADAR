@@ -1,4 +1,4 @@
-"""V5 commitment tracking API routes."""
+"""V6 commitment tracking API routes."""
 
 from datetime import datetime, timezone
 
@@ -21,6 +21,8 @@ from app.schemas.commitment import (
 router = APIRouter(prefix="/commitments", tags=["commitments"])
 settings = get_settings()
 
+_V6_ONLY = MinerCommitment.version == "v6"
+
 
 @router.get("", response_model=CommitmentListResponse)
 async def list_commitments(
@@ -30,7 +32,7 @@ async def list_commitments(
     sort: str = Query(default="commit_block", pattern="^(commit_block|uid|last_updated)$"),
     db: AsyncSession = Depends(get_db),
 ) -> CommitmentListResponse:
-    """List latest v5 commitments on a subnet, newest commits first."""
+    """List latest v6 commitments on a subnet, newest commits first."""
     order_col = {
         "commit_block": MinerCommitment.commit_block.desc(),
         "uid": MinerCommitment.uid.asc().nullslast(),
@@ -39,20 +41,21 @@ async def list_commitments(
 
     total = (
         await db.execute(
-            select(func.count()).select_from(MinerCommitment).where(MinerCommitment.subnet == subnet)
+            select(func.count())
+            .select_from(MinerCommitment)
+            .where(MinerCommitment.subnet == subnet, _V6_ONLY)
         )
     ).scalar() or 0
 
     result = await db.execute(
         select(MinerCommitment)
-        .where(MinerCommitment.subnet == subnet)
+        .where(MinerCommitment.subnet == subnet, _V6_ONLY)
         .order_by(order_col)
         .limit(limit)
         .offset(offset)
     )
     commitments = list(result.scalars().all())
 
-    # UIDs registered but without a v5 commitment
     miners_result = await db.execute(
         select(Miner.uid).where(
             Miner.subnet == subnet,
@@ -90,19 +93,25 @@ async def commitment_stats(
 
     committed = (
         await db.execute(
-            select(func.count()).select_from(MinerCommitment).where(MinerCommitment.subnet == subnet)
+            select(func.count())
+            .select_from(MinerCommitment)
+            .where(MinerCommitment.subnet == subnet, _V6_ONLY)
         )
     ).scalar() or 0
 
     latest_block = (
         await db.execute(
-            select(func.max(MinerCommitment.commit_block)).where(MinerCommitment.subnet == subnet)
+            select(func.max(MinerCommitment.commit_block)).where(
+                MinerCommitment.subnet == subnet, _V6_ONLY
+            )
         )
     ).scalar()
 
     last_scan = (
         await db.execute(
-            select(func.max(MinerCommitment.last_updated)).where(MinerCommitment.subnet == subnet)
+            select(func.max(MinerCommitment.last_updated)).where(
+                MinerCommitment.subnet == subnet, _V6_ONLY
+            )
         )
     ).scalar()
 
@@ -124,7 +133,7 @@ async def miner_registry(
     subnet: int = Query(default=97, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> MinerRegistryResponse:
-    """Full miner list with v5 commitment status — committed miners first."""
+    """Full miner list with v6 commitment status — committed miners first."""
     miners_result = await db.execute(
         select(Miner).where(
             Miner.subnet == subnet,
@@ -135,32 +144,28 @@ async def miner_registry(
     miners = list(miners_result.scalars().all())
 
     commits_result = await db.execute(
-        select(MinerCommitment).where(MinerCommitment.subnet == subnet)
+        select(MinerCommitment).where(MinerCommitment.subnet == subnet, _V6_ONLY)
     )
     all_commits = list(commits_result.scalars().all())
     commits_by_uid = {c.uid: c for c in all_commits if c.uid is not None}
 
     entries: list[MinerRegistryEntry] = []
-    v5_count = 0
     v6_count = 0
     seen_uids: set[int] = set()
 
     for m in miners:
         seen_uids.add(m.uid)
         c = commits_by_uid.get(m.uid)
-        has_v5 = c is not None
-        if has_v5:
-            if c and c.version == "v6":
-                v6_count += 1
-            else:
-                v5_count += 1
+        has_v6 = c is not None
+        if has_v6:
+            v6_count += 1
         entries.append(
             MinerRegistryEntry(
                 uid=m.uid,
                 hotkey=m.hotkey,
                 coldkey=m.coldkey,
                 registered_at_block=m.registered_at_block,
-                has_v5=has_v5,
+                has_v6=has_v6,
                 version=c.version if c else None,
                 commit_block=c.commit_block if c else None,
                 repo=c.repo if c else None,
@@ -170,20 +175,16 @@ async def miner_registry(
             )
         )
 
-    # Include v5 commits even if miner row missing (e.g. collector partial sync)
     for c in all_commits:
         if c.uid is not None and c.uid not in seen_uids:
-            if c.version == "v6":
-                v6_count += 1
-            else:
-                v5_count += 1
+            v6_count += 1
             entries.append(
                 MinerRegistryEntry(
                     uid=c.uid,
                     hotkey=c.hotkey,
                     coldkey=c.coldkey,
                     registered_at_block=c.registered_at_block,
-                    has_v5=True,
+                    has_v6=True,
                     version=c.version,
                     commit_block=c.commit_block,
                     repo=c.repo,
@@ -193,15 +194,14 @@ async def miner_registry(
                 )
             )
 
-    entries.sort(key=lambda e: (not e.has_v5, -(e.commit_block or 0), e.uid))
+    entries.sort(key=lambda e: (not e.has_v6, -(e.commit_block or 0), e.uid))
 
     return MinerRegistryResponse(
         subnet=subnet,
         miners=entries,
         total=len(entries),
         v6_count=v6_count,
-        v5_count=v5_count,
-        uncommitted_count=sum(1 for e in entries if not e.has_v5),
+        uncommitted_count=sum(1 for e in entries if not e.has_v6),
     )
 
 
@@ -212,11 +212,15 @@ async def get_commitment_by_uid(
     db: AsyncSession = Depends(get_db),
 ) -> CommitmentResponse:
     result = await db.execute(
-        select(MinerCommitment).where(MinerCommitment.subnet == subnet, MinerCommitment.uid == uid)
+        select(MinerCommitment).where(
+            MinerCommitment.subnet == subnet,
+            MinerCommitment.uid == uid,
+            _V6_ONLY,
+        )
     )
     row = result.scalar_one_or_none()
     if not row:
-        raise HTTPException(status_code=404, detail="No v5 commitment for this UID")
+        raise HTTPException(status_code=404, detail="No v6 commitment for this UID")
     return CommitmentResponse.model_validate(row)
 
 
@@ -227,11 +231,15 @@ async def get_commitment_by_hotkey(
     db: AsyncSession = Depends(get_db),
 ) -> CommitmentResponse:
     result = await db.execute(
-        select(MinerCommitment).where(MinerCommitment.subnet == subnet, MinerCommitment.hotkey == hotkey)
+        select(MinerCommitment).where(
+            MinerCommitment.subnet == subnet,
+            MinerCommitment.hotkey == hotkey,
+            _V6_ONLY,
+        )
     )
     row = result.scalar_one_or_none()
     if not row:
-        raise HTTPException(status_code=404, detail="No v5 commitment for this hotkey")
+        raise HTTPException(status_code=404, detail="No v6 commitment for this hotkey")
     return CommitmentResponse.model_validate(row)
 
 
@@ -254,14 +262,16 @@ async def sync_status(
     subnet: int = Query(default=97, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Compare on-chain v5 commits vs database — shows if collector is behind."""
+    """Compare on-chain v6 commits vs database — shows if collector is behind."""
     from bittensor.core.async_subtensor import AsyncSubtensor
 
-    from app.chain_reader.commitment_scanner import _neuron_index, scan_v5_active_fast
+    from app.chain_reader.commitment_scanner import _neuron_index, scan_v6_active_fast
 
     db_count = (
         await db.execute(
-            select(func.count()).select_from(MinerCommitment).where(MinerCommitment.subnet == subnet)
+            select(func.count())
+            .select_from(MinerCommitment)
+            .where(MinerCommitment.subnet == subnet, _V6_ONLY)
         )
     ).scalar() or 0
 
@@ -269,7 +279,11 @@ async def sync_status(
         (
             await db.execute(
                 select(MinerCommitment.uid)
-                .where(MinerCommitment.subnet == subnet, MinerCommitment.uid.isnot(None))
+                .where(
+                    MinerCommitment.subnet == subnet,
+                    MinerCommitment.uid.isnot(None),
+                    _V6_ONLY,
+                )
                 .order_by(MinerCommitment.uid.asc())
             )
         ).scalars().all()
@@ -277,48 +291,38 @@ async def sync_status(
 
     async with AsyncSubtensor(network=settings.bittensor_network) as st:
         neurons = await _neuron_index(st, subnet)
-        commits = await scan_v5_active_fast(st, subnet, neurons)
+        commits = await scan_v6_active_fast(st, subnet, neurons)
 
     onchain_uids = sorted({c.uid for c in commits if c.uid is not None})
     missing_in_db = sorted(set(onchain_uids) - set(db_uids))
-    onchain_v5 = sum(1 for c in commits if c.commit_payload.get("version") == "v5")
-    onchain_v6 = sum(1 for c in commits if c.commit_payload.get("version") == "v6")
 
     return {
         "subnet": subnet,
-        "onchain_v5_count": len(commits),
-        "onchain_model_count": len(commits),
-        "onchain_v5_only": onchain_v5,
-        "onchain_v6_only": onchain_v6,
-        "db_v5_count": db_count,
+        "onchain_v6_count": len(commits),
+        "db_v6_count": db_count,
         "in_sync": len(missing_in_db) == 0 and db_count >= len(commits),
         "onchain_uids": onchain_uids,
         "db_uids": db_uids,
         "missing_in_db": missing_in_db,
         "repos": [c.commit_payload.get("repo") for c in commits],
-        "versions": [c.commit_payload.get("version") for c in commits],
     }
 
 
 @router.get("/onchain")
-async def onchain_v5_count(subnet: int = Query(default=97, ge=0)) -> dict:
-    """Debug: v5/v6 model commits on chain right now."""
+async def onchain_v6_count(subnet: int = Query(default=97, ge=0)) -> dict:
+    """Debug: v6 model commits on chain right now."""
     from bittensor.core.async_subtensor import AsyncSubtensor
 
-    from app.chain_reader.commitment_scanner import _neuron_index, scan_v5_active_fast
+    from app.chain_reader.commitment_scanner import _neuron_index, scan_v6_active_fast
 
     async with AsyncSubtensor(network=settings.bittensor_network) as st:
         neurons = await _neuron_index(st, subnet)
-        commits = await scan_v5_active_fast(st, subnet, neurons)
+        commits = await scan_v6_active_fast(st, subnet, neurons)
 
     return {
         "subnet": subnet,
-        "onchain_v5_count": len(commits),
-        "onchain_model_count": len(commits),
-        "onchain_v5_only": sum(1 for c in commits if c.commit_payload.get("version") == "v5"),
-        "onchain_v6_only": sum(1 for c in commits if c.commit_payload.get("version") == "v6"),
+        "onchain_v6_count": len(commits),
         "uids": sorted({c.uid for c in commits if c.uid is not None}),
         "hotkeys": [c.hotkey for c in commits],
         "repos": [c.commit_payload.get("repo") for c in commits],
-        "versions": [c.commit_payload.get("version") for c in commits],
     }
