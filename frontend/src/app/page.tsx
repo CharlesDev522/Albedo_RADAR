@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import LiveDashboard from "@/components/LiveDashboard";
+import MinerGroupsPanel from "@/components/MinerGroupsPanel";
 import SlotStatusBoard from "@/components/SlotStatusBoard";
 import { DashboardSyncProvider } from "@/lib/DashboardSyncContext";
 import {
@@ -59,6 +60,9 @@ export default async function Page({
         </Suspense>
         <Suspense fallback={null}>
           <LiveDashboard />
+        </Suspense>
+        <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading clusters…</div>}>
+          <MinerGroupsPanel />
         </Suspense>
       </div>
     </DashboardSyncProvider>
