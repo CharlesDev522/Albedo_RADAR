@@ -45,44 +45,47 @@ class CommitmentPoller:
         self.encrypted_state_builder = EncryptedCommitmentStateBuilder()
         self.slot_status_builder = SlotStatusBuilder()
         self._running = False
-        self._neurons: dict[str, dict] = {}
-        self._last_full_scan = 0.0
-        self._last_slot_scan = 0.0
-        self._last_metagraph_sync = 0.0
-        self._last_incentive_sync = 0.0
+        self._neurons: dict[int, dict[str, dict]] = {}
+        self._last_full_scan: dict[int, float] = {}
+        self._last_slot_scan: dict[int, float] = {}
+        self._last_metagraph_sync: dict[int, float] = {}
+        self._last_incentive_sync: dict[int, float] = {}
         self._poll_lock = asyncio.Lock()
-        self._seen_v6_hotkeys: set[str] = set()
+        self._seen_hotkeys: dict[int, set[str]] = {}
 
     async def setup(self) -> None:
         await init_db(engine)
         await self.subtensor_client.connect()
         self._subtensor = self.subtensor_client._subtensor
         await self.publisher.connect()
-        netuid = self.settings.default_subnet
-        self._neurons = await _neuron_index(self._subtensor, netuid)
-        logger.info(
-            "Commitment poller ready — netuid=%d fast=%ds slot=%ds metagraph=%ds full=%ds neurons=%d",
-            netuid,
-            self.settings.poll_interval_seconds,
-            self.settings.slot_scan_interval_seconds,
-            self.settings.metagraph_sync_interval_seconds,
-            self.settings.full_scan_interval_seconds,
-            len(self._neurons),
-        )
-        try:
-            await self.poll_once(netuid)
-        except Exception:
-            logger.exception("Initial poll failed")
-        try:
-            await self._incentive_sync(netuid)
-            self._last_incentive_sync = time.monotonic()
-        except Exception:
-            logger.exception("Initial incentive sync failed")
+        for netuid in self.settings.dashboard_subnets:
+            assert self._subtensor is not None
+            self._neurons[netuid] = await _neuron_index(self._subtensor, netuid)
+            self._seen_hotkeys.setdefault(netuid, set())
+            logger.info(
+                "Commitment poller ready — netuid=%d fast=%ds slot=%ds metagraph=%ds full=%ds neurons=%d",
+                netuid,
+                self.settings.poll_interval_seconds,
+                self.settings.slot_scan_interval_seconds,
+                self.settings.metagraph_sync_interval_seconds,
+                self.settings.full_scan_interval_seconds,
+                len(self._neurons[netuid]),
+            )
+            try:
+                await self.poll_once(netuid)
+            except Exception:
+                logger.exception("Initial poll failed netuid=%d", netuid)
+            try:
+                await self._incentive_sync(netuid)
+                self._last_incentive_sync[netuid] = time.monotonic()
+            except Exception:
+                logger.exception("Initial incentive sync failed netuid=%d", netuid)
 
     async def _slot_poll(self, netuid: int, snapshot: ChainSnapshot) -> dict[str, int]:
         assert self._subtensor is not None
-        slots = scan_slots_from_snapshot(snapshot, self._neurons)
-        active_uids = {int(info["uid"]) for info in self._neurons.values()}
+        neurons = self._neurons.get(netuid, {})
+        slots = scan_slots_from_snapshot(snapshot, neurons)
+        active_uids = {int(info["uid"]) for info in neurons.values()}
         async with AsyncSessionLocal() as session:
             stats = await self.slot_status_builder.process_slots(session, slots, netuid)
             pruned = await self.slot_status_builder.prune_absent_uids(session, netuid, active_uids)
@@ -132,16 +135,19 @@ class CommitmentPoller:
 
     async def _fast_poll(self, netuid: int, snapshot: ChainSnapshot) -> dict[str, int]:
         assert self._subtensor is not None
+        neurons = self._neurons.setdefault(netuid, {})
+        seen = self._seen_hotkeys.setdefault(netuid, set())
         t0 = time.monotonic()
         commits = await scan_v6_active_fast(
-            self._subtensor, netuid, self._neurons, snapshot=snapshot
+            self._subtensor, netuid, neurons, snapshot=snapshot
         )
 
-        new_hotkeys = {c.hotkey for c in commits} - self._seen_v6_hotkeys
+        new_hotkeys = {c.hotkey for c in commits} - seen
         if any(c.uid is None for c in commits) or new_hotkeys:
-            self._neurons = await _neuron_index(self._subtensor, netuid)
+            self._neurons[netuid] = await _neuron_index(self._subtensor, netuid)
+            neurons = self._neurons[netuid]
             commits = await scan_v6_active_fast(
-                self._subtensor, netuid, self._neurons, snapshot=snapshot
+                self._subtensor, netuid, neurons, snapshot=snapshot
             )
 
         async with AsyncSessionLocal() as session:
@@ -150,13 +156,13 @@ class CommitmentPoller:
                 await session.execute(
                     select(MinerCommitment.hotkey).where(
                         MinerCommitment.subnet == netuid,
-                        MinerCommitment.version.in_(("v5", "v6")),
+                        MinerCommitment.version.in_(("v5", "v6", "quasar")),
                     )
                 )
             ).scalars().all()
             await session.commit()
 
-        self._seen_v6_hotkeys = {c.hotkey for c in commits}
+        self._seen_hotkeys[netuid] = {c.hotkey for c in commits}
         await self._sync_miners_from_cache(netuid, commits)
 
         db_hotkeys = set(db_rows)
@@ -185,12 +191,14 @@ class CommitmentPoller:
         return stats
 
     async def _encrypted_poll(self, netuid: int, snapshot: ChainSnapshot) -> dict[str, int]:
-        commits = scan_encrypted_from_map(netuid, snapshot.commitment_of, self._neurons)
+        neurons = self._neurons.setdefault(netuid, {})
+        commits = scan_encrypted_from_map(netuid, snapshot.commitment_of, neurons)
 
         if any(c.uid is None for c in commits):
             assert self._subtensor is not None
-            self._neurons = await _neuron_index(self._subtensor, netuid)
-            commits = scan_encrypted_from_map(netuid, snapshot.commitment_of, self._neurons)
+            self._neurons[netuid] = await _neuron_index(self._subtensor, netuid)
+            neurons = self._neurons[netuid]
+            commits = scan_encrypted_from_map(netuid, snapshot.commitment_of, neurons)
 
         async with AsyncSessionLocal() as session:
             stats = await self.encrypted_state_builder.process_commits(session, commits, netuid)
@@ -218,12 +226,13 @@ class CommitmentPoller:
     async def _full_poll(self, netuid: int, snapshot: ChainSnapshot) -> dict[str, int]:
         assert self._subtensor is not None
         t0 = time.monotonic()
-        self._neurons = await _neuron_index(self._subtensor, netuid)
-        self._last_metagraph_sync = time.monotonic()
+        self._neurons[netuid] = await _neuron_index(self._subtensor, netuid)
+        neurons = self._neurons[netuid]
+        self._last_metagraph_sync[netuid] = time.monotonic()
 
         commits = await scan_v6_from_snapshot(
             snapshot,
-            self._neurons,
+            neurons,
             self._subtensor,
             include_revealed=True,
             fetch_block_hashes=True,
@@ -242,10 +251,10 @@ class CommitmentPoller:
             )
             await session.commit()
 
-        self._seen_v6_hotkeys = present_hotkeys
+        self._seen_hotkeys[netuid] = present_hotkeys
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         logger.info(
-            "FULL netuid=%d v6=%d new=%d updated=%d unchanged=%d pruned=%d %dms uids=%s",
+            "FULL netuid=%d commits=%d new=%d updated=%d unchanged=%d pruned=%d %dms uids=%s",
             netuid,
             len(commits),
             stats["new"],
@@ -255,7 +264,7 @@ class CommitmentPoller:
             elapsed_ms,
             sorted({c.uid for c in commits if c.uid is not None}),
         )
-        self._last_full_scan = time.monotonic()
+        self._last_full_scan[netuid] = time.monotonic()
         return stats
 
     async def _incentive_sync(self, netuid: int) -> None:
@@ -273,19 +282,19 @@ class CommitmentPoller:
         async with self._poll_lock:
             now = time.monotonic()
 
-            if now - self._last_metagraph_sync >= self.settings.metagraph_sync_interval_seconds:
-                self._neurons = await _neuron_index(self._subtensor, netuid)
-                self._last_metagraph_sync = now
+            if now - self._last_metagraph_sync.get(netuid, 0.0) >= self.settings.metagraph_sync_interval_seconds:
+                self._neurons[netuid] = await _neuron_index(self._subtensor, netuid)
+                self._last_metagraph_sync[netuid] = now
 
-            if now - self._last_incentive_sync >= self.settings.metagraph_sync_interval_seconds:
+            if now - self._last_incentive_sync.get(netuid, 0.0) >= self.settings.metagraph_sync_interval_seconds:
                 try:
                     await self._incentive_sync(netuid)
                 except Exception:
                     logger.exception("Incentive sync failed netuid=%d", netuid)
-                self._last_incentive_sync = now
+                self._last_incentive_sync[netuid] = now
 
-            run_full = now - self._last_full_scan >= self.settings.full_scan_interval_seconds
-            run_slot = now - self._last_slot_scan >= self.settings.slot_scan_interval_seconds
+            run_full = now - self._last_full_scan.get(netuid, 0.0) >= self.settings.full_scan_interval_seconds
+            run_slot = now - self._last_slot_scan.get(netuid, 0.0) >= self.settings.slot_scan_interval_seconds
 
             snapshot = await load_chain_snapshot(
                 self._subtensor, netuid, include_revealed=True
@@ -303,7 +312,7 @@ class CommitmentPoller:
 
             if run_slot:
                 await self._slot_poll(netuid, snapshot)
-                self._last_slot_scan = now
+                self._last_slot_scan[netuid] = now
 
             return stats
 
@@ -312,10 +321,11 @@ class CommitmentPoller:
         await self.setup()
 
         while self._running:
-            try:
-                await self.poll_once()
-            except Exception:
-                logger.exception("Commitment poll failed")
+            for netuid in self.settings.dashboard_subnets:
+                try:
+                    await self.poll_once(netuid)
+                except Exception:
+                    logger.exception("Commitment poll failed netuid=%d", netuid)
             await asyncio.sleep(self.settings.poll_interval_seconds)
 
     def stop(self) -> None:

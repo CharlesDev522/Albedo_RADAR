@@ -5,7 +5,7 @@ import {
   shortAddr,
   shortHash,
   shortRepo,
-  hippiusModelUrl,
+  modelCommitUrl,
 } from "@/lib/api";
 import {
   sortCommits,
@@ -31,19 +31,18 @@ export default function LiveDashboard() {
     liveStatus,
     flashUids,
     feed,
-    albedoStatus,
   } = useDashboardSync();
   const [commitSort, setCommitSort] = useState<DashboardSortKey>("commit_desc");
   const [registrySort, setRegistrySort] = useState<DashboardSortKey>("committed_first");
+
+  const commitLabel = profile.features.commitLabel;
+  const modelHost = profile.features.modelHost;
 
   const sortedCommits = useMemo(() => sortCommits(commits, commitSort), [commits, commitSort]);
   const sortedRegistry = useMemo(
     () => sortRegistry(registry?.miners ?? [], registrySort),
     [registry?.miners, registrySort]
   );
-
-  const kingUid = albedoStatus?.current_king?.uid ?? null;
-  const kingHotkey = albedoStatus?.current_king?.hotkey ?? null;
 
   const fmtIncentive = (n: number | null | undefined) => {
     if (n == null || n <= 0) return "—";
@@ -52,7 +51,7 @@ export default function LiveDashboard() {
   };
 
   const waiting = registry?.miners.filter((m) => !m.has_v6) ?? [];
-  const v6Count = registry?.v6_count ?? commits.length;
+  const committedCount = registry?.v6_count ?? commits.length;
 
   return (
     <div className="space-y-3">
@@ -64,7 +63,7 @@ export default function LiveDashboard() {
       )}
       {!apiError && syncStatus && syncStatus.in_sync === false && (
         <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[11px] text-amber-300">
-          Chain has <strong>{syncStatus.onchain_v6_count ?? "—"}</strong> v6 commits (uids{" "}
+          Chain has <strong>{syncStatus.onchain_v6_count ?? "—"}</strong> on-chain commits (uids{" "}
           {syncStatus.onchain_uids.join(", ") || "—"}) but DB has{" "}
           <strong>{syncStatus.db_v6_count}</strong>
           {syncStatus.missing_in_db.length > 0 && (
@@ -79,7 +78,7 @@ export default function LiveDashboard() {
       )}
       {!apiError && commits.length === 0 && stats?.committed_miners === 0 && (
         <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[11px] text-amber-300">
-          No v6 commits in database yet — check{" "}
+          No {commitLabel} commits in database yet — check{" "}
           <code className="mono text-amber-100">docker compose logs collector</code> and{" "}
           <code className="mono text-amber-100">GET /api/v1/commitments/onchain</code>.
         </div>
@@ -114,8 +113,8 @@ export default function LiveDashboard() {
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         <Kpi label="miners" value={String(stats?.total_neurons ?? "—")} />
-        <Kpi label="v6 committed" value={String(stats?.committed_miners ?? "—")} accent />
-        <Kpi label="v6 active" value={String(v6Count)} accent />
+        <Kpi label={`${commitLabel} committed`} value={String(stats?.committed_miners ?? "—")} accent />
+        <Kpi label={`${commitLabel} active`} value={String(committedCount)} accent />
         <Kpi label="no commit" value={String(stats?.uncommitted_miners ?? "—")} warn={(stats?.uncommitted_miners ?? 0) > 0} />
         <Kpi label="coverage" value={stats ? `${stats.coverage_pct}%` : "—"} />
         <Kpi label="latest blk" value={stats?.latest_commit_block?.toLocaleString() ?? "—"} mono />
@@ -142,7 +141,7 @@ export default function LiveDashboard() {
                   <p className="text-[10px] text-zinc-500 truncate mt-0.5">
                     {e.repo ? (
                       <a
-                        href={hippiusModelUrl(e.repo)}
+                        href={modelCommitUrl(e.repo, "", modelHost)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="hover:text-sky-400 hover:underline"
@@ -162,7 +161,7 @@ export default function LiveDashboard() {
         <section className="panel xl:col-span-9 order-1 xl:order-2">
           <div className="panel-head">
             <div>
-              <h2 className="text-[12px] font-semibold text-zinc-100">v6 commits · SN{subnet}</h2>
+              <h2 className="text-[12px] font-semibold text-zinc-100">{commitLabel} commits · SN{subnet}</h2>
               <p className="text-[10px] text-zinc-500">new rows flash green</p>
             </div>
             <span className="pill-v6">{commits.length} active</span>
@@ -184,7 +183,7 @@ export default function LiveDashboard() {
                 {sortedCommits.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="text-center text-zinc-500 py-8">
-                      no v6 commits yet
+                      no {commitLabel} commits yet
                     </td>
                   </tr>
                 ) : (
@@ -197,7 +196,7 @@ export default function LiveDashboard() {
                       >
                         <td className="mono font-medium text-zinc-200">
                           {c.uid ?? "—"}
-                          <span className="ml-1 text-[8px] uppercase text-lime-400">v6</span>
+                          <span className="ml-1 text-[8px] uppercase text-lime-400">{c.version ?? commitLabel}</span>
                           {isNew && <span className="ml-1 text-[9px] text-lime-400">NEW</span>}
                         </td>
                         <td className="mono text-zinc-300 tabular-nums">{c.commit_block.toLocaleString()}</td>
@@ -212,16 +211,20 @@ export default function LiveDashboard() {
                         </td>
                         <td className="max-w-[160px]">
                           <a
-                            href={hippiusModelUrl(c.repo)}
+                            href={modelCommitUrl(c.repo, c.digest, modelHost)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-sky-400/90 hover:underline truncate block text-[10px]"
-                            title={hippiusModelUrl(c.repo)}
+                            title={modelCommitUrl(c.repo, c.digest, modelHost)}
                           >
                             {shortRepo(c.repo)}
                           </a>
                         </td>
-                        <td className="mono text-[10px] text-zinc-500">{shortHash(c.digest)}…</td>
+                        <td className="mono text-[10px] text-zinc-500">
+                          {c.digest.startsWith("revision:")
+                            ? `${c.digest.slice("revision:".length).slice(0, 10)}…`
+                            : `${shortHash(c.digest)}…`}
+                        </td>
                       </tr>
                     );
                   })
@@ -239,7 +242,7 @@ export default function LiveDashboard() {
             <h2 className="text-[12px] font-semibold text-zinc-100">miner registry · SN{subnet}</h2>
           </div>
           <span className="text-[10px] text-zinc-500">
-            {registry?.total ?? 0} miners · {registry?.v6_count ?? 0} v6
+            {registry?.total ?? 0} miners · {registry?.v6_count ?? 0} {commitLabel}
           </span>
         </div>
         <div className="overflow-x-auto max-h-[360px] overflow-y-auto">
@@ -264,21 +267,14 @@ export default function LiveDashboard() {
                   </td>
                 </tr>
               ) : (
-              sortedRegistry.map((m) => {
-                const isKing =
-                  (kingUid != null && m.uid === kingUid) ||
-                  (kingHotkey != null && m.hotkey === kingHotkey);
-                return (
+              sortedRegistry.map((m) => (
                 <tr
                   key={m.uid}
                   className={`${m.has_v6 ? "" : "opacity-50"} ${
                     flashUids.has(m.uid) ? "bg-lime-500/10" : ""
-                  } ${isKing ? "bg-amber-500/5" : ""}`}
+                  }`}
                 >
-                  <td className="mono text-zinc-200">
-                    {m.uid}
-                    {isKing && <span className="ml-1 pill-king text-[8px]">king</span>}
-                  </td>
+                  <td className="mono text-zinc-200">{m.uid}</td>
                   <td className="mono text-zinc-400 tabular-nums">
                     {m.commit_block?.toLocaleString() ?? "—"}
                   </td>
@@ -294,7 +290,7 @@ export default function LiveDashboard() {
                   )}
                   <td>
                     {m.has_v6 ? (
-                      <span className="pill-v6">v6</span>
+                      <span className="pill-v6">{m.version ?? commitLabel}</span>
                     ) : (
                       <span className="pill-none">—</span>
                     )}
@@ -304,11 +300,11 @@ export default function LiveDashboard() {
                   <td className="text-[10px] truncate max-w-[180px]">
                     {m.repo ? (
                       <a
-                        href={hippiusModelUrl(m.repo)}
+                        href={modelCommitUrl(m.repo, m.model_uri?.split("@")[1] ?? "", modelHost)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-zinc-500 hover:text-sky-400 hover:underline"
-                        title={hippiusModelUrl(m.repo)}
+                        title={modelCommitUrl(m.repo, m.model_uri?.split("@")[1] ?? "", modelHost)}
                       >
                         {shortRepo(m.repo)}
                       </a>
@@ -317,8 +313,7 @@ export default function LiveDashboard() {
                     )}
                   </td>
                 </tr>
-              );
-              })
+              ))
               )}
             </tbody>
           </table>
@@ -326,7 +321,7 @@ export default function LiveDashboard() {
         <TableSortBar sort={registrySort} onSort={setRegistrySort} showStatus />
         {waiting.length > 0 && (
           <div className="px-3 py-2 border-t border-zinc-800/80 text-[10px] text-zinc-600">
-            {waiting.length} miners without v6
+            {waiting.length} miners without {commitLabel}
           </div>
         )}
       </section>

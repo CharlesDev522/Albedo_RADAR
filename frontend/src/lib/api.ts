@@ -154,98 +154,47 @@ export interface SlotStatusData {
   source: string;
 }
 
-export interface ReignMember {
-  king_version: number | null;
-  title: string | null;
+export interface QuasarKing {
   uid: number | null;
-  hotkey: string | null;
-  coldkey?: string | null;
-  model_uri?: string | null;
-  model_repo?: string | null;
-  hf_account?: string | null;
-  weight_pct?: number | null;
-  score_challenger?: number | null;
-  score_king?: number | null;
+  hf_repo: string | null;
+  king_revision: string | null;
+  reign_number: number | null;
+  crowned_at: string | null;
+  weights_block: number | null;
 }
 
-export interface AlbedoPipelineState {
-  updated_at: string | null;
-  validate: { running: number; queued: number };
-  pre_eval: { running: number; queued: number };
-  eval: { running: number; queued: number };
-  total_in_flight: number;
-}
-
-export interface DuelRun {
-  eval_run_id: string | null;
+export interface QuasarChainKing {
   uid: number | null;
-  hotkey: string | null;
-  model_repo: string | null;
-  hf_account: string | null;
-  king_version: number | null;
-  challenger_won: boolean;
-  coronated: boolean;
-  badge: string;
-  score_challenger: number | null;
-  score_king: number | null;
-  win_margin: number | null;
-  finished_at: string | null;
-  defeated_king_hf: string | null;
+  hf_repo: string | null;
+  revision: string | null;
+  support_fraction: number | null;
+  block: number | null;
 }
 
-export interface FailRun {
-  eval_run_id: string | null;
-  uid: number | null;
-  hf_account: string | null;
-  fault_code: string | null;
-  finished_at: string | null;
+export interface QuasarEvalPhase {
+  active: boolean;
+  phase: string | null;
+  label: string | null;
+  detail: string | null;
+  state_king_uid: number | null;
+  chain_king_uid: number | null;
+  winner_uid: number | null;
+  weight_reveal_pending: boolean;
+  current_block: number | null;
 }
 
-export interface AlbedoStatus {
+export interface QuasarStatus {
   subnet: number;
-  updated_at: string | null;
-  schema_version: number;
   source_url: string;
   dashboard_url: string;
-  current_king: ReignMember | null;
-  reign_chain: ReignMember[];
-  crownings: DuelRun[];
-  recent_duels: DuelRun[];
-  recent_fails: FailRun[];
-  pipeline: AlbedoPipelineState | null;
-  stats: Record<string, number>;
-  queue_len: number;
+  king: QuasarKing | null;
+  consensus_king: QuasarChainKing | null;
+  state_king_uid: number | null;
+  eval_phase: QuasarEvalPhase | null;
   current_eval: string | null;
-}
-
-export interface HfAccountStats {
-  hf_account: string;
-  coldkeys: string[];
-  hotkey_count: number;
-  challenges: number;
-  duel_wins: number;
-  duel_losses: number;
-  crowns: number;
-  dethrones_caused: number;
-  times_dethroned: number;
-  reign_versions: number[];
-  win_rate: number;
-  crown_rate: number;
-  dethrone_rate: number;
-  avg_win_margin: number | null;
-}
-
-export interface HfAnalytics {
-  subnet: number;
-  updated_at: string | null;
-  summary: {
-    total_eval_runs: number;
-    total_crownings: number;
-    unique_hf_accounts: number;
-    top_crown_holder: string | null;
-    crown_share_top: number;
-  };
-  accounts: HfAccountStats[];
+  queue_len: number;
+  submission_counts: Record<string, number>;
+  policy: Record<string, unknown> | null;
 }
 
 export interface MinerIncentiveEntry {
@@ -257,15 +206,12 @@ export interface MinerIncentiveEntry {
   rank_position: number | null;
   is_validator: boolean;
   receiving_incentive: boolean;
-  is_king: boolean;
-  king_model_repo?: string | null;
   commit_repo?: string | null;
 }
 
 export interface IncentiveOverview {
   subnet: number;
   metagraph_block: number | null;
-  king: ReignMember | null;
   incentivized_count: number;
   top_incentive: number;
   miners: MinerIncentiveEntry[];
@@ -312,19 +258,35 @@ export const api = {
     ),
   getRecent: (subnet = DEFAULT_SUBNET) =>
     fetchApi<{ commits: Commitment[] }>(`/live/recent?subnet=${subnet}`),
-  getAlbedoStatus: (subnet = DEFAULT_SUBNET) =>
-    fetchApi<AlbedoStatus>(`/albedo/status?subnet=${subnet}`),
-  getAlbedoAnalytics: (subnet = DEFAULT_SUBNET, limit = 40) =>
-    fetchApi<HfAnalytics>(`/albedo/analytics?subnet=${subnet}&limit=${limit}`),
+  getQuasarStatus: (subnet = 24) =>
+    fetchApi<QuasarStatus>(`/quasar/status?subnet=${subnet}`),
   getIncentiveOverview: (subnet = DEFAULT_SUBNET, limit = 30, live = false) =>
     fetchApi<IncentiveOverview>(
-      `/albedo/incentives?subnet=${subnet}&limit=${limit}${live ? "&live=true" : ""}`
+      `/incentives?subnet=${subnet}&limit=${limit}${live ? "&live=true" : ""}`
     ),
 };
 
 export function hippiusModelUrl(repo: string, branch = "main"): string {
   const clean = repo.replace(/^\/+|\/+$/g, "");
   return `https://hub.hippius.com/models/${clean}/${branch}`;
+}
+
+export function hfModelUrl(repo: string, digest?: string): string {
+  const clean = repo.replace(/^\/+|\/+$/g, "");
+  if (digest?.startsWith("revision:")) {
+    return `https://huggingface.co/${clean}/tree/${digest.slice("revision:".length)}`;
+  }
+  if (digest) return `https://huggingface.co/${clean}/tree/${digest}`;
+  return `https://huggingface.co/${clean}`;
+}
+
+export function modelCommitUrl(
+  repo: string,
+  digest: string,
+  host: "hippius" | "huggingface" = "hippius"
+): string {
+  if (host === "huggingface") return hfModelUrl(repo, digest);
+  return hippiusModelUrl(repo);
 }
 
 export function shortAddr(addr: string, n = 5): string {

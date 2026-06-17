@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     # Primary dashboard subnets (API accepts any netuid via query param)
     dashboard_subnets: list[int] = [97, 24]
 
-    # Albedo SN97 dashboard (king-of-the-hill eval server)
-    albedo_dashboard_url: str = "https://us-east-1.hippius.com/albedo/data/dashboard.json"
+    # Quasar SN24 dashboard (validator public API)
+    quasar_dashboard_url: str = "https://api.quasarcopilot.com/api/dashboard.json"
 
     # Database
     database_url: str = "postgresql+asyncpg://minerwatch:minerwatch@localhost:5432/minerwatch"

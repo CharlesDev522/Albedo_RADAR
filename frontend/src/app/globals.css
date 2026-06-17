@@ -50,6 +50,10 @@
     @apply pill border-lime-500/30 bg-lime-500/10 text-lime-400;
   }
 
+  .pill-violet {
+    @apply pill border-violet-500/30 bg-violet-500/10 text-violet-400;
+  }
+
   .pill-king {
     @apply pill border-amber-500/40 bg-amber-500/15 text-amber-300;
   }

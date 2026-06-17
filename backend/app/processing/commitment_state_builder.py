@@ -23,7 +23,7 @@ from app.db.models import (
 logger = logging.getLogger(__name__)
 
 
-_MODEL_VERSIONS = frozenset({"v5", "v6"})
+_MODEL_VERSIONS = frozenset({"v5", "v6", "quasar"})
 
 
 class CommitmentStateBuilder:

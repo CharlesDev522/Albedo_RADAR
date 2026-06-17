@@ -14,11 +14,12 @@ from app.api.routes import (
     encrypted_commitments,
     events,
     hotkeys,
+    incentives,
     leaderboards,
     live,
     miners,
+    quasar,
     slot_status,
-    albedo,
 )
 from app.config import get_settings
 from app.db.init_db import init_db
@@ -38,7 +39,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    description="Real-time v6 commitment tracking and miner intelligence for Bittensor subnet 97",
+    description="Real-time model commitment tracking for Bittensor subnets (SN97 Albedo, SN24 Quasar)",
     version=__version__,
     lifespan=lifespan,
 )
@@ -61,7 +62,8 @@ app.include_router(leaderboards.router, prefix=api_prefix)
 app.include_router(hotkeys.router, prefix=api_prefix)
 app.include_router(coldkeys.router, prefix=api_prefix)
 app.include_router(events.router, prefix=api_prefix)
-app.include_router(albedo.router, prefix=api_prefix)
+app.include_router(incentives.router, prefix=api_prefix)
+app.include_router(quasar.router, prefix=api_prefix)
 
 
 @app.get("/health", response_model=HealthResponse)

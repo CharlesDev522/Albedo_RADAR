@@ -1,4 +1,4 @@
-/** Dashboard subnet profiles — SN97 (Albedo) + SN24 (OMEGA) are first-class. */
+/** Dashboard subnet profiles — SN97 (Albedo) + SN24 (Quasar) are first-class. */
 
 export const DASHBOARD_SUBNETS = [97, 24] as const;
 export type DashboardSubnet = (typeof DASHBOARD_SUBNETS)[number];
@@ -6,9 +6,10 @@ export type DashboardSubnet = (typeof DASHBOARD_SUBNETS)[number];
 export const OTHER_SUBNETS = [21, 1] as const;
 
 export interface SubnetFeatures {
-  albedoKing: boolean;
-  hfAnalytics: boolean;
+  quasarStatus: boolean;
   incentiveColumn: boolean;
+  commitLabel: string;
+  modelHost: "hippius" | "huggingface";
 }
 
 export interface SubnetProfile {
@@ -25,24 +26,26 @@ const PROFILES: Record<number, SubnetProfile> = {
     netuid: 97,
     name: "Albedo",
     shortName: "Albedo",
-    tagline: "King-of-the-hill model distillation · Qwen3-4B",
+    tagline: "Model distillation · Qwen3-4B · v6 commits",
     accent: "amber",
     features: {
-      albedoKing: true,
-      hfAnalytics: true,
+      quasarStatus: false,
       incentiveColumn: true,
+      commitLabel: "v6",
+      modelHost: "hippius",
     },
   },
   24: {
     netuid: 24,
-    name: "OMEGA Labs",
-    shortName: "OMEGA",
-    tagline: "Multimodal dataset subnet · model commits",
+    name: "Quasar",
+    shortName: "Quasar",
+    tagline: "Quasar 3B MoE · king-of-the-hill · JSON commits",
     accent: "violet",
     features: {
-      albedoKing: false,
-      hfAnalytics: false,
+      quasarStatus: true,
       incentiveColumn: true,
+      commitLabel: "quasar",
+      modelHost: "huggingface",
     },
   },
 };
@@ -56,9 +59,10 @@ export function getSubnetProfile(netuid: number): SubnetProfile {
       tagline: "Bittensor subnet",
       accent: "emerald",
       features: {
-        albedoKing: false,
-        hfAnalytics: false,
+        quasarStatus: false,
         incentiveColumn: true,
+        commitLabel: "model",
+        modelHost: "huggingface",
       },
     }
   );

@@ -11,11 +11,10 @@ import {
 } from "react";
 import {
   api,
-  type AlbedoStatus,
   type Commitment,
   type CommitmentStats,
-  type HfAnalytics,
   type IncentiveOverview,
+  type QuasarStatus,
   type Registry,
   type SlotStatusData,
   type SyncStatus,
@@ -26,7 +25,7 @@ import { useSubnet } from "@/lib/useSubnet";
 const LIVE_URL = "/api/v1/live/stream";
 export const DASHBOARD_POLL_MS = 3000;
 const SYNC_POLL_MS = 30_000;
-const ALBEDO_POLL_MS = 4000;
+const SUBNET_EXTRAS_POLL_MS = 4000;
 
 export interface LiveEvent {
   type: string;
@@ -54,8 +53,7 @@ interface DashboardSyncContextValue {
   liveStatus: "connecting" | "live" | "polling";
   flashUids: Set<number>;
   feed: LiveEvent[];
-  albedoStatus: AlbedoStatus | null;
-  albedoAnalytics: HfAnalytics | null;
+  quasarStatus: QuasarStatus | null;
   incentiveOverview: IncentiveOverview | null;
   refresh: () => Promise<void>;
 }
@@ -102,8 +100,7 @@ export function DashboardSyncProvider({
   const [liveStatus, setLiveStatus] = useState<"connecting" | "live" | "polling">("connecting");
   const [flashUids, setFlashUids] = useState<Set<number>>(new Set());
   const [feed, setFeed] = useState<LiveEvent[]>([]);
-  const [albedoStatus, setAlbedoStatus] = useState<AlbedoStatus | null>(null);
-  const [albedoAnalytics, setAlbedoAnalytics] = useState<HfAnalytics | null>(null);
+  const [quasarStatus, setQuasarStatus] = useState<QuasarStatus | null>(null);
   const [incentiveOverview, setIncentiveOverview] = useState<IncentiveOverview | null>(null);
 
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -184,9 +181,8 @@ export function DashboardSyncProvider({
     const profile = getSubnetProfile(subnet);
     const fetchSubnet = subnet;
 
-    if (!profile.features.albedoKing) {
-      setAlbedoStatus(null);
-      setAlbedoAnalytics(null);
+    if (!profile.features.quasarStatus) {
+      setQuasarStatus(null);
     }
     if (!profile.features.incentiveColumn) {
       setIncentiveOverview(null);
@@ -195,17 +191,11 @@ export function DashboardSyncProvider({
     try {
       const tasks: Promise<void>[] = [];
 
-      if (profile.features.albedoKing) {
+      if (profile.features.quasarStatus) {
         tasks.push(
           (async () => {
-            const [status, analytics] = await Promise.all([
-              api.getAlbedoStatus(fetchSubnet),
-              api.getAlbedoAnalytics(fetchSubnet, 50),
-            ]);
-            if (subnetRef.current === fetchSubnet) {
-              setAlbedoStatus(status);
-              setAlbedoAnalytics(analytics);
-            }
+            const status = await api.getQuasarStatus(fetchSubnet);
+            if (subnetRef.current === fetchSubnet) setQuasarStatus(status);
           })()
         );
       }
@@ -237,8 +227,7 @@ export function DashboardSyncProvider({
     setSyncStatus(null);
     setSlotData(null);
     setFeed([]);
-    setAlbedoStatus(null);
-    setAlbedoAnalytics(null);
+    setQuasarStatus(null);
     setIncentiveOverview(null);
     setApiError(null);
     setLoading(true);
@@ -255,11 +244,11 @@ export function DashboardSyncProvider({
     }
     const interval = setInterval(refreshCore, DASHBOARD_POLL_MS);
     const syncInterval = setInterval(refreshSync, SYNC_POLL_MS);
-    const albedoInterval = setInterval(refreshSubnetExtras, ALBEDO_POLL_MS);
+    const extrasInterval = setInterval(refreshSubnetExtras, SUBNET_EXTRAS_POLL_MS);
     return () => {
       clearInterval(interval);
       clearInterval(syncInterval);
-      clearInterval(albedoInterval);
+      clearInterval(extrasInterval);
     };
   }, [refresh, refreshCore, refreshSync, refreshSubnetExtras]);
 
@@ -313,8 +302,7 @@ export function DashboardSyncProvider({
         liveStatus,
         flashUids,
         feed,
-        albedoStatus,
-        albedoAnalytics,
+        quasarStatus,
         incentiveOverview,
         refresh,
       }}

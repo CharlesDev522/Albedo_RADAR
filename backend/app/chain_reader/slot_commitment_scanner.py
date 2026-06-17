@@ -13,7 +13,7 @@ from app.chain_reader.commitment_classifier import (
     classify_commitment_raw,
     classify_plaintext_reveal,
 )
-from app.chain_reader.commitment_scanner import _neuron_index, parse_model_commit
+from app.chain_reader.commitment_scanner import _neuron_index, parse_any_model_commit
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +21,17 @@ logger = logging.getLogger(__name__)
 def _latest_revealed_per_hotkey(
     entries: list[tuple[str, int, str]],
 ) -> dict[str, ClassifiedCommitment]:
-    """Highest-block valid v5/v6 reveal per hotkey from RevealedCommitments history."""
+    """Highest-block valid model reveal per hotkey from RevealedCommitments history."""
     latest: dict[str, ClassifiedCommitment] = {}
     for hotkey, block, payload in entries:
-        if parse_model_commit(payload, hotkey) is None:
+        if parse_any_model_commit(payload, hotkey) is None:
             continue
         classified = classify_plaintext_reveal(payload, block, 0, hotkey)
-        if classified.commitment_type not in (CommitmentType.V5, CommitmentType.V6):
+        if classified.commitment_type not in (
+            CommitmentType.V5,
+            CommitmentType.V6,
+            CommitmentType.JSON,
+        ):
             continue
         prev = latest.get(hotkey)
         if prev is None or block > prev.commit_block:

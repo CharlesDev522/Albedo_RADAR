@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 _BLOCK_HASH_CACHE: OrderedDict[int, str] = OrderedDict()
 _BLOCK_HASH_CACHE_MAX = 10_000
 
-MODEL_COMMIT_VERSIONS = frozenset({"v5", "v6"})
+MODEL_COMMIT_VERSIONS = frozenset({"v5", "v6", "quasar"})
 _MODEL_COMMIT_RE = re.compile(r"^v[56]\|")
 
 
@@ -51,7 +51,7 @@ def parse_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
     if len(parts) != 3:
         return None
     version, repo, digest = parts
-    if version not in MODEL_COMMIT_VERSIONS:
+    if version not in ("v5", "v6"):
         return None
     if "/" not in repo or not digest.startswith("sha256:"):
         return None
@@ -63,6 +63,38 @@ def parse_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
     }
 
 
+def parse_quasar_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
+    """Parse SN24 Quasar JSON commit: {"model": "user/repo", "revision": "git_sha"}."""
+    if not data or not data.lstrip().startswith("{"):
+        return None
+    try:
+        obj = json.loads(data)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    repo = obj.get("model") or obj.get("hf_repo") or obj.get("hf_repo_id")
+    revision = obj.get("revision") or obj.get("king_revision")
+    if not repo or not revision or "/" not in str(repo):
+        return None
+    rev = str(revision).removeprefix("revision:")
+    return {
+        "version": "quasar",
+        "repo": str(repo),
+        "digest": f"revision:{rev}",
+        "revision": rev,
+        "author_hotkey": chain_hotkey,
+    }
+
+
+def parse_any_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
+    """Parse v5/v6 pipe commits or SN24 Quasar JSON commits."""
+    parsed = parse_model_commit(data, chain_hotkey)
+    if parsed is not None:
+        return parsed
+    return parse_quasar_commit(data, chain_hotkey)
+
+
 def parse_v6(data: str, chain_hotkey: str) -> dict[str, Any] | None:
     """Parse v6 only."""
     parsed = parse_model_commit(data, chain_hotkey)
@@ -72,7 +104,7 @@ def parse_v6(data: str, chain_hotkey: str) -> dict[str, Any] | None:
 
 
 def is_model_commit(data: str) -> bool:
-    return parse_model_commit(data, "x") is not None
+    return parse_any_model_commit(data, "x") is not None
 
 
 def payload_hash(payload: dict[str, Any]) -> str:
@@ -99,7 +131,7 @@ def active_model_from_map(
         decoded = decode_commitment_of_raw(raw)
         if decoded.kind != CommitmentKind.PLAINTEXT or not decoded.reveal_string:
             continue
-        parsed = parse_model_commit(decoded.reveal_string, hotkey)
+        parsed = parse_any_model_commit(decoded.reveal_string, hotkey)
         if parsed is None:
             continue
         block = decoded.commit_block or 0
@@ -122,7 +154,7 @@ def _latest_model_commits_per_hotkey(
 ) -> dict[str, tuple[int, str]]:
     latest: dict[str, tuple[int, str]] = {}
     for hotkey, block, data in entries:
-        if parse_model_commit(data, hotkey) is None:
+        if parse_any_model_commit(data, hotkey) is None:
             continue
         prev = latest.get(hotkey)
         if prev is None or block > prev[0]:
@@ -214,7 +246,7 @@ def _commits_from_merged(
 ) -> list[Commit]:
     commits: list[Commit] = []
     for hotkey, (block, data, source) in merged.items():
-        parsed = parse_model_commit(data, hotkey)
+        parsed = parse_any_model_commit(data, hotkey)
         if parsed is None:
             continue
         neuron = neurons.get(hotkey)
