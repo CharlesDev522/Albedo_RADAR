@@ -52,6 +52,10 @@ export interface RegistryMiner {
   model_uri: string | null;
   commit_source: string | null;
   last_updated: string | null;
+  incentive?: number | null;
+  emission?: number | null;
+  rank_position?: number | null;
+  receiving_incentive?: boolean | null;
 }
 
 export interface SyncStatus {
@@ -150,6 +154,79 @@ export interface SlotStatusData {
   source: string;
 }
 
+export interface AlbedoKing {
+  hotkey: string;
+  uid: number | null;
+  coldkey?: string | null;
+  model_repo?: string | null;
+  model_digest?: string | null;
+  crowned_at?: string | null;
+  reign_number?: number | null;
+  weight?: number | null;
+  weight_share?: number | null;
+  registered?: boolean | null;
+  challenge_id?: string | null;
+}
+
+export interface AlbedoEvalStats {
+  queued: number;
+  accepted: number;
+  rejected: number;
+  failed: number;
+  duplicates: number;
+  injection_attempts: number;
+}
+
+export interface AlbedoHistoryItem {
+  type: string;
+  eval_id?: string | null;
+  hotkey?: string | null;
+  uid?: number | null;
+  model_repo?: string | null;
+  accepted?: boolean | null;
+  winner?: string | null;
+  code?: string | null;
+  detail?: string | null;
+  completed_at?: string | null;
+}
+
+export interface AlbedoStatus {
+  subnet: number;
+  updated_at: string | null;
+  source_url: string;
+  king: AlbedoKing | null;
+  king_chain: AlbedoKing[];
+  queue_len: number;
+  current_eval: string | null;
+  stats: AlbedoEvalStats;
+  recent_history: AlbedoHistoryItem[];
+  dashboard_url: string;
+}
+
+export interface MinerIncentiveEntry {
+  uid: number;
+  hotkey: string;
+  coldkey?: string | null;
+  incentive: number;
+  emission: number;
+  rank_position: number | null;
+  is_validator: boolean;
+  receiving_incentive: boolean;
+  is_king: boolean;
+  king_model_repo?: string | null;
+  commit_repo?: string | null;
+}
+
+export interface IncentiveOverview {
+  subnet: number;
+  metagraph_block: number | null;
+  king: AlbedoKing | null;
+  incentivized_count: number;
+  top_incentive: number;
+  miners: MinerIncentiveEntry[];
+  note: string;
+}
+
 async function fetchApi<T>(path: string): Promise<T> {
   const res = await fetch(`${apiBase()}${path}`, { cache: "no-store" });
   if (!res.ok) {
@@ -190,6 +267,12 @@ export const api = {
     ),
   getRecent: (subnet = DEFAULT_SUBNET) =>
     fetchApi<{ commits: Commitment[] }>(`/live/recent?subnet=${subnet}`),
+  getAlbedoStatus: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<AlbedoStatus>(`/albedo/status?subnet=${subnet}`),
+  getIncentiveOverview: (subnet = DEFAULT_SUBNET, limit = 30, live = false) =>
+    fetchApi<IncentiveOverview>(
+      `/albedo/incentives?subnet=${subnet}&limit=${limit}${live ? "&live=true" : ""}`
+    ),
 };
 
 export function hippiusModelUrl(repo: string, branch = "main"): string {

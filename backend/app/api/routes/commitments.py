@@ -160,6 +160,7 @@ async def miner_registry(
         has_v6 = c is not None
         if has_v6:
             v6_count += 1
+        incentive = float(m.current_incentive or 0.0)
         entries.append(
             MinerRegistryEntry(
                 uid=m.uid,
@@ -173,6 +174,10 @@ async def miner_registry(
                 model_uri=c.model_uri if c else None,
                 commit_source=c.commit_source if c else None,
                 last_updated=c.last_updated if c else None,
+                incentive=incentive,
+                emission=float(m.current_emission or 0.0),
+                rank_position=m.rank_position,
+                receiving_incentive=incentive > 0,
             )
         )
 

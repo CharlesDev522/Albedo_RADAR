@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     slot_scan_interval_seconds: int = 30
     mechid: int = 0
 
+    # Albedo SN97 dashboard (king-of-the-hill eval server)
+    albedo_dashboard_url: str = "https://us-east-1.hippius.com/albedo/dashboard.json"
+
     # Database
     database_url: str = "postgresql+asyncpg://minerwatch:minerwatch@localhost:5432/minerwatch"
 

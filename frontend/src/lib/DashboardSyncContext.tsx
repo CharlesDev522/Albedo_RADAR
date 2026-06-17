@@ -11,8 +11,10 @@ import {
 } from "react";
 import {
   api,
+  type AlbedoStatus,
   type Commitment,
   type CommitmentStats,
+  type IncentiveOverview,
   type Registry,
   type SlotStatusData,
   type SyncStatus,
@@ -22,6 +24,7 @@ import { useSubnet } from "@/lib/useSubnet";
 const LIVE_URL = "/api/v1/live/stream";
 export const DASHBOARD_POLL_MS = 3000;
 const SYNC_POLL_MS = 30_000;
+const ALBEDO_POLL_MS = 15_000;
 
 export interface LiveEvent {
   type: string;
@@ -49,6 +52,8 @@ interface DashboardSyncContextValue {
   liveStatus: "connecting" | "live" | "polling";
   flashUids: Set<number>;
   feed: LiveEvent[];
+  albedoStatus: AlbedoStatus | null;
+  incentiveOverview: IncentiveOverview | null;
   refresh: () => Promise<void>;
 }
 
@@ -94,6 +99,8 @@ export function DashboardSyncProvider({
   const [liveStatus, setLiveStatus] = useState<"connecting" | "live" | "polling">("connecting");
   const [flashUids, setFlashUids] = useState<Set<number>>(new Set());
   const [feed, setFeed] = useState<LiveEvent[]>([]);
+  const [albedoStatus, setAlbedoStatus] = useState<AlbedoStatus | null>(null);
+  const [incentiveOverview, setIncentiveOverview] = useState<IncentiveOverview | null>(null);
 
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const knownUids = useRef<Set<number>>(
@@ -169,9 +176,30 @@ export function DashboardSyncProvider({
     }
   }, [subnet]);
 
+  const refreshAlbedo = useCallback(async () => {
+    if (subnet !== 97) {
+      setAlbedoStatus(null);
+      setIncentiveOverview(null);
+      return;
+    }
+    const fetchSubnet = subnet;
+    try {
+      const [status, incentives] = await Promise.all([
+        api.getAlbedoStatus(fetchSubnet),
+        api.getIncentiveOverview(fetchSubnet, 30, false),
+      ]);
+      if (subnetRef.current === fetchSubnet) {
+        setAlbedoStatus(status);
+        setIncentiveOverview(incentives);
+      }
+    } catch {
+      /* albedo metadata is non-critical */
+    }
+  }, [subnet]);
+
   const refresh = useCallback(async () => {
-    await Promise.all([refreshCore(), refreshSync()]);
-  }, [refreshCore, refreshSync]);
+    await Promise.all([refreshCore(), refreshSync(), refreshAlbedo()]);
+  }, [refreshCore, refreshSync, refreshAlbedo]);
 
   useEffect(() => {
     subnetRef.current = subnet;
@@ -181,6 +209,8 @@ export function DashboardSyncProvider({
     setSyncStatus(null);
     setSlotData(null);
     setFeed([]);
+    setAlbedoStatus(null);
+    setIncentiveOverview(null);
     setApiError(null);
     setLoading(true);
     knownUids.current = new Set();
@@ -196,11 +226,13 @@ export function DashboardSyncProvider({
     }
     const interval = setInterval(refreshCore, DASHBOARD_POLL_MS);
     const syncInterval = setInterval(refreshSync, SYNC_POLL_MS);
+    const albedoInterval = setInterval(refreshAlbedo, ALBEDO_POLL_MS);
     return () => {
       clearInterval(interval);
       clearInterval(syncInterval);
+      clearInterval(albedoInterval);
     };
-  }, [refresh, refreshCore, refreshSync]);
+  }, [refresh, refreshCore, refreshSync, refreshAlbedo]);
 
   useEffect(() => {
     let es: EventSource | null = null;
@@ -252,6 +284,8 @@ export function DashboardSyncProvider({
         liveStatus,
         flashUids,
         feed,
+        albedoStatus,
+        incentiveOverview,
         refresh,
       }}
     >

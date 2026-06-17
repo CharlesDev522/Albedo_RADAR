@@ -26,6 +26,7 @@ from app.db.models import Miner, MinerCommitment, MinerStatus
 from app.db.session import AsyncSessionLocal, engine
 from app.processing.commitment_state_builder import CommitmentStateBuilder
 from app.processing.encrypted_commitment_state_builder import EncryptedCommitmentStateBuilder
+from app.processing.incentive_sync import sync_metagraph_incentives
 from app.processing.slot_status_builder import SlotStatusBuilder
 from sqlalchemy import func, select
 
@@ -48,6 +49,7 @@ class CommitmentPoller:
         self._last_full_scan = 0.0
         self._last_slot_scan = 0.0
         self._last_metagraph_sync = 0.0
+        self._last_incentive_sync = 0.0
         self._poll_lock = asyncio.Lock()
         self._seen_v6_hotkeys: set[str] = set()
 
@@ -71,6 +73,11 @@ class CommitmentPoller:
             await self.poll_once(netuid)
         except Exception:
             logger.exception("Initial poll failed")
+        try:
+            await self._incentive_sync(netuid)
+            self._last_incentive_sync = time.monotonic()
+        except Exception:
+            logger.exception("Initial incentive sync failed")
 
     async def _slot_poll(self, netuid: int, snapshot: ChainSnapshot) -> dict[str, int]:
         assert self._subtensor is not None
@@ -251,6 +258,14 @@ class CommitmentPoller:
         self._last_full_scan = time.monotonic()
         return stats
 
+    async def _incentive_sync(self, netuid: int) -> None:
+        """Refresh metagraph incentive/emission on active miners (~60s)."""
+        assert self._subtensor is not None
+        snapshot = await self.subtensor_client.get_subnet_snapshot(netuid)
+        async with AsyncSessionLocal() as session:
+            await sync_metagraph_incentives(session, snapshot)
+            await session.commit()
+
     async def poll_once(self, netuid: int | None = None) -> dict[str, int]:
         netuid = netuid or self.settings.default_subnet
         assert self._subtensor is not None
@@ -261,6 +276,13 @@ class CommitmentPoller:
             if now - self._last_metagraph_sync >= self.settings.metagraph_sync_interval_seconds:
                 self._neurons = await _neuron_index(self._subtensor, netuid)
                 self._last_metagraph_sync = now
+
+            if now - self._last_incentive_sync >= self.settings.metagraph_sync_interval_seconds:
+                try:
+                    await self._incentive_sync(netuid)
+                except Exception:
+                    logger.exception("Incentive sync failed netuid=%d", netuid)
+                self._last_incentive_sync = now
 
             run_full = now - self._last_full_scan >= self.settings.full_scan_interval_seconds
             run_slot = now - self._last_slot_scan >= self.settings.slot_scan_interval_seconds

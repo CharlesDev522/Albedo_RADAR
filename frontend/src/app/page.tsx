@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import LiveDashboard from "@/components/LiveDashboard";
+import AlbedoKingPanel from "@/components/AlbedoKingPanel";
 import MinerGroupsPanel from "@/components/MinerGroupsPanel";
 import SlotStatusBoard from "@/components/SlotStatusBoard";
 import { DashboardSyncProvider } from "@/lib/DashboardSyncContext";
@@ -55,6 +56,11 @@ export default async function Page({
       initialSyncStatus={syncStatus}
     >
       <div className="space-y-3">
+        {subnet === 97 && (
+          <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading albedo…</div>}>
+            <AlbedoKingPanel />
+          </Suspense>
+        )}
         <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading slots…</div>}>
           <SlotStatusBoard />
         </Suspense>

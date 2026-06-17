@@ -18,6 +18,7 @@ from app.api.routes import (
     live,
     miners,
     slot_status,
+    albedo,
 )
 from app.config import get_settings
 from app.db.init_db import init_db
@@ -60,6 +61,7 @@ app.include_router(leaderboards.router, prefix=api_prefix)
 app.include_router(hotkeys.router, prefix=api_prefix)
 app.include_router(coldkeys.router, prefix=api_prefix)
 app.include_router(events.router, prefix=api_prefix)
+app.include_router(albedo.router, prefix=api_prefix)
 
 
 @app.get("/health", response_model=HealthResponse)

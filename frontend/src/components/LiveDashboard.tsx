@@ -29,6 +29,7 @@ export default function LiveDashboard() {
     liveStatus,
     flashUids,
     feed,
+    albedoStatus,
   } = useDashboardSync();
   const [commitSort, setCommitSort] = useState<DashboardSortKey>("commit_desc");
   const [registrySort, setRegistrySort] = useState<DashboardSortKey>("committed_first");
@@ -38,6 +39,15 @@ export default function LiveDashboard() {
     () => sortRegistry(registry?.miners ?? [], registrySort),
     [registry?.miners, registrySort]
   );
+
+  const kingUid = albedoStatus?.king?.uid ?? null;
+  const kingHotkey = albedoStatus?.king?.hotkey ?? null;
+
+  const fmtIncentive = (n: number | null | undefined) => {
+    if (n == null || n <= 0) return "—";
+    if (n >= 0.999) return "100%";
+    return `${(n * 100).toFixed(1)}%`;
+  };
 
   const waiting = registry?.miners.filter((m) => !m.has_v6) ?? [];
   const v6Count = registry?.v6_count ?? commits.length;
@@ -237,6 +247,7 @@ export default function LiveDashboard() {
                 <th>uid</th>
                 <th>commit</th>
                 <th>reg</th>
+                {subnet === 97 && <th>incentive</th>}
                 <th>st</th>
                 <th>hotkey</th>
                 <th>coldkey</th>
@@ -246,23 +257,39 @@ export default function LiveDashboard() {
             <tbody>
               {sortedRegistry.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center text-zinc-500 py-8 text-[10px]">
+                  <td colSpan={subnet === 97 ? 8 : 7} className="text-center text-zinc-500 py-8 text-[10px]">
                     {registry ? "no miners" : "loading registry…"}
                   </td>
                 </tr>
               ) : (
-              sortedRegistry.map((m) => (
+              sortedRegistry.map((m) => {
+                const isKing =
+                  (kingUid != null && m.uid === kingUid) ||
+                  (kingHotkey != null && m.hotkey === kingHotkey);
+                return (
                 <tr
                   key={m.uid}
                   className={`${m.has_v6 ? "" : "opacity-50"} ${
                     flashUids.has(m.uid) ? "bg-lime-500/10" : ""
-                  }`}
+                  } ${isKing ? "bg-amber-500/5" : ""}`}
                 >
-                  <td className="mono text-zinc-200">{m.uid}</td>
+                  <td className="mono text-zinc-200">
+                    {m.uid}
+                    {isKing && <span className="ml-1 pill-king text-[8px]">king</span>}
+                  </td>
                   <td className="mono text-zinc-400 tabular-nums">
                     {m.commit_block?.toLocaleString() ?? "—"}
                   </td>
                   <td className="mono text-zinc-500 tabular-nums">{m.registered_at_block?.toLocaleString() ?? "—"}</td>
+                  {subnet === 97 && (
+                    <td
+                      className={`mono tabular-nums ${
+                        m.receiving_incentive ? "text-lime-400" : "text-zinc-600"
+                      }`}
+                    >
+                      {fmtIncentive(m.incentive)}
+                    </td>
+                  )}
                   <td>
                     {m.has_v6 ? (
                       <span className="pill-v6">v6</span>
@@ -288,7 +315,8 @@ export default function LiveDashboard() {
                     )}
                   </td>
                 </tr>
-              ))
+              );
+              })
               )}
             </tbody>
           </table>

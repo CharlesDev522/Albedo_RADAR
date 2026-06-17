@@ -64,6 +64,10 @@ class MinerRegistryEntry(BaseModel):
     model_uri: str | None = None
     commit_source: str | None = None
     last_updated: datetime | None = None
+    incentive: float | None = None
+    emission: float | None = None
+    rank_position: int | None = None
+    receiving_incentive: bool | None = None
 
 
 class MinerRegistryResponse(BaseModel):
