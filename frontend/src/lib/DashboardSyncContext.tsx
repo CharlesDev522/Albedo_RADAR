@@ -14,6 +14,7 @@ import {
   type AlbedoStatus,
   type Commitment,
   type CommitmentStats,
+  type HfAnalytics,
   type IncentiveOverview,
   type Registry,
   type SlotStatusData,
@@ -24,7 +25,7 @@ import { useSubnet } from "@/lib/useSubnet";
 const LIVE_URL = "/api/v1/live/stream";
 export const DASHBOARD_POLL_MS = 3000;
 const SYNC_POLL_MS = 30_000;
-const ALBEDO_POLL_MS = 15_000;
+const ALBEDO_POLL_MS = 4000;
 
 export interface LiveEvent {
   type: string;
@@ -53,6 +54,7 @@ interface DashboardSyncContextValue {
   flashUids: Set<number>;
   feed: LiveEvent[];
   albedoStatus: AlbedoStatus | null;
+  albedoAnalytics: HfAnalytics | null;
   incentiveOverview: IncentiveOverview | null;
   refresh: () => Promise<void>;
 }
@@ -100,6 +102,7 @@ export function DashboardSyncProvider({
   const [flashUids, setFlashUids] = useState<Set<number>>(new Set());
   const [feed, setFeed] = useState<LiveEvent[]>([]);
   const [albedoStatus, setAlbedoStatus] = useState<AlbedoStatus | null>(null);
+  const [albedoAnalytics, setAlbedoAnalytics] = useState<HfAnalytics | null>(null);
   const [incentiveOverview, setIncentiveOverview] = useState<IncentiveOverview | null>(null);
 
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -179,17 +182,20 @@ export function DashboardSyncProvider({
   const refreshAlbedo = useCallback(async () => {
     if (subnet !== 97) {
       setAlbedoStatus(null);
+      setAlbedoAnalytics(null);
       setIncentiveOverview(null);
       return;
     }
     const fetchSubnet = subnet;
     try {
-      const [status, incentives] = await Promise.all([
+      const [status, analytics, incentives] = await Promise.all([
         api.getAlbedoStatus(fetchSubnet),
+        api.getAlbedoAnalytics(fetchSubnet, 50),
         api.getIncentiveOverview(fetchSubnet, 30, false),
       ]);
       if (subnetRef.current === fetchSubnet) {
         setAlbedoStatus(status);
+        setAlbedoAnalytics(analytics);
         setIncentiveOverview(incentives);
       }
     } catch {
@@ -210,6 +216,7 @@ export function DashboardSyncProvider({
     setSlotData(null);
     setFeed([]);
     setAlbedoStatus(null);
+    setAlbedoAnalytics(null);
     setIncentiveOverview(null);
     setApiError(null);
     setLoading(true);
@@ -285,6 +292,7 @@ export function DashboardSyncProvider({
         flashUids,
         feed,
         albedoStatus,
+        albedoAnalytics,
         incentiveOverview,
         refresh,
       }}

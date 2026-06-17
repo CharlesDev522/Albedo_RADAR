@@ -154,53 +154,98 @@ export interface SlotStatusData {
   source: string;
 }
 
-export interface AlbedoKing {
-  hotkey: string;
+export interface ReignMember {
+  king_version: number | null;
+  title: string | null;
   uid: number | null;
+  hotkey: string | null;
   coldkey?: string | null;
+  model_uri?: string | null;
   model_repo?: string | null;
-  model_digest?: string | null;
-  crowned_at?: string | null;
-  reign_number?: number | null;
-  weight?: number | null;
-  weight_share?: number | null;
-  registered?: boolean | null;
-  challenge_id?: string | null;
+  hf_account?: string | null;
+  weight_pct?: number | null;
+  score_challenger?: number | null;
+  score_king?: number | null;
 }
 
-export interface AlbedoEvalStats {
-  queued: number;
-  accepted: number;
-  rejected: number;
-  failed: number;
-  duplicates: number;
-  injection_attempts: number;
+export interface AlbedoPipelineState {
+  updated_at: string | null;
+  validate: { running: number; queued: number };
+  pre_eval: { running: number; queued: number };
+  eval: { running: number; queued: number };
+  total_in_flight: number;
 }
 
-export interface AlbedoHistoryItem {
-  type: string;
-  eval_id?: string | null;
-  hotkey?: string | null;
-  uid?: number | null;
-  model_repo?: string | null;
-  accepted?: boolean | null;
-  winner?: string | null;
-  code?: string | null;
-  detail?: string | null;
-  completed_at?: string | null;
+export interface DuelRun {
+  eval_run_id: string | null;
+  uid: number | null;
+  hotkey: string | null;
+  model_repo: string | null;
+  hf_account: string | null;
+  king_version: number | null;
+  challenger_won: boolean;
+  coronated: boolean;
+  badge: string;
+  score_challenger: number | null;
+  score_king: number | null;
+  win_margin: number | null;
+  finished_at: string | null;
+  defeated_king_hf: string | null;
+}
+
+export interface FailRun {
+  eval_run_id: string | null;
+  uid: number | null;
+  hf_account: string | null;
+  fault_code: string | null;
+  finished_at: string | null;
 }
 
 export interface AlbedoStatus {
   subnet: number;
   updated_at: string | null;
+  schema_version: number;
   source_url: string;
-  king: AlbedoKing | null;
-  king_chain: AlbedoKing[];
+  dashboard_url: string;
+  current_king: ReignMember | null;
+  reign_chain: ReignMember[];
+  crownings: DuelRun[];
+  recent_duels: DuelRun[];
+  recent_fails: FailRun[];
+  pipeline: AlbedoPipelineState | null;
+  stats: Record<string, number>;
   queue_len: number;
   current_eval: string | null;
-  stats: AlbedoEvalStats;
-  recent_history: AlbedoHistoryItem[];
-  dashboard_url: string;
+}
+
+export interface HfAccountStats {
+  hf_account: string;
+  coldkeys: string[];
+  hotkey_count: number;
+  challenges: number;
+  duel_wins: number;
+  duel_losses: number;
+  crowns: number;
+  dethrones_caused: number;
+  times_dethroned: number;
+  reign_versions: number[];
+  win_rate: number;
+  crown_rate: number;
+  dethrone_rate: number;
+  avg_win_margin: number | null;
+}
+
+export interface HfAnalytics {
+  subnet: number;
+  updated_at: string | null;
+  summary: {
+    total_eval_runs: number;
+    total_crownings: number;
+    unique_hf_accounts: number;
+    top_crown_holder: string | null;
+    crown_share_top: number;
+  };
+  accounts: HfAccountStats[];
 }
 
 export interface MinerIncentiveEntry {
@@ -220,7 +265,7 @@ export interface MinerIncentiveEntry {
 export interface IncentiveOverview {
   subnet: number;
   metagraph_block: number | null;
-  king: AlbedoKing | null;
+  king: ReignMember | null;
   incentivized_count: number;
   top_incentive: number;
   miners: MinerIncentiveEntry[];
@@ -269,6 +314,8 @@ export const api = {
     fetchApi<{ commits: Commitment[] }>(`/live/recent?subnet=${subnet}`),
   getAlbedoStatus: (subnet = DEFAULT_SUBNET) =>
     fetchApi<AlbedoStatus>(`/albedo/status?subnet=${subnet}`),
+  getAlbedoAnalytics: (subnet = DEFAULT_SUBNET, limit = 40) =>
+    fetchApi<HfAnalytics>(`/albedo/analytics?subnet=${subnet}&limit=${limit}`),
   getIncentiveOverview: (subnet = DEFAULT_SUBNET, limit = 30, live = false) =>
     fetchApi<IncentiveOverview>(
       `/albedo/incentives?subnet=${subnet}&limit=${limit}${live ? "&live=true" : ""}`

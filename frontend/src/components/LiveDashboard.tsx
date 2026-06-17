@@ -40,8 +40,8 @@ export default function LiveDashboard() {
     [registry?.miners, registrySort]
   );
 
-  const kingUid = albedoStatus?.king?.uid ?? null;
-  const kingHotkey = albedoStatus?.king?.hotkey ?? null;
+  const kingUid = albedoStatus?.current_king?.uid ?? null;
+  const kingHotkey = albedoStatus?.current_king?.hotkey ?? null;
 
   const fmtIncentive = (n: number | null | undefined) => {
     if (n == null || n <= 0) return "—";

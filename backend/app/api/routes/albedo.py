@@ -1,4 +1,4 @@
-"""Albedo king status + metagraph incentive overview for SN97."""
+"""Albedo king status, duels, HF analytics, and metagraph incentives."""
 
 from __future__ import annotations
 
@@ -10,14 +10,32 @@ from app.collectors.subtensor_client import SubtensorClient
 from app.config import get_settings
 from app.db.models import Miner, MinerCommitment, MinerStatus
 from app.db.session import get_db
-from app.integrations.albedo_client import fetch_albedo_dashboard, king_hotkey, king_uid
+from app.integrations.albedo_client import (
+    fetch_albedo_dashboard,
+    fetch_albedo_state,
+    king_hotkey,
+    king_uid,
+)
+from app.integrations.albedo_normalize import (
+    build_hf_analytics,
+    current_king,
+    hf_account,
+    king_title_name,
+    model_repo,
+    verdict_info,
+)
 from app.schemas.albedo import (
-    AlbedoEvalStats,
-    AlbedoHistoryItem,
-    AlbedoKing,
+    AlbedoPipelineState,
     AlbedoStatusResponse,
+    DuelRun,
+    FailRun,
+    HfAccountStats,
+    HfAnalyticsResponse,
+    HfAnalyticsSummary,
     IncentiveOverviewResponse,
     MinerIncentiveEntry,
+    PipelineCounts,
+    ReignMember,
 )
 
 router = APIRouter(prefix="/albedo", tags=["albedo"])
@@ -26,73 +44,184 @@ settings = get_settings()
 _MODEL_VERSIONS = ("v5", "v6")
 
 
-def _parse_king(raw: dict | None) -> AlbedoKing | None:
-    if not raw:
-        return None
-    return AlbedoKing(
-        hotkey=str(raw.get("hotkey", "")),
+def _reign_member(raw: dict, coldkey: str | None = None) -> ReignMember:
+    uri = raw.get("model_uri")
+    bps = raw.get("weight_bps")
+    return ReignMember(
+        king_version=raw.get("king_version"),
+        title=king_title_name(raw.get("king_version")),
         uid=raw.get("uid"),
-        coldkey=raw.get("coldkey") or None,
-        model_repo=raw.get("model_repo"),
-        model_digest=raw.get("model_digest"),
-        crowned_at=raw.get("crowned_at"),
-        reign_number=raw.get("reign_number"),
-        weight=raw.get("weight"),
-        weight_share=raw.get("weight_share"),
-        registered=raw.get("registered"),
-        challenge_id=raw.get("challenge_id"),
+        hotkey=raw.get("hotkey"),
+        coldkey=coldkey or raw.get("coldkey"),
+        model_uri=uri,
+        model_repo=model_repo(uri) or None,
+        hf_account=hf_account(uri),
+        weight_bps=bps,
+        weight_pct=round(bps / 100, 1) if bps is not None else None,
+        score_challenger=raw.get("score_challenger"),
+        score_king=raw.get("score_king"),
     )
 
 
-def _parse_history(items: list[dict]) -> list[AlbedoHistoryItem]:
-    out: list[AlbedoHistoryItem] = []
-    for item in items[:30]:
-        verdict = item.get("verdict") or {}
-        out.append(
-            AlbedoHistoryItem(
-                type=str(item.get("type", "unknown")),
-                eval_id=item.get("eval_id"),
-                hotkey=item.get("hotkey"),
-                uid=item.get("uid"),
-                model_repo=item.get("model_repo"),
-                accepted=item.get("accepted"),
-                winner=item.get("winner") or verdict.get("winner"),
-                code=item.get("code") or item.get("error_code"),
-                detail=item.get("detail") or item.get("error_detail"),
-                completed_at=item.get("completed_at"),
-            )
+def _duel_run(raw: dict) -> DuelRun:
+    uri = raw.get("model_uri")
+    v = verdict_info(raw)
+    defeated = raw.get("king") or {}
+    return DuelRun(
+        eval_run_id=raw.get("eval_run_id"),
+        uid=raw.get("uid"),
+        hotkey=raw.get("hotkey"),
+        model_uri=uri,
+        model_repo=model_repo(uri) or None,
+        hf_account=hf_account(uri),
+        king_version=raw.get("king_version"),
+        challenger_won=v["won"],
+        coronated=v["coronated"],
+        badge=v["badge"],
+        score_challenger=raw.get("score_challenger"),
+        score_king=raw.get("score_king"),
+        win_margin=raw.get("win_margin"),
+        finished_at=raw.get("finished_at"),
+        defeated_king_hf=hf_account(defeated.get("model_uri")),
+    )
+
+
+def _fail_run(raw: dict) -> FailRun:
+    uri = raw.get("model_uri")
+    return FailRun(
+        eval_run_id=raw.get("eval_run_id") or raw.get("eval_id"),
+        uid=raw.get("uid"),
+        hotkey=raw.get("hotkey"),
+        model_uri=uri,
+        hf_account=hf_account(uri),
+        fault_code=raw.get("fault_code") or raw.get("code") or raw.get("error_code"),
+        fault_class=raw.get("fault_class"),
+        finished_at=raw.get("finished_at") or raw.get("completed_at"),
+    )
+
+
+def _pipeline_state(raw: dict | None) -> AlbedoPipelineState | None:
+    if not raw:
+        return None
+    counts = raw.get("counts") or {}
+
+    def stage(name: str) -> PipelineCounts:
+        c = counts.get(name) or {}
+        return PipelineCounts(running=int(c.get("running") or 0), queued=int(c.get("queued") or 0))
+
+    validate = stage("hippius_validate")
+    pre_eval = stage("pre_eval")
+    eval_stage = stage("eval")
+    total = sum(s.running + s.queued for s in (validate, pre_eval, eval_stage))
+    return AlbedoPipelineState(
+        updated_at=raw.get("updated_at"),
+        validate=validate,
+        pre_eval=pre_eval,
+        eval=eval_stage,
+        total_in_flight=total,
+    )
+
+
+async def _coldkeys_for_hotkeys(db: AsyncSession, subnet: int, hotkeys: set[str]) -> dict[str, str]:
+    if not hotkeys:
+        return {}
+    result = await db.execute(
+        select(Miner.hotkey, Miner.coldkey).where(
+            Miner.subnet == subnet,
+            Miner.hotkey.in_(tuple(hotkeys)),
         )
-    return out
+    )
+    return {str(hk): str(ck) for hk, ck in result.all() if hk and ck}
 
 
 @router.get("/status", response_model=AlbedoStatusResponse)
 async def albedo_status(
     subnet: int = Query(default=97, ge=0),
+    db: AsyncSession = Depends(get_db),
 ) -> AlbedoStatusResponse:
-    """Current Albedo king, eval queue, and recent duel history (Hippius dashboard API)."""
+    """Current king, reign chain, duels (not fails), pipeline — v2 Hippius API."""
     dashboard = await fetch_albedo_dashboard()
-    stats_raw = (dashboard or {}).get("stats") or {}
-    king_raw = (dashboard or {}).get("king")
-    chain_raw = (dashboard or {}).get("king_chain") or []
-    history_raw = (dashboard or {}).get("history") or []
+    state_raw = await fetch_albedo_state()
+    if not dashboard:
+        return AlbedoStatusResponse(
+            subnet=subnet,
+            source_url=settings.albedo_dashboard_url,
+        )
+
+    hotkeys = set()
+    for m in dashboard.get("reign", {}).get("members") or []:
+        if m.get("hotkey"):
+            hotkeys.add(str(m["hotkey"]))
+    for r in (dashboard.get("eval_runs") or [])[:40]:
+        if r.get("hotkey"):
+            hotkeys.add(str(r["hotkey"]))
+    coldkeys = await _coldkeys_for_hotkeys(db, subnet, hotkeys)
+
+    members = dashboard.get("reign", {}).get("members") or []
+    reign_chain = [
+        _reign_member(m, coldkeys.get(str(m.get("hotkey") or "")))
+        for m in sorted(members, key=lambda x: int(x.get("king_version") or 0), reverse=True)
+    ]
+    king_raw = current_king(dashboard.get("reign") or {})
+    current = _reign_member(king_raw, coldkeys.get(str(king_raw.get("hotkey") or ""))) if king_raw else None
+
+    duels = [_duel_run(r) for r in dashboard.get("eval_runs") or []]
+    duels.sort(key=lambda d: d.finished_at or "", reverse=True)
+    crownings = [_duel_run(r) for r in dashboard.get("crownings") or []]
+    crownings.sort(key=lambda d: int(d.king_version or 0), reverse=True)
+    fails = [_fail_run(r) for r in (dashboard.get("fails") or [])[:20]]
 
     return AlbedoStatusResponse(
         subnet=subnet,
-        updated_at=(dashboard or {}).get("updated_at"),
-        source_url=settings.albedo_dashboard_url,
-        king=_parse_king(king_raw),
-        king_chain=[k for k in (_parse_king(x) for x in chain_raw) if k is not None],
-        queue_len=int((dashboard or {}).get("queue_len") or 0),
-        current_eval=(dashboard or {}).get("current_eval"),
-        stats=AlbedoEvalStats(
-            queued=int(stats_raw.get("queued") or 0),
-            accepted=int(stats_raw.get("accepted") or 0),
-            rejected=int(stats_raw.get("rejected") or 0),
-            failed=int(stats_raw.get("failed") or 0),
-            duplicates=int(stats_raw.get("duplicates") or 0),
-            injection_attempts=int(stats_raw.get("injection_attempts") or 0),
-        ),
-        recent_history=_parse_history(history_raw),
+        updated_at=dashboard.get("updated_at"),
+        schema_version=int(dashboard.get("schema_version") or 2),
+        source_url="https://us-east-1.hippius.com/albedo/data/dashboard.json",
+        current_king=current,
+        reign_chain=reign_chain,
+        crownings=crownings,
+        recent_duels=duels[:25],
+        recent_fails=fails,
+        pipeline=_pipeline_state(state_raw),
+        stats=dashboard.get("stats") or {},
+        queue_len=len(dashboard.get("queue") or []),
+        current_eval=dashboard.get("current_eval"),
+    )
+
+
+@router.get("/analytics", response_model=HfAnalyticsResponse)
+async def hf_analytics(
+    subnet: int = Query(default=97, ge=0),
+    limit: int = Query(default=40, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> HfAnalyticsResponse:
+    """HF namespace leaderboard: crowns, dethrones, win/crown rates."""
+    dashboard = await fetch_albedo_dashboard()
+    if not dashboard:
+        return HfAnalyticsResponse(
+            subnet=subnet,
+            summary=HfAnalyticsSummary(),
+        )
+
+    hotkeys: set[str] = set()
+    for r in dashboard.get("eval_runs") or []:
+        if r.get("hotkey"):
+            hotkeys.add(str(r["hotkey"]))
+    coldkeys = await _coldkeys_for_hotkeys(db, subnet, hotkeys)
+    built = build_hf_analytics(dashboard, coldkey_by_hotkey=coldkeys)
+
+    accounts = [HfAccountStats(**row) for row in built["accounts"][:limit]]
+    summary = HfAnalyticsSummary(
+        total_eval_runs=built["total_eval_runs"],
+        total_crownings=built["total_crownings"],
+        unique_hf_accounts=built["unique_hf_accounts"],
+        top_crown_holder=built["top_crown_holder"],
+        crown_share_top=built["crown_share_top"],
+    )
+    return HfAnalyticsResponse(
+        subnet=subnet,
+        updated_at=dashboard.get("updated_at"),
+        summary=summary,
+        accounts=accounts,
     )
 
 
@@ -104,9 +233,9 @@ async def incentive_overview(
     live: bool = Query(default=False, description="Fetch metagraph from chain (slow)"),
     db: AsyncSession = Depends(get_db),
 ) -> IncentiveOverviewResponse:
-    """Metagraph incentive/emission per miner, merged with Albedo king identity."""
     dashboard = await fetch_albedo_dashboard()
-    king = _parse_king((dashboard or {}).get("king"))
+    king_raw = current_king((dashboard or {}).get("reign") or {}) if dashboard else None
+    king = _reign_member(king_raw) if king_raw else None
     king_hk = king_hotkey(dashboard)
     king_id = king_uid(dashboard)
 
@@ -139,8 +268,7 @@ async def incentive_overview(
         finally:
             await client.disconnect()
     else:
-        miners_result = await _load_miners(db, subnet)
-        for m in miners_result:
+        for m in await _load_miners(db, subnet):
             if m.is_validator:
                 continue
             neuron_rows.append(
@@ -156,7 +284,6 @@ async def incentive_overview(
             )
 
     commits_by_uid = await _load_commits(db, subnet)
-
     entries: list[MinerIncentiveEntry] = []
     for uid, hotkey, coldkey, incentive, emission, rank_pos, is_validator in neuron_rows:
         if incentive < min_incentive:
@@ -184,13 +311,11 @@ async def incentive_overview(
     entries.sort(key=lambda e: (-e.incentive, e.uid))
     entries = entries[:limit]
     top = entries[0].incentive if entries else 0.0
-    incentivized = sum(1 for e in entries if e.receiving_incentive)
-
     return IncentiveOverviewResponse(
         subnet=subnet,
         metagraph_block=metagraph_block,
         king=king,
-        incentivized_count=incentivized,
+        incentivized_count=sum(1 for e in entries if e.receiving_incentive),
         top_incentive=top,
         miners=entries,
     )
