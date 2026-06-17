@@ -13,6 +13,7 @@ import {
   type DashboardSortKey,
 } from "@/lib/dashboardSort";
 import { getSubnetProfile } from "@/lib/subnets";
+import { getSubnetTheme } from "@/lib/subnetTheme";
 import { DASHBOARD_POLL_MS, useDashboardSync } from "@/lib/DashboardSyncContext";
 import { useSubnet } from "@/lib/useSubnet";
 import TableSortBar from "@/components/TableSortBar";
@@ -20,6 +21,7 @@ import TableSortBar from "@/components/TableSortBar";
 export default function LiveDashboard() {
   const { subnet } = useSubnet();
   const profile = getSubnetProfile(subnet);
+  const theme = getSubnetTheme(subnet);
   const {
     stats,
     commits,
@@ -35,8 +37,13 @@ export default function LiveDashboard() {
   const [commitSort, setCommitSort] = useState<DashboardSortKey>("commit_desc");
   const [registrySort, setRegistrySort] = useState<DashboardSortKey>("committed_first");
 
-  const commitLabel = profile.features.commitLabel;
-  const modelHost = profile.features.modelHost;
+  const commitLabel = theme.commitLabel;
+  const modelHost = theme.modelHost;
+
+  const subnetFeed = useMemo(
+    () => feed.filter((e) => e.subnet == null || e.subnet === subnet),
+    [feed, subnet]
+  );
 
   const sortedCommits = useMemo(() => sortCommits(commits, commitSort), [commits, commitSort]);
   const sortedRegistry = useMemo(
@@ -63,7 +70,7 @@ export default function LiveDashboard() {
       )}
       {!apiError && syncStatus && syncStatus.in_sync === false && (
         <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[11px] text-amber-300">
-          Chain has <strong>{syncStatus.onchain_v6_count ?? "—"}</strong> on-chain commits (uids{" "}
+          SN{subnet} chain has <strong>{syncStatus.onchain_v6_count ?? "—"}</strong> on-chain commits (uids{" "}
           {syncStatus.onchain_uids.join(", ") || "—"}) but DB has{" "}
           <strong>{syncStatus.db_v6_count}</strong>
           {syncStatus.missing_in_db.length > 0 && (
@@ -78,13 +85,14 @@ export default function LiveDashboard() {
       )}
       {!apiError && commits.length === 0 && stats?.committed_miners === 0 && (
         <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[11px] text-amber-300">
-          No {commitLabel} commits in database yet — check{" "}
+          No {commitLabel} commits in SN{subnet} database yet — check{" "}
           <code className="mono text-amber-100">docker compose logs collector</code> and{" "}
-          <code className="mono text-amber-100">GET /api/v1/commitments/onchain</code>.
+          <code className="mono text-amber-100">GET /api/v1/commitments/onchain?subnet={subnet}</code>.
         </div>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-zinc-500">
         <div className="flex items-center gap-3">
+          <SubnetChip netuid={subnet} name={profile.shortName} accent={theme.accent} />
           <span
             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border ${
               liveStatus === "live"
@@ -107,14 +115,14 @@ export default function LiveDashboard() {
           )}
         </div>
         <span className="mono text-zinc-600">
-          chain {syncStatus?.onchain_v6_count ?? "—"} · db {syncStatus?.db_v6_count ?? stats?.committed_miners ?? "—"} · sync ~{DASHBOARD_POLL_MS / 1000}s
+          SN{subnet} · chain {syncStatus?.onchain_v6_count ?? "—"} · db {syncStatus?.db_v6_count ?? stats?.committed_miners ?? "—"}
         </span>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         <Kpi label="miners" value={String(stats?.total_neurons ?? "—")} />
-        <Kpi label={`${commitLabel} committed`} value={String(stats?.committed_miners ?? "—")} accent />
-        <Kpi label={`${commitLabel} active`} value={String(committedCount)} accent />
+        <Kpi label={`${commitLabel} committed`} value={String(stats?.committed_miners ?? "—")} accentClass={theme.kpiAccent} />
+        <Kpi label={`${commitLabel} active`} value={String(committedCount)} accentClass={theme.kpiAccent} />
         <Kpi label="no commit" value={String(stats?.uncommitted_miners ?? "—")} warn={(stats?.uncommitted_miners ?? 0) > 0} />
         <Kpi label="coverage" value={stats ? `${stats.coverage_pct}%` : "—"} />
         <Kpi label="latest blk" value={stats?.latest_commit_block?.toLocaleString() ?? "—"} mono />
@@ -124,36 +132,39 @@ export default function LiveDashboard() {
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
         <aside className="panel xl:col-span-3 order-2 xl:order-1">
           <div className="panel-head">
-            <h2 className="text-[12px] font-semibold text-zinc-100">live feed</h2>
-            <span className="pill-v6">instant</span>
+            <h2 className="text-[12px] font-semibold text-zinc-100">live feed · SN{subnet}</h2>
+            <span className={theme.pill}>instant</span>
           </div>
           <div className="max-h-[320px] overflow-y-auto divide-y divide-zinc-800/50">
-            {feed.length === 0 ? (
-              <p className="px-3 py-4 text-[10px] text-zinc-500">waiting for new commits…</p>
+            {subnetFeed.length === 0 ? (
+              <p className="px-3 py-4 text-[10px] text-zinc-500">waiting for new {commitLabel} commits on SN{subnet}…</p>
             ) : (
-              feed.map((e, i) => (
-                <div key={`${e.hotkey}-${i}`} className="px-3 py-2 bg-lime-500/5">
-                  <div className="flex justify-between gap-2">
-                    <span className="pill-v6 text-[9px]">{e.type?.replace("commitment_", "")}</span>
-                    <span className="text-[9px] text-zinc-600">{e.timestamp ? fmtTime(e.timestamp) : "now"}</span>
+              subnetFeed.map((e, i) => {
+                const version = e.version ?? commitLabel;
+                return (
+                  <div key={`${e.hotkey}-${e.timestamp}-${i}`} className={`px-3 py-2 ${theme.feedItemBg}`}>
+                    <div className="flex justify-between gap-2">
+                      <span className={`${theme.pill} text-[9px]`}>{version}</span>
+                      <span className="text-[9px] text-zinc-600">{e.timestamp ? fmtTime(e.timestamp) : "now"}</span>
+                    </div>
+                    <p className={`mono text-[11px] ${theme.textAccent} mt-1`}>uid {e.uid ?? "?"}</p>
+                    <p className="text-[10px] text-zinc-500 truncate mt-0.5">
+                      {e.repo ? (
+                        <a
+                          href={modelCommitUrl(e.repo, e.digest ?? "", modelHost)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-sky-400 hover:underline"
+                        >
+                          {shortRepo(e.repo, 36)}
+                        </a>
+                      ) : (
+                        e.model_uri
+                      )}
+                    </p>
                   </div>
-                  <p className="mono text-[11px] text-lime-400 mt-1">uid {e.uid ?? "?"}</p>
-                  <p className="text-[10px] text-zinc-500 truncate mt-0.5">
-                    {e.repo ? (
-                      <a
-                        href={modelCommitUrl(e.repo, "", modelHost)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="hover:text-sky-400 hover:underline"
-                      >
-                        {shortRepo(e.repo, 36)}
-                      </a>
-                    ) : (
-                      e.model_uri
-                    )}
-                  </p>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </aside>
@@ -161,10 +172,14 @@ export default function LiveDashboard() {
         <section className="panel xl:col-span-9 order-1 xl:order-2">
           <div className="panel-head">
             <div>
-              <h2 className="text-[12px] font-semibold text-zinc-100">{commitLabel} commits · SN{subnet}</h2>
-              <p className="text-[10px] text-zinc-500">new rows flash green</p>
+              <h2 className="text-[12px] font-semibold text-zinc-100">
+                {profile.name} {commitLabel} commits · SN{subnet}
+              </h2>
+              <p className="text-[10px] text-zinc-500">
+                {profile.tagline} · new rows flash {theme.accent === "violet" ? "violet" : "green"}
+              </p>
             </div>
-            <span className="pill-v6">{commits.length} active</span>
+            <span className={theme.pill}>{commits.length} active</span>
           </div>
           <div className="overflow-x-auto">
             <table className="tbl">
@@ -176,14 +191,14 @@ export default function LiveDashboard() {
                   <th>hotkey</th>
                   <th>coldkey</th>
                   <th>model</th>
-                  <th>hash</th>
+                  <th>{modelHost === "huggingface" ? "revision" : "hash"}</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedCommits.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="text-center text-zinc-500 py-8">
-                      no {commitLabel} commits yet
+                      no {commitLabel} commits on SN{subnet} yet
                     </td>
                   </tr>
                 ) : (
@@ -192,18 +207,20 @@ export default function LiveDashboard() {
                     return (
                       <tr
                         key={c.id}
-                        className={isNew ? "bg-lime-500/15 ring-1 ring-lime-500/40" : ""}
+                        className={isNew ? theme.rowFlash : ""}
                       >
                         <td className="mono font-medium text-zinc-200">
                           {c.uid ?? "—"}
-                          <span className="ml-1 text-[8px] uppercase text-lime-400">{c.version ?? commitLabel}</span>
-                          {isNew && <span className="ml-1 text-[9px] text-lime-400">NEW</span>}
+                          <span className={`ml-1 text-[8px] uppercase ${theme.textAccent}`}>
+                            {c.version ?? commitLabel}
+                          </span>
+                          {isNew && <span className={`ml-1 text-[9px] ${theme.textAccent}`}>NEW</span>}
                         </td>
                         <td className="mono text-zinc-300 tabular-nums">{c.commit_block.toLocaleString()}</td>
                         <td className="mono text-zinc-500 tabular-nums">
                           {c.registered_at_block?.toLocaleString() ?? "—"}
                         </td>
-                        <td className="mono text-lime-400/90" title={c.hotkey}>
+                        <td className={`mono ${theme.textAccentSoft}`} title={c.hotkey}>
                           {shortAddr(c.hotkey, 6)}
                         </td>
                         <td className="mono text-zinc-500" title={c.coldkey ?? ""}>
@@ -239,7 +256,10 @@ export default function LiveDashboard() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <h2 className="text-[12px] font-semibold text-zinc-100">miner registry · SN{subnet}</h2>
+            <h2 className="text-[12px] font-semibold text-zinc-100">
+              {profile.name} miner registry · SN{subnet}
+            </h2>
+            <p className="text-[10px] text-zinc-500">{profile.tagline}</p>
           </div>
           <span className="text-[10px] text-zinc-500">
             {registry?.total ?? 0} miners · {registry?.v6_count ?? 0} {commitLabel}
@@ -263,7 +283,7 @@ export default function LiveDashboard() {
               {sortedRegistry.length === 0 ? (
                 <tr>
                   <td colSpan={profile.features.incentiveColumn ? 8 : 7} className="text-center text-zinc-500 py-8 text-[10px]">
-                    {registry ? "no miners" : "loading registry…"}
+                    {registry ? `no miners on SN${subnet}` : "loading registry…"}
                   </td>
                 </tr>
               ) : (
@@ -271,7 +291,7 @@ export default function LiveDashboard() {
                 <tr
                   key={m.uid}
                   className={`${m.has_v6 ? "" : "opacity-50"} ${
-                    flashUids.has(m.uid) ? "bg-lime-500/10" : ""
+                    flashUids.has(m.uid) ? theme.rowFlashSubtle : ""
                   }`}
                 >
                   <td className="mono text-zinc-200">{m.uid}</td>
@@ -282,7 +302,7 @@ export default function LiveDashboard() {
                   {profile.features.incentiveColumn && (
                     <td
                       className={`mono tabular-nums ${
-                        m.receiving_incentive ? "text-lime-400" : "text-zinc-600"
+                        m.receiving_incentive ? theme.textAccent : "text-zinc-600"
                       }`}
                     >
                       {fmtIncentive(m.incentive)}
@@ -290,7 +310,7 @@ export default function LiveDashboard() {
                   )}
                   <td>
                     {m.has_v6 ? (
-                      <span className="pill-v6">{m.version ?? commitLabel}</span>
+                      <span className={theme.pill}>{m.version ?? commitLabel}</span>
                     ) : (
                       <span className="pill-none">—</span>
                     )}
@@ -321,11 +341,33 @@ export default function LiveDashboard() {
         <TableSortBar sort={registrySort} onSort={setRegistrySort} showStatus />
         {waiting.length > 0 && (
           <div className="px-3 py-2 border-t border-zinc-800/80 text-[10px] text-zinc-600">
-            {waiting.length} miners without {commitLabel}
+            {waiting.length} miners on SN{subnet} without {commitLabel} commit
           </div>
         )}
       </section>
     </div>
+  );
+}
+
+function SubnetChip({
+  netuid,
+  name,
+  accent,
+}: {
+  netuid: number;
+  name: string;
+  accent: "amber" | "violet" | "emerald";
+}) {
+  const styles = {
+    amber: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+    violet: "border-violet-500/40 bg-violet-500/10 text-violet-300",
+    emerald: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  };
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${styles[accent]}`}>
+      <span className="mono">SN{netuid}</span>
+      <span className="opacity-80">{name}</span>
+    </span>
   );
 }
 
@@ -342,14 +384,14 @@ function fmtTime(iso: string) {
 function Kpi({
   label,
   value,
-  accent,
+  accentClass,
   warn,
   mono,
   small,
 }: {
   label: string;
   value: string;
-  accent?: boolean;
+  accentClass?: string;
   warn?: boolean;
   mono?: boolean;
   small?: boolean;
@@ -360,7 +402,7 @@ function Kpi({
       <p
         className={`${small ? "text-[11px] font-normal text-zinc-400" : "stat-value"} ${
           mono ? "mono" : ""
-        } ${accent ? "text-lime-400" : ""} ${warn ? "text-amber-400" : ""}`}
+        } ${accentClass ?? ""} ${warn ? "text-amber-400" : ""}`}
       >
         {value}
       </p>

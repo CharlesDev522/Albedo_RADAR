@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
-  hippiusModelUrl,
+  modelCommitUrl,
   shortAddr,
   shortRepo,
 } from "@/lib/api";
@@ -17,10 +17,14 @@ import {
   type GroupView,
   type MinerGroup,
 } from "@/lib/minerGroups";
+import { getSubnetProfile } from "@/lib/subnets";
+import { getSubnetTheme } from "@/lib/subnetTheme";
 import { useSubnet } from "@/lib/useSubnet";
 
 export default function MinerGroupsPanel() {
   const { subnet } = useSubnet();
+  const profile = getSubnetProfile(subnet);
+  const theme = getSubnetTheme(subnet);
   const { registry, commits } = useDashboardSync();
   const [view, setView] = useState<GroupView>("coldkey");
   const [multiOnly, setMultiOnly] = useState(true);
@@ -46,9 +50,11 @@ export default function MinerGroupsPanel() {
     <section className="panel">
       <div className="panel-head">
         <div>
-          <h2 className="text-[12px] font-semibold text-zinc-100">miner clusters · SN{subnet}</h2>
+          <h2 className="text-[12px] font-semibold text-zinc-100">
+            {profile.name} miner clusters · SN{subnet}
+          </h2>
           <p className="text-[10px] text-zinc-500 mt-0.5">
-            same coldkey operators · shared HuggingFace owners (happyconst, rsgold, …)
+            same coldkey operators · shared HuggingFace model owners
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -69,7 +75,7 @@ export default function MinerGroupsPanel() {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 p-3 border-b border-zinc-800/80">
         <MiniStat label="miners" value={String(summary.totalMiners)} />
-        <MiniStat label="v6" value={String(summary.v6Miners)} accent />
+        <MiniStat label={theme.commitLabel} value={String(summary.v6Miners)} accentClass={theme.kpiAccent} />
         <MiniStat label="multi coldkeys" value={String(summary.multiColdkeys)} />
         <MiniStat label="multi HF owners" value={String(summary.multiOwners)} />
         <MiniStat label="largest coldkey" value={String(summary.largestColdkey)} />
@@ -79,7 +85,7 @@ export default function MinerGroupsPanel() {
       {groups.length === 0 ? (
         <div className="px-3 py-10 text-center text-[11px] text-zinc-500">
           {multiOnly
-            ? "no multi-miner groups yet — try “all groups” or wait for more registry data"
+            ? `no multi-miner groups on SN${subnet} yet — try “all groups” or wait for more registry data`
             : "no groups to show"}
         </div>
       ) : (
@@ -91,6 +97,9 @@ export default function MinerGroupsPanel() {
               view={view}
               open={expanded.has(g.key)}
               onToggle={() => toggleExpand(g.key)}
+              commitLabel={theme.commitLabel}
+              modelHost={theme.modelHost}
+              uidChipClass={theme.uidChipCommitted}
             />
           ))}
         </div>
@@ -129,11 +138,17 @@ function GroupCard({
   view,
   open,
   onToggle,
+  commitLabel,
+  modelHost,
+  uidChipClass,
 }: {
   group: MinerGroup;
   view: GroupView;
   open: boolean;
   onToggle: () => void;
+  commitLabel: string;
+  modelHost: "hippius" | "huggingface";
+  uidChipClass: string;
 }) {
   const accent =
     view === "owner" ? ownerPalette(group.label) : ownerPalette(group.label.slice(-8));
@@ -166,7 +181,7 @@ function GroupCard({
               </p>
             </div>
             <p className="text-[10px] text-zinc-500 mt-1">
-              {group.miners.length} miners · {group.v6Count} v6
+              {group.miners.length} miners · {group.committedCount} {commitLabel}
               {view === "owner" && group.coldkeyCount > 1 && (
                 <> · {group.coldkeyCount} coldkeys</>
               )}
@@ -177,7 +192,7 @@ function GroupCard({
 
         <div className="flex flex-wrap gap-1 mt-2">
           {group.miners.map((m) => (
-            <UidChip key={m.uid} uid={m.uid} hasV6={m.hasV6} />
+            <UidChip key={m.uid} uid={m.uid} hasCommit={m.hasCommit} committedClass={uidChipClass} commitLabel={commitLabel} />
           ))}
         </div>
 
@@ -218,8 +233,10 @@ function GroupCard({
                   <tr key={m.uid}>
                     <td className="mono text-zinc-200">
                       {m.uid}
-                      {m.hasV6 ? (
-                        <span className="ml-1 text-[8px] text-lime-400">v6</span>
+                      {m.hasCommit ? (
+                        <span className={`ml-1 text-[8px] ${pal?.text ?? "text-lime-400"}`}>
+                          {m.version ?? commitLabel}
+                        </span>
                       ) : (
                         <span className="ml-1 text-[8px] text-zinc-600">—</span>
                       )}
@@ -235,11 +252,11 @@ function GroupCard({
                     <td className="text-[10px] max-w-[140px] truncate">
                       {m.repo ? (
                         <a
-                          href={hippiusModelUrl(m.repo)}
+                          href={modelCommitUrl(m.repo, m.digest ?? "", modelHost)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className={`hover:underline ${pal?.text ?? "text-sky-400/80"}`}
-                          title={hippiusModelUrl(m.repo)}
+                          title={modelCommitUrl(m.repo, m.digest ?? "", modelHost)}
                         >
                           {shortRepo(m.repo, 22)}
                         </a>
@@ -258,15 +275,25 @@ function GroupCard({
   );
 }
 
-function UidChip({ uid, hasV6 }: { uid: number; hasV6: boolean }) {
+function UidChip({
+  uid,
+  hasCommit,
+  committedClass,
+  commitLabel,
+}: {
+  uid: number;
+  hasCommit: boolean;
+  committedClass: string;
+  commitLabel: string;
+}) {
   return (
     <span
       className={`inline-flex items-center justify-center min-w-[26px] h-[18px] px-1 rounded text-[9px] mono tabular-nums border ${
-        hasV6
-          ? "border-lime-500/40 bg-lime-500/15 text-lime-300"
+        hasCommit
+          ? committedClass
           : "border-zinc-700 bg-zinc-900/80 text-zinc-500"
       }`}
-      title={hasV6 ? `uid ${uid} · v6` : `uid ${uid}`}
+      title={hasCommit ? `uid ${uid} · ${commitLabel}` : `uid ${uid}`}
     >
       {uid}
     </span>
@@ -276,16 +303,16 @@ function UidChip({ uid, hasV6 }: { uid: number; hasV6: boolean }) {
 function MiniStat({
   label,
   value,
-  accent,
+  accentClass,
 }: {
   label: string;
   value: string;
-  accent?: boolean;
+  accentClass?: string;
 }) {
   return (
     <div className="rounded border border-zinc-800/80 bg-zinc-950/50 px-2 py-1.5">
       <p className="text-[9px] uppercase tracking-wide text-zinc-600">{label}</p>
-      <p className={`text-[13px] font-semibold tabular-nums mt-0.5 ${accent ? "text-lime-400" : "text-zinc-200"}`}>
+      <p className={`text-[13px] font-semibold tabular-nums mt-0.5 ${accentClass ?? "text-zinc-200"}`}>
         {value}
       </p>
     </div>

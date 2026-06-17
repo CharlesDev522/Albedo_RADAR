@@ -57,20 +57,20 @@ export default async function Page({
       initialSlotData={slotData}
       initialSyncStatus={syncStatus}
     >
-      <div className="space-y-3">
+      <div className="space-y-3" key={`dashboard-${subnet}`}>
         {profile.features.quasarStatus && (
           <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading quasar…</div>}>
-            <QuasarStatusPanel />
+            <QuasarStatusPanel key={`quasar-${subnet}`} />
           </Suspense>
         )}
         <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading slots…</div>}>
-          <SlotStatusBoard />
+          <SlotStatusBoard key={`slots-${subnet}`} />
         </Suspense>
         <Suspense fallback={null}>
-          <LiveDashboard />
+          <LiveDashboard key={`live-${subnet}`} />
         </Suspense>
         <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading clusters…</div>}>
-          <MinerGroupsPanel />
+          <MinerGroupsPanel key={`clusters-${subnet}`} />
         </Suspense>
       </div>
     </DashboardSyncProvider>

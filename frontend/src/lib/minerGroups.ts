@@ -6,8 +6,10 @@ export interface MinerRow {
   uid: number;
   hotkey: string;
   coldkey: string;
-  hasV6: boolean;
+  hasCommit: boolean;
+  version: string | null;
   repo: string | null;
+  digest: string | null;
   commitBlock: number | null;
 }
 
@@ -16,7 +18,7 @@ export interface MinerGroup {
   label: string;
   kind: GroupView;
   miners: MinerRow[];
-  v6Count: number;
+  committedCount: number;
   coldkeyCount: number;
   ownerCounts: Record<string, number>;
 }
@@ -42,8 +44,10 @@ export function buildMinerRows(
       uid: m.uid,
       hotkey: m.hotkey,
       coldkey: m.coldkey,
-      hasV6: m.has_v6,
+      hasCommit: m.has_v6,
+      version: m.version ?? c?.version ?? null,
       repo: m.repo ?? c?.repo ?? null,
+      digest: c?.digest ?? m.model_uri?.split("@")[1] ?? null,
       commitBlock: m.commit_block ?? c?.commit_block ?? null,
     };
   });
@@ -66,7 +70,7 @@ function coldkeysFor(miners: MinerRow[]): Set<string> {
 function sortGroups(groups: MinerGroup[]): MinerGroup[] {
   return [...groups].sort((a, b) => {
     if (b.miners.length !== a.miners.length) return b.miners.length - a.miners.length;
-    if (b.v6Count !== a.v6Count) return b.v6Count - a.v6Count;
+    if (b.committedCount !== a.committedCount) return b.committedCount - a.committedCount;
     return a.label.localeCompare(b.label);
   });
 }
@@ -89,7 +93,7 @@ export function groupByColdkey(rows: MinerRow[], multiOnly: boolean): MinerGroup
       label: key,
       kind: "coldkey",
       miners: sorted,
-      v6Count: sorted.filter((m) => m.hasV6).length,
+      committedCount: sorted.filter((m) => m.hasCommit).length,
       coldkeyCount: 1,
       ownerCounts: ownerCountsFor(sorted),
     });
@@ -116,7 +120,7 @@ export function groupByOwner(rows: MinerRow[], multiOnly: boolean): MinerGroup[]
       label: owner,
       kind: "owner",
       miners: sorted,
-      v6Count: sorted.filter((m) => m.hasV6).length,
+      committedCount: sorted.filter((m) => m.hasCommit).length,
       coldkeyCount: coldkeysFor(sorted).size,
       ownerCounts: { [owner]: sorted.length },
     });
@@ -137,7 +141,7 @@ export function clusterSummary(rows: MinerRow[]) {
     largestColdkey,
     largestOwner,
     totalMiners: rows.length,
-    v6Miners: rows.filter((r) => r.hasV6).length,
+    v6Miners: rows.filter((r) => r.hasCommit).length,
   };
 }
 

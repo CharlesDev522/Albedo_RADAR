@@ -34,6 +34,8 @@ export interface LiveEvent {
   hotkey?: string;
   coldkey?: string;
   repo?: string;
+  digest?: string;
+  version?: string;
   model_uri?: string;
   commit_block?: number;
   registered_at_block?: number;
