@@ -21,7 +21,7 @@ from app.schemas.commitment import (
 router = APIRouter(prefix="/commitments", tags=["commitments"])
 settings = get_settings()
 
-_MODEL_VERSIONS = ("v5", "v6", "quasar")
+_MODEL_VERSIONS = ("v5", "v6", "json", "quasar")
 _MODEL_ONLY = MinerCommitment.version.in_(_MODEL_VERSIONS)
 
 

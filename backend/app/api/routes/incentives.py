@@ -15,7 +15,7 @@ from app.schemas.incentives import IncentiveOverviewResponse, MinerIncentiveEntr
 router = APIRouter(prefix="/incentives", tags=["incentives"])
 settings = get_settings()
 
-_MODEL_VERSIONS = ("v5", "v6", "quasar")
+_MODEL_VERSIONS = ("v5", "v6", "json", "quasar")
 
 
 @router.get("", response_model=IncentiveOverviewResponse)

@@ -23,7 +23,12 @@ logger = logging.getLogger(__name__)
 _BLOCK_HASH_CACHE: OrderedDict[int, str] = OrderedDict()
 _BLOCK_HASH_CACHE_MAX = 10_000
 
-MODEL_COMMIT_VERSIONS = frozenset({"v5", "v6", "quasar"})
+PIPE_MODEL_VERSIONS = frozenset({"v5", "v6"})
+JSON_MODEL_VERSION = "json"
+# Legacy rows stored before SN97/SN24 JSON split used "quasar" for all JSON commits.
+LEGACY_QUASAR_VERSION = "quasar"
+ALL_MODEL_VERSIONS = frozenset({*PIPE_MODEL_VERSIONS, JSON_MODEL_VERSION, LEGACY_QUASAR_VERSION})
+MODEL_COMMIT_VERSIONS = ALL_MODEL_VERSIONS  # backwards-compatible alias
 _MODEL_COMMIT_RE = re.compile(r"^v[56]\|")
 
 
@@ -63,8 +68,11 @@ def parse_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
     }
 
 
-def parse_quasar_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
-    """Parse SN24 Quasar JSON commit: {"model": "user/repo", "revision": "git_sha"}."""
+def parse_json_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
+    """Parse JSON model commit: {"model": "user/repo", "revision": "git_sha"}.
+
+    Used on SN97 (legacy Albedo JSON) and SN24 (Quasar). Stored as version ``json``.
+    """
     if not data or not data.lstrip().startswith("{"):
         return None
     try:
@@ -79,7 +87,7 @@ def parse_quasar_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
         return None
     rev = str(revision).removeprefix("revision:")
     return {
-        "version": "quasar",
+        "version": JSON_MODEL_VERSION,
         "repo": str(repo),
         "digest": f"revision:{rev}",
         "revision": rev,
@@ -87,12 +95,26 @@ def parse_quasar_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
     }
 
 
-def parse_any_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
-    """Parse v5/v6 pipe commits or SN24 Quasar JSON commits."""
+# Backwards-compatible alias (SN24 Quasar uses the same JSON wire format).
+parse_quasar_commit = parse_json_model_commit
+
+
+def parse_subnet_model_commit(
+    data: str,
+    chain_hotkey: str,
+    netuid: int | None = None,
+) -> dict[str, Any] | None:
+    """Parse v5/v6 pipe commits or JSON model commits for a subnet."""
+    del netuid  # reserved for subnet-specific rules; JSON is shared across SN97/SN24
     parsed = parse_model_commit(data, chain_hotkey)
     if parsed is not None:
         return parsed
-    return parse_quasar_commit(data, chain_hotkey)
+    return parse_json_model_commit(data, chain_hotkey)
+
+
+def parse_any_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
+    """Parse any supported model commit (pipe or JSON)."""
+    return parse_subnet_model_commit(data, chain_hotkey)
 
 
 def parse_v6(data: str, chain_hotkey: str) -> dict[str, Any] | None:
@@ -124,14 +146,15 @@ def timelock_hotkeys_from_map(commitment_of: dict[str, dict[str, Any]]) -> set[s
 
 def active_model_from_map(
     commitment_of: dict[str, dict[str, Any]],
+    netuid: int | None = None,
 ) -> dict[str, tuple[int, str]]:
-    """Active plaintext v5/v6 per hotkey: (on-chain commit_block, reveal_string)."""
+    """Active plaintext model commits per hotkey: (on-chain commit_block, reveal_string)."""
     active: dict[str, tuple[int, str]] = {}
     for hotkey, raw in commitment_of.items():
         decoded = decode_commitment_of_raw(raw)
         if decoded.kind != CommitmentKind.PLAINTEXT or not decoded.reveal_string:
             continue
-        parsed = parse_any_model_commit(decoded.reveal_string, hotkey)
+        parsed = parse_subnet_model_commit(decoded.reveal_string, hotkey, netuid)
         if parsed is None:
             continue
         block = decoded.commit_block or 0
@@ -151,10 +174,11 @@ async def _iter_revealed(subtensor: Any, netuid: int) -> list[tuple[str, int, st
 
 def _latest_model_commits_per_hotkey(
     entries: list[tuple[str, int, str]],
+    netuid: int | None = None,
 ) -> dict[str, tuple[int, str]]:
     latest: dict[str, tuple[int, str]] = {}
     for hotkey, block, data in entries:
-        if parse_any_model_commit(data, hotkey) is None:
+        if parse_subnet_model_commit(data, hotkey, netuid) is None:
             continue
         prev = latest.get(hotkey)
         if prev is None or block > prev[0]:
@@ -246,7 +270,7 @@ def _commits_from_merged(
 ) -> list[Commit]:
     commits: list[Commit] = []
     for hotkey, (block, data, source) in merged.items():
-        parsed = parse_any_model_commit(data, hotkey)
+        parsed = parse_subnet_model_commit(data, hotkey, netuid)
         if parsed is None:
             continue
         neuron = neurons.get(hotkey)
@@ -284,11 +308,11 @@ async def scan_v6_from_snapshot(
 ) -> list[Commit]:
     """Build v6 commit list from a pre-loaded chain snapshot."""
     timelock = timelock_hotkeys_from_map(snapshot.commitment_of)
-    active = active_model_from_map(snapshot.commitment_of)
+    active = active_model_from_map(snapshot.commitment_of, snapshot.netuid)
 
     revealed_model: dict[str, tuple[int, str]] = {}
     if include_revealed and snapshot.revealed is not None:
-        revealed_model = _latest_model_commits_per_hotkey(snapshot.revealed)
+        revealed_model = _latest_model_commits_per_hotkey(snapshot.revealed, snapshot.netuid)
 
     merged = _merge_model_commit_sources(active, revealed_model, timelock)
 

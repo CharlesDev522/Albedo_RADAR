@@ -18,6 +18,12 @@ import { DASHBOARD_POLL_MS, useDashboardSync } from "@/lib/DashboardSyncContext"
 import { useSubnet } from "@/lib/useSubnet";
 import TableSortBar from "@/components/TableSortBar";
 
+function displayVersion(version: string | null | undefined, subnet: number, fallback: string): string {
+  const v = version ?? fallback;
+  if (subnet === 24 && (v === "json" || v === "quasar")) return "quasar";
+  return v;
+}
+
 export default function LiveDashboard() {
   const { subnet } = useSubnet();
   const profile = getSubnetProfile(subnet);
@@ -140,7 +146,7 @@ export default function LiveDashboard() {
               <p className="px-3 py-4 text-[10px] text-zinc-500">waiting for new {commitLabel} commits on SN{subnet}…</p>
             ) : (
               subnetFeed.map((e, i) => {
-                const version = e.version ?? commitLabel;
+                const version = displayVersion(e.version, subnet, commitLabel);
                 return (
                   <div key={`${e.hotkey}-${e.timestamp}-${i}`} className={`px-3 py-2 ${theme.feedItemBg}`}>
                     <div className="flex justify-between gap-2">
@@ -212,7 +218,7 @@ export default function LiveDashboard() {
                         <td className="mono font-medium text-zinc-200">
                           {c.uid ?? "—"}
                           <span className={`ml-1 text-[8px] uppercase ${theme.textAccent}`}>
-                            {c.version ?? commitLabel}
+                            {displayVersion(c.version, subnet, commitLabel)}
                           </span>
                           {isNew && <span className={`ml-1 text-[9px] ${theme.textAccent}`}>NEW</span>}
                         </td>
@@ -310,7 +316,7 @@ export default function LiveDashboard() {
                   )}
                   <td>
                     {m.has_v6 ? (
-                      <span className={theme.pill}>{m.version ?? commitLabel}</span>
+                      <span className={theme.pill}>{displayVersion(m.version, subnet, commitLabel)}</span>
                     ) : (
                       <span className="pill-none">—</span>
                     )}

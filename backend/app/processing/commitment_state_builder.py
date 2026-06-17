@@ -23,7 +23,7 @@ from app.db.models import (
 logger = logging.getLogger(__name__)
 
 
-_MODEL_VERSIONS = frozenset({"v5", "v6", "quasar"})
+_MODEL_VERSIONS = frozenset({"v5", "v6", "json", "quasar"})
 
 
 class CommitmentStateBuilder:
@@ -76,7 +76,10 @@ class CommitmentStateBuilder:
                 self._apply_block_and_source(existing, commit)
                 existing.block_hash = commit.block_hash or existing.block_hash
                 existing.reveal_string = commit.reveal_string
-                existing.version = commit.commit_payload.get("version", existing.version)
+                existing.version = self._normalize_version(
+                    commit.commit_payload.get("version", existing.version),
+                    commit.netuid,
+                )
                 existing.repo = commit.commit_payload["repo"]
                 existing.digest = commit.commit_payload["digest"]
                 existing.model_uri = commit.model_uri
@@ -102,6 +105,10 @@ class CommitmentStateBuilder:
                 existing.coldkey = commit.coldkey
                 existing.registered_at_block = commit.registered_at_block
                 existing.miner_id = miner.id if miner else None
+                normalized_version = self._normalize_version(existing.version, commit.netuid)
+                if existing.version != normalized_version:
+                    existing.version = normalized_version
+                    existing.last_updated = datetime.now(timezone.utc)
                 if self._refresh_block_and_source(existing, commit):
                     existing.last_updated = datetime.now(timezone.utc)
                 stats["unchanged"] += 1
@@ -233,7 +240,15 @@ class CommitmentStateBuilder:
         )
         return result.scalar_one_or_none()
 
+    @staticmethod
+    def _normalize_version(version: str | None, netuid: int) -> str:
+        v = version or "v6"
+        if v == "quasar" and netuid != 24:
+            return "json"
+        return v
+
     def _build_commitment(self, commit: Commit, miner: Miner | None) -> MinerCommitment:
+        version = self._normalize_version(commit.commit_payload.get("version"), commit.netuid)
         return MinerCommitment(
             miner_id=miner.id if miner else None,
             subnet=commit.netuid,
@@ -244,7 +259,7 @@ class CommitmentStateBuilder:
             commit_block=commit.block_number,
             block_hash=commit.block_hash,
             reveal_string=commit.reveal_string,
-            version=commit.commit_payload.get("version", "v6"),
+            version=version,
             repo=commit.commit_payload["repo"],
             digest=commit.commit_payload["digest"],
             model_uri=commit.model_uri,

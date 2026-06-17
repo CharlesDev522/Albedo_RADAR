@@ -238,7 +238,7 @@ export const api = {
     fetchApi<CommitmentStats>(`/commitments/stats?subnet=${subnet}`),
   getCommitments: (subnet = DEFAULT_SUBNET) =>
     fetchApi<{ commitments: Commitment[]; total: number }>(
-      `/commitments?subnet=${subnet}&limit=200&sort=last_updated`
+      `/commitments?subnet=${subnet}&limit=200&sort=commit_block`
     ),
   getRegistry: (subnet = DEFAULT_SUBNET) =>
     fetchApi<Registry>(`/commitments/registry?subnet=${subnet}`),

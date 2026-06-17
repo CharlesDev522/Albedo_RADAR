@@ -89,9 +89,9 @@ export function getSubnetTheme(netuid: number): SubnetTheme {
     rowFlashSubtle: "bg-lime-500/10",
     uidChipCommitted: "border-lime-500/40 bg-lime-500/15 text-lime-300",
     kpiAccent: "text-lime-400",
-    slotDefaultFilter: "v6",
-    slotPrimaryType: "v6",
-    slotSummaryPrimaryLabel: "v6",
+    slotDefaultFilter: "committed",
+    slotPrimaryType: "json",
+    slotSummaryPrimaryLabel: "json",
   };
 }
 

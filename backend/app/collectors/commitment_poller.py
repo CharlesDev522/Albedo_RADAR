@@ -156,7 +156,7 @@ class CommitmentPoller:
                 await session.execute(
                     select(MinerCommitment.hotkey).where(
                         MinerCommitment.subnet == netuid,
-                        MinerCommitment.version.in_(("v5", "v6", "quasar")),
+                        MinerCommitment.version.in_(("v5", "v6", "json", "quasar")),
                     )
                 )
             ).scalars().all()
