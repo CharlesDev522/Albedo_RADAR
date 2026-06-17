@@ -26,11 +26,18 @@ def test_parse_json_hf_repo_alias():
     assert parsed["version"] == "json"
 
 
-def test_sn97_json_not_labeled_quasar():
-    data = '{"model": "divinequest/m9n2", "revision": "cca9b0d216cd9c838b1f8ac7be5fd7bb9d4c2be6"}'
+def test_sn97_ignores_json_and_v5():
+    json_data = '{"model": "divinequest/m9n2", "revision": "cca9b0d"}'
+    assert parse_subnet_model_commit(json_data, "5Hotkey", netuid=97) is None
+    v5_data = "v5|owner/repo|sha256:abc123deadbeef"
+    assert parse_subnet_model_commit(v5_data, "5Hotkey", netuid=97) is None
+
+
+def test_sn97_accepts_v6():
+    data = "v6|owner/my-model|sha256:abc123deadbeef"
     parsed = parse_subnet_model_commit(data, "5Hotkey", netuid=97)
     assert parsed is not None
-    assert parsed["version"] == "json"
+    assert parsed["version"] == "v6"
 
 
 def test_parse_json_invalid():

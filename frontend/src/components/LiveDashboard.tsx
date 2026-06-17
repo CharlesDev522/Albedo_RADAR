@@ -65,6 +65,8 @@ export default function LiveDashboard() {
 
   const waiting = registry?.miners.filter((m) => !m.has_v6) ?? [];
   const committedCount = registry?.v6_count ?? commits.length;
+  const unpublishedCount =
+    subnet === 97 ? (stats?.uncommitted_miners ?? waiting.length) : (stats?.uncommitted_miners ?? waiting.length);
 
   return (
     <div className="space-y-3">
@@ -129,7 +131,11 @@ export default function LiveDashboard() {
         <Kpi label="miners" value={String(stats?.total_neurons ?? "—")} />
         <Kpi label={`${commitLabel} committed`} value={String(stats?.committed_miners ?? "—")} accentClass={theme.kpiAccent} />
         <Kpi label={`${commitLabel} active`} value={String(committedCount)} accentClass={theme.kpiAccent} />
-        <Kpi label="no commit" value={String(stats?.uncommitted_miners ?? "—")} warn={(stats?.uncommitted_miners ?? 0) > 0} />
+        <Kpi
+          label={subnet === 97 ? "unpublished" : "no commit"}
+          value={String(unpublishedCount)}
+          warn={unpublishedCount > 0}
+        />
         <Kpi label="coverage" value={stats ? `${stats.coverage_pct}%` : "—"} />
         <Kpi label="latest blk" value={stats?.latest_commit_block?.toLocaleString() ?? "—"} mono />
         <Kpi label="scan" value={stats?.last_scan_at ? fmtTime(stats.last_scan_at) : "—"} small />

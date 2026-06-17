@@ -129,6 +129,7 @@ export interface SlotStatusEntry {
   reveal_round: number | null;
   detail: string | null;
   last_updated: string | null;
+  is_published?: boolean;
 }
 
 export interface SlotStatusSummary {
@@ -142,6 +143,7 @@ export interface SlotStatusSummary {
   unknown: number;
   none: number;
   committed: number;
+  unpublished?: number;
   last_scan_at: string | null;
 }
 

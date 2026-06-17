@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chain_reader.subnet_commit_rules import model_versions_sql_tuple
 from app.collectors.event_publisher import EventPublisher
 from app.config import get_settings
 from app.db.models import MinerCommitment
@@ -82,7 +83,10 @@ async def recent_commits(
     """Lightweight poll endpoint — returns newest v6 commits (for fallback refresh)."""
     result = await db.execute(
         select(MinerCommitment)
-        .where(MinerCommitment.subnet == subnet, MinerCommitment.version.in_(("v5", "v6", "json", "quasar")))
+        .where(
+            MinerCommitment.subnet == subnet,
+            MinerCommitment.version.in_(model_versions_sql_tuple(subnet)),
+        )
         .order_by(MinerCommitment.last_updated.desc())
         .limit(limit)
     )

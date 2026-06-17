@@ -1,4 +1,4 @@
-"""Process v5/v6 model commitment scans into persistent state."""
+"""Process v6 model commitment scans into persistent state."""
 
 from __future__ import annotations
 
@@ -9,6 +9,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chain_reader.commitment_scanner import Commit
+from app.chain_reader.subnet_commit_rules import (
+    QUASAR_NETUID,
+    is_v6_history_row,
+    model_versions_for_subnet,
+    model_versions_sql_tuple,
+    normalize_stored_version,
+)
 from app.collectors.event_publisher import EventPublisher
 from app.collectors.subtensor_client import MetagraphSnapshot, SubtensorClient
 from app.db.models import (
@@ -21,9 +28,6 @@ from app.db.models import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-_MODEL_VERSIONS = frozenset({"v5", "v6", "json", "quasar"})
 
 
 class CommitmentStateBuilder:
@@ -140,10 +144,11 @@ class CommitmentStateBuilder:
     ) -> int:
         """Drop model-commit rows absent from a full on-chain scan (e.g. deregistered miners)."""
         keep = present_hotkeys | (retain_hotkeys or set())
+        versions = model_versions_sql_tuple(netuid)
         result = await session.execute(
             select(MinerCommitment).where(
                 MinerCommitment.subnet == netuid,
-                MinerCommitment.version.in_(tuple(_MODEL_VERSIONS)),
+                MinerCommitment.version.in_(versions),
             )
         )
         removed = 0
@@ -153,6 +158,39 @@ class CommitmentStateBuilder:
                 removed += 1
         if removed:
             logger.info("pruned %d stale model-commit rows netuid=%d", removed, netuid)
+            await session.flush()
+        return removed
+
+    async def prune_invalid_subnet_versions(self, session: AsyncSession, netuid: int) -> int:
+        """Remove rows with wrong commit version for this subnet (e.g. v5/json on SN97)."""
+        allowed = model_versions_for_subnet(netuid)
+        result = await session.execute(
+            select(MinerCommitment).where(MinerCommitment.subnet == netuid)
+        )
+        removed = 0
+        for row in result.scalars().all():
+            if row.version not in allowed:
+                await session.delete(row)
+                removed += 1
+        if removed:
+            logger.info("pruned %d invalid-version rows netuid=%d", removed, netuid)
+            await session.flush()
+        return removed
+
+    async def prune_non_v6_history(self, session: AsyncSession, netuid: int) -> int:
+        """SN97: drop commitment history rows that are not v6 pipe commits."""
+        if netuid == QUASAR_NETUID:
+            return 0
+        result = await session.execute(
+            select(CommitmentHistory).where(CommitmentHistory.subnet == netuid)
+        )
+        removed = 0
+        for row in result.scalars().all():
+            if not is_v6_history_row(row.reveal_string, row.commit_payload):
+                await session.delete(row)
+                removed += 1
+        if removed:
+            logger.info("pruned %d non-v6 history rows netuid=%d", removed, netuid)
             await session.flush()
         return removed
 
@@ -242,10 +280,10 @@ class CommitmentStateBuilder:
 
     @staticmethod
     def _normalize_version(version: str | None, netuid: int) -> str:
-        v = version or "v6"
-        if v == "quasar" and netuid != 24:
-            return "json"
-        return v
+        normalized = normalize_stored_version(version, netuid)
+        if netuid == QUASAR_NETUID:
+            return normalized or "quasar"
+        return normalized or "v6"
 
     def _build_commitment(self, commit: Commit, miner: Miner | None) -> MinerCommitment:
         version = self._normalize_version(commit.commit_payload.get("version"), commit.netuid)
@@ -269,6 +307,8 @@ class CommitmentStateBuilder:
         )
 
     async def _record_history(self, session: AsyncSession, commit: Commit) -> None:
+        if not is_v6_history_row(commit.reveal_string, commit.commit_payload) and commit.netuid != QUASAR_NETUID:
+            return
         result = await session.execute(
             select(CommitmentHistory).where(
                 CommitmentHistory.subnet == commit.netuid,

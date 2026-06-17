@@ -18,6 +18,7 @@ class SlotStatusEntry(BaseModel):
     reveal_round: int | None
     detail: str | None
     last_updated: datetime | None = None
+    is_published: bool = False
 
 
 class SlotStatusSummary(BaseModel):
@@ -31,6 +32,7 @@ class SlotStatusSummary(BaseModel):
     unknown: int = 0
     none: int = 0
     committed: int = 0
+    unpublished: int = 0
     last_scan_at: datetime | None = None
 
 

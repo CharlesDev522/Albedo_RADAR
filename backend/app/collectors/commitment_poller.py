@@ -16,6 +16,7 @@ from app.chain_reader.commitment_scanner import (
     scan_v6_from_snapshot,
     timelock_hotkeys_from_map,
 )
+from app.chain_reader.subnet_commit_rules import model_versions_sql_tuple
 from app.chain_reader.encrypted_commitment_scanner import scan_encrypted_from_map
 from app.chain_reader.slot_commitment_scanner import scan_slots_from_snapshot
 from app.collectors.event_publisher import EventPublisher
@@ -156,7 +157,7 @@ class CommitmentPoller:
                 await session.execute(
                     select(MinerCommitment.hotkey).where(
                         MinerCommitment.subnet == netuid,
-                        MinerCommitment.version.in_(("v5", "v6", "json", "quasar")),
+                        MinerCommitment.version.in_(model_versions_sql_tuple(netuid)),
                     )
                 )
             ).scalars().all()
@@ -243,6 +244,8 @@ class CommitmentPoller:
 
         async with AsyncSessionLocal() as session:
             stats = await self.state_builder.process_commits(session, commits, snapshot_meta)
+            pruned_invalid = await self.state_builder.prune_invalid_subnet_versions(session, netuid)
+            pruned_history = await self.state_builder.prune_non_v6_history(session, netuid)
             pruned = await self.state_builder.prune_absent_v6(
                 session,
                 netuid,
@@ -254,13 +257,15 @@ class CommitmentPoller:
         self._seen_hotkeys[netuid] = present_hotkeys
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         logger.info(
-            "FULL netuid=%d commits=%d new=%d updated=%d unchanged=%d pruned=%d %dms uids=%s",
+            "FULL netuid=%d commits=%d new=%d updated=%d unchanged=%d pruned=%d invalid=%d history=%d %dms uids=%s",
             netuid,
             len(commits),
             stats["new"],
             stats["updated"],
             stats.get("unchanged", 0),
             pruned,
+            pruned_invalid,
+            pruned_history,
             elapsed_ms,
             sorted({c.uid for c in commits if c.uid is not None}),
         )

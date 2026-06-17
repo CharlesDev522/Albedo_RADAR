@@ -1,4 +1,4 @@
-/** Per-subnet UI theme — SN97 (Albedo/v6) vs SN24 (Quasar/JSON). */
+/** Per-subnet UI theme — SN97 (Albedo/v6 only) vs SN24 (Quasar/JSON). */
 
 import { getSubnetProfile } from "@/lib/subnets";
 
@@ -8,6 +8,7 @@ export type SlotFilterKey =
   | "v6"
   | "timelock_encrypted"
   | "json"
+  | "unpublished"
   | "other"
   | "none";
 
@@ -37,11 +38,9 @@ export interface SlotFilterDef {
 
 const SN97_SLOT_FILTERS: SlotFilterDef[] = [
   { key: "all", label: "all 256", color: "text-zinc-300 border-zinc-600" },
-  { key: "committed", label: "has commit", color: "text-zinc-200 border-zinc-500 bg-zinc-800/40", hint: "any on-chain commit" },
-  { key: "v6", label: "v6", color: "text-lime-400 border-lime-500/40 bg-lime-500/10" },
+  { key: "v6", label: "v6", color: "text-lime-400 border-lime-500/40 bg-lime-500/10", hint: "published v6 pipe" },
+  { key: "unpublished", label: "unpublished", color: "text-rose-300 border-rose-500/40 bg-rose-500/10", hint: "registered, no v6" },
   { key: "timelock_encrypted", label: "encrypted", color: "text-violet-300 border-violet-500/40 bg-violet-500/10", hint: "TimelockEncrypted" },
-  { key: "json", label: "json", color: "text-amber-300 border-amber-500/40 bg-amber-500/10" },
-  { key: "other", label: "other", color: "text-orange-300 border-orange-500/40 bg-orange-500/10" },
   { key: "none", label: "no commit", color: "text-zinc-500 border-zinc-700 bg-zinc-800/30" },
 ];
 
@@ -89,9 +88,9 @@ export function getSubnetTheme(netuid: number): SubnetTheme {
     rowFlashSubtle: "bg-lime-500/10",
     uidChipCommitted: "border-lime-500/40 bg-lime-500/15 text-lime-300",
     kpiAccent: "text-lime-400",
-    slotDefaultFilter: "committed",
-    slotPrimaryType: "json",
-    slotSummaryPrimaryLabel: "json",
+    slotDefaultFilter: "v6",
+    slotPrimaryType: "v6",
+    slotSummaryPrimaryLabel: "v6",
   };
 }
 
@@ -113,32 +112,34 @@ export function slotGridColor(netuid: number, type: string): string {
     };
     return sn24[type] ?? "bg-zinc-700";
   }
-  const sn97: Record<string, string> = {
-    v6: "bg-lime-500",
-    v5: "bg-lime-600",
-    timelock_encrypted: "bg-violet-500",
-    binary: "bg-violet-600",
-    json: "bg-amber-500",
-    other: "bg-orange-500",
-    unknown: "bg-rose-500",
-    none: "bg-zinc-700",
-  };
-  return sn97[type] ?? "bg-zinc-700";
+  if (type === "v6") return "bg-lime-500";
+  if (type === "timelock_encrypted" || type === "binary") return "bg-violet-500";
+  if (type === "none") return "bg-zinc-700";
+  return "bg-rose-500";
 }
 
 export function slotTypeStyle(netuid: number, type: string): string {
   if (netuid === 24 && type === "json") {
     return "text-violet-300 border-violet-500/30 bg-violet-500/10";
   }
+  if (netuid !== 24 && type === "v6") {
+    return "text-lime-400 border-lime-500/30 bg-lime-500/10";
+  }
+  if (type === "timelock_encrypted" || type === "binary") {
+    return "text-violet-300 border-violet-500/30 bg-violet-500/10";
+  }
+  if (type === "none") {
+    return "text-zinc-500 border-zinc-700 bg-zinc-800/20";
+  }
+  if (netuid !== 24) {
+    return "text-rose-300 border-rose-500/30 bg-rose-500/10";
+  }
   const base: Record<string, string> = {
     v6: "text-lime-400 border-lime-500/30 bg-lime-500/10",
     v5: "text-lime-400 border-lime-500/30 bg-lime-500/10",
-    timelock_encrypted: "text-violet-300 border-violet-500/30 bg-violet-500/10",
-    binary: "text-violet-300 border-violet-500/30 bg-violet-500/10",
     json: "text-amber-300 border-amber-500/30 bg-amber-500/10",
     other: "text-orange-300 border-orange-500/30 bg-orange-500/10",
     unknown: "text-rose-300 border-rose-500/30 bg-rose-500/10",
-    none: "text-zinc-500 border-zinc-700 bg-zinc-800/20",
   };
   return base[type] ?? base.unknown;
 }
@@ -147,5 +148,6 @@ export function slotTypeLabel(netuid: number, type: string): string {
   if (type === "timelock_encrypted" || type === "binary") return "encrypted";
   if (type === "none") return "—";
   if (netuid === 24 && type === "json") return "quasar";
+  if (netuid !== 24 && type !== "v6") return "unpublished";
   return type;
 }

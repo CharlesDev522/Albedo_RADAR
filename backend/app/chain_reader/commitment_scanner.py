@@ -17,6 +17,7 @@ from app.chain_reader.commitment_decoder import (
     decode_revealed_payload,
 )
 from app.chain_reader.chain_snapshot import ChainSnapshot
+from app.chain_reader.subnet_commit_rules import QUASAR_NETUID
 
 logger = logging.getLogger(__name__)
 
@@ -104,12 +105,17 @@ def parse_subnet_model_commit(
     chain_hotkey: str,
     netuid: int | None = None,
 ) -> dict[str, Any] | None:
-    """Parse v5/v6 pipe commits or JSON model commits for a subnet."""
-    del netuid  # reserved for subnet-specific rules; JSON is shared across SN97/SN24
-    parsed = parse_model_commit(data, chain_hotkey)
-    if parsed is not None:
-        return parsed
-    return parse_json_model_commit(data, chain_hotkey)
+    """Parse model commits using subnet-specific rules.
+
+    SN97 Albedo: v6 pipe only (v5, legacy JSON, and other formats ignored).
+    SN24 Quasar: JSON model commits (v5/v6 pipe accepted if present).
+    """
+    if netuid == QUASAR_NETUID:
+        parsed = parse_model_commit(data, chain_hotkey)
+        if parsed is not None:
+            return parsed
+        return parse_json_model_commit(data, chain_hotkey)
+    return parse_v6(data, chain_hotkey)
 
 
 def parse_any_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:

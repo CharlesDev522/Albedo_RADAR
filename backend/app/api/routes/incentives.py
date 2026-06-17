@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chain_reader.subnet_commit_rules import model_versions_sql_tuple
 from app.collectors.subtensor_client import SubtensorClient
 from app.config import get_settings
 from app.db.models import Miner, MinerCommitment, MinerStatus
@@ -14,8 +15,6 @@ from app.schemas.incentives import IncentiveOverviewResponse, MinerIncentiveEntr
 
 router = APIRouter(prefix="/incentives", tags=["incentives"])
 settings = get_settings()
-
-_MODEL_VERSIONS = ("v5", "v6", "json", "quasar")
 
 
 @router.get("", response_model=IncentiveOverviewResponse)
@@ -116,7 +115,7 @@ async def _load_commits(db: AsyncSession, subnet: int) -> dict[int, MinerCommitm
     result = await db.execute(
         select(MinerCommitment).where(
             MinerCommitment.subnet == subnet,
-            MinerCommitment.version.in_(_MODEL_VERSIONS),
+            MinerCommitment.version.in_(model_versions_sql_tuple(subnet)),
         )
     )
     rows = list(result.scalars().all())

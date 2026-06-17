@@ -24,8 +24,10 @@ function byUid(a: SlotStatusEntry, b: SlotStatusEntry) {
   return a.uid - b.uid;
 }
 
-function filterSlots(slots: SlotStatusEntry[], filter: SlotFilterKey): SlotStatusEntry[] {
+function filterSlots(slots: SlotStatusEntry[], filter: SlotFilterKey, subnet: number): SlotStatusEntry[] {
   if (filter === "all") return slots;
+  if (filter === "unpublished")
+    return slots.filter((s) => s.is_published === false || (s.is_published == null && s.commitment_type !== "v6"));
   if (filter === "committed") return slots.filter((s) => s.commitment_type !== "none");
   if (filter === "timelock_encrypted")
     return slots.filter((s) => s.commitment_type === "timelock_encrypted" || s.commitment_type === "binary");
@@ -57,8 +59,8 @@ export default function SlotStatusBoard() {
   const summary = useMemo(() => slotData?.summary, [slotData?.summary]);
 
   const displaySlots = useMemo(
-    () => filterSlots(allSlots, filter).sort(byUid),
-    [allSlots, filter]
+    () => filterSlots(allSlots, filter, subnet).sort(byUid),
+    [allSlots, filter, subnet]
   );
 
   const jumpToUid = useCallback((uid: number) => {
@@ -74,6 +76,7 @@ export default function SlotStatusBoard() {
       all: s.total_slots,
       committed: s.committed,
       v6: s.v6 ?? 0,
+      unpublished: s.unpublished ?? 0,
       timelock_encrypted: s.timelock_encrypted + (s.binary ?? 0),
       json: s.json,
       other: s.other,
@@ -86,14 +89,17 @@ export default function SlotStatusBoard() {
     theme.slotPrimaryType === "json" ? summary?.json ?? 0 : summary?.v6 ?? 0;
 
   const gridLegend = useMemo(() => {
-    const types =
-      subnet === 24
-        ? ["json", "v6", "timelock_encrypted", "other", "none"]
-        : ["v6", "timelock_encrypted", "json", "other", "none"];
-    return types.map((k) => ({
+    if (subnet === 24) {
+      return ["json", "v6", "timelock_encrypted", "other", "none"].map((k) => ({
+        key: k,
+        color: slotGridColor(subnet, k),
+        label: slotTypeLabel(subnet, k === "timelock_encrypted" ? "timelock_encrypted" : k),
+      }));
+    }
+    return ["v6", "timelock_encrypted", "unpublished", "none"].map((k) => ({
       key: k,
-      color: slotGridColor(subnet, k),
-      label: slotTypeLabel(subnet, k === "timelock_encrypted" ? "timelock_encrypted" : k),
+      color: slotGridColor(subnet, k === "unpublished" ? "json" : k),
+      label: k === "unpublished" ? "unpublished" : slotTypeLabel(subnet, k),
     }));
   }, [subnet]);
 
@@ -135,7 +141,7 @@ export default function SlotStatusBoard() {
           {subnet === 97 && (
             <>
               , <span className="text-violet-400">{summary.timelock_encrypted + (summary.binary ?? 0)} enc</span>
-              , <span className="text-amber-400">{summary.json} json</span>
+              , <span className="text-rose-400">{summary.unpublished ?? 0} unpublished</span>
             </>
           )}
           {subnet === 24 && (summary.v6 ?? 0) > 0 && (
@@ -179,7 +185,7 @@ export default function SlotStatusBoard() {
                 title={`uid ${s.uid} · ${slotTypeLabel(subnet, s.commitment_type)}${s.registered_at_block ? ` · reg ${s.registered_at_block}` : ""}`}
                 onClick={() => jumpToUid(s.uid)}
                 className={`w-[10px] h-[10px] shrink-0 rounded-[2px] p-0 border-0 ${slotGridColor(subnet, s.commitment_type)} ${
-                  filter !== "all" && !filterSlots([s], filter).length ? "opacity-30 saturate-50" : "opacity-100"
+                  filter !== "all" && !filterSlots([s], filter, subnet).length ? "opacity-30 saturate-50" : "opacity-100"
                 } ${highlightUid === s.uid ? "ring-2 ring-white/90 ring-offset-1 ring-offset-zinc-950 scale-110 z-10" : ""} hover:ring-1 hover:ring-white/70 hover:brightness-110 cursor-pointer transition-all duration-100`}
               />
             ))}
@@ -265,9 +271,11 @@ function SlotDetail({ subnet, slot }: { subnet: number; slot: SlotStatusEntry })
   if (!slot.detail) return <>—</>;
 
   const isModelSlot =
-    slot.commitment_type === "v6" ||
-    slot.commitment_type === "v5" ||
-    slot.commitment_type === "json";
+    subnet === 97
+      ? slot.commitment_type === "v6"
+      : slot.commitment_type === "v6" ||
+        slot.commitment_type === "v5" ||
+        slot.commitment_type === "json";
 
   if (isModelSlot) {
     return (

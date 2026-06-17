@@ -6,6 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chain_reader.subnet_commit_rules import (
+    ALBEDO_MODEL_VERSIONS,
+    is_albedo_subnet,
+    is_v6_history_row,
+    model_versions_sql_tuple,
+)
 from app.config import get_settings
 from app.db.models import CommitmentHistory, Miner, MinerCommitment, MinerStatus
 from app.db.session import get_db
@@ -21,8 +27,9 @@ from app.schemas.commitment import (
 router = APIRouter(prefix="/commitments", tags=["commitments"])
 settings = get_settings()
 
-_MODEL_VERSIONS = ("v5", "v6", "json", "quasar")
-_MODEL_ONLY = MinerCommitment.version.in_(_MODEL_VERSIONS)
+
+def _model_only(subnet: int):
+    return MinerCommitment.version.in_(model_versions_sql_tuple(subnet))
 
 
 @router.get("", response_model=CommitmentListResponse)
@@ -44,13 +51,13 @@ async def list_commitments(
         await db.execute(
             select(func.count())
             .select_from(MinerCommitment)
-            .where(MinerCommitment.subnet == subnet, _MODEL_ONLY)
+            .where(MinerCommitment.subnet == subnet, _model_only(subnet))
         )
     ).scalar() or 0
 
     result = await db.execute(
         select(MinerCommitment)
-        .where(MinerCommitment.subnet == subnet, _MODEL_ONLY)
+        .where(MinerCommitment.subnet == subnet, _model_only(subnet))
         .order_by(order_col)
         .limit(limit)
         .offset(offset)
@@ -96,14 +103,14 @@ async def commitment_stats(
         await db.execute(
             select(func.count())
             .select_from(MinerCommitment)
-            .where(MinerCommitment.subnet == subnet, _MODEL_ONLY)
+            .where(MinerCommitment.subnet == subnet, _model_only(subnet))
         )
     ).scalar() or 0
 
     latest_block = (
         await db.execute(
             select(func.max(MinerCommitment.commit_block)).where(
-                MinerCommitment.subnet == subnet, _MODEL_ONLY
+                MinerCommitment.subnet == subnet, _model_only(subnet)
             )
         )
     ).scalar()
@@ -111,7 +118,7 @@ async def commitment_stats(
     last_scan = (
         await db.execute(
             select(func.max(MinerCommitment.last_updated)).where(
-                MinerCommitment.subnet == subnet, _MODEL_ONLY
+                MinerCommitment.subnet == subnet, _model_only(subnet)
             )
         )
     ).scalar()
@@ -145,7 +152,7 @@ async def miner_registry(
     miners = list(miners_result.scalars().all())
 
     commits_result = await db.execute(
-        select(MinerCommitment).where(MinerCommitment.subnet == subnet, _MODEL_ONLY)
+        select(MinerCommitment).where(MinerCommitment.subnet == subnet, _model_only(subnet))
     )
     all_commits = list(commits_result.scalars().all())
     commits_by_uid = {c.uid: c for c in all_commits if c.uid is not None}
@@ -221,7 +228,7 @@ async def get_commitment_by_uid(
         select(MinerCommitment).where(
             MinerCommitment.subnet == subnet,
             MinerCommitment.uid == uid,
-            _MODEL_ONLY,
+            _model_only(subnet),
         )
     )
     row = result.scalar_one_or_none()
@@ -240,7 +247,7 @@ async def get_commitment_by_hotkey(
         select(MinerCommitment).where(
             MinerCommitment.subnet == subnet,
             MinerCommitment.hotkey == hotkey,
-            _MODEL_ONLY,
+            _model_only(subnet),
         )
     )
     row = result.scalar_one_or_none()
@@ -260,7 +267,10 @@ async def get_commitment_history(
         .where(CommitmentHistory.subnet == subnet, CommitmentHistory.hotkey == hotkey)
         .order_by(CommitmentHistory.commit_block.desc())
     )
-    return [CommitmentHistoryResponse.model_validate(h) for h in result.scalars().all()]
+    rows = list(result.scalars().all())
+    if is_albedo_subnet(subnet):
+        rows = [h for h in rows if is_v6_history_row(h.reveal_string, h.commit_payload)]
+    return [CommitmentHistoryResponse.model_validate(h) for h in rows]
 
 
 @router.get("/sync-status")
@@ -274,7 +284,7 @@ async def sync_status(
         await db.execute(
             select(MinerCommitment).where(
                 MinerCommitment.subnet == subnet,
-                _MODEL_ONLY,
+                _model_only(subnet),
             )
         )
     ).scalars().all()
@@ -334,6 +344,66 @@ async def sync_status(
         "repos": [c.commit_payload.get("repo") for c in commits],
         "last_db_update": last_db_update.isoformat() if last_db_update else None,
         "mode": "live",
+    }
+
+
+@router.get("/unpublished")
+async def unpublished_miners(
+    subnet: int = Query(default=97, ge=0),
+    live: bool = Query(default=False, description="Run on-chain scan (slow)"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """SN97: registered miners with no v6 pipe publish."""
+    if not is_albedo_subnet(subnet):
+        return {
+            "subnet": subnet,
+            "note": "v6-only unpublished detection applies to SN97 Albedo",
+            "unpublished_uids": [],
+            "unpublished_count": 0,
+        }
+
+    miners_result = await db.execute(
+        select(Miner).where(
+            Miner.subnet == subnet,
+            Miner.status == MinerStatus.ACTIVE,
+            Miner.is_validator == False,  # noqa: E712
+        )
+    )
+    all_uids = {m.uid for m in miners_result.scalars().all()}
+
+    if live:
+        from bittensor.core.async_subtensor import AsyncSubtensor
+
+        from app.chain_reader.chain_snapshot import load_chain_snapshot
+        from app.chain_reader.commitment_scanner import _neuron_index, scan_v6_from_snapshot
+
+        async with AsyncSubtensor(network=settings.bittensor_network) as st:
+            neurons = await _neuron_index(st, subnet)
+            snapshot = await load_chain_snapshot(st, subnet, include_revealed=True)
+            commits = await scan_v6_from_snapshot(
+                snapshot, neurons, st, include_revealed=True, fetch_block_hashes=False
+            )
+        published_uids = {c.uid for c in commits if c.uid is not None}
+        source = "chain"
+    else:
+        commits_result = await db.execute(
+            select(MinerCommitment.uid).where(
+                MinerCommitment.subnet == subnet,
+                MinerCommitment.version.in_(tuple(ALBEDO_MODEL_VERSIONS)),
+            )
+        )
+        published_uids = {r[0] for r in commits_result.all() if r[0] is not None}
+        source = "db"
+
+    unpublished = sorted(all_uids - published_uids)
+    return {
+        "subnet": subnet,
+        "source": source,
+        "total_registered": len(all_uids),
+        "published_count": len(published_uids),
+        "unpublished_count": len(unpublished),
+        "unpublished_uids": unpublished,
+        "detection_rule": "registered miner with no v6 pipe in active CommitmentOf ∪ latest revealed v6",
     }
 
 

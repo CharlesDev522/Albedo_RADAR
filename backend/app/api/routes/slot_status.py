@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chain_reader.subnet_commit_rules import is_published_slot_type
 from app.config import get_settings
 from app.db.models import MinerSlotStatus
 from app.db.session import get_db
@@ -24,6 +25,7 @@ VALID_FILTERS = {
     "unknown",
     "none",
     "committed",
+    "unpublished",
     "legacy",
     "binary",
 }
@@ -59,7 +61,7 @@ async def list_slot_status(
 
     return SlotStatusResponse(
         subnet=subnet,
-        slots=[SlotStatusEntry.model_validate(r) for r in ordered],
+        slots=[_entry_from_row(r, subnet) for r in ordered],
         summary=summary,
         filter=filter_type,
         sort=sort,
@@ -86,6 +88,28 @@ async def _load_slot_rows(db: AsyncSession, subnet: int, force_live: bool = Fals
             raise
 
     return db_rows
+
+
+def _entry_from_row(row, subnet: int) -> SlotStatusEntry:
+    published = getattr(row, "is_published", None)
+    if published is None:
+        published = is_published_slot_type(
+            row.commitment_type if isinstance(row.commitment_type, str) else row.commitment_type,
+            subnet,
+        )
+    return SlotStatusEntry.model_validate({
+        "uid": row.uid,
+        "hotkey": row.hotkey,
+        "coldkey": row.coldkey,
+        "registered_at_block": row.registered_at_block,
+        "commitment_type": row.commitment_type,
+        "commit_block": row.commit_block,
+        "deposit": row.deposit,
+        "reveal_round": row.reveal_round,
+        "detail": row.detail,
+        "last_updated": getattr(row, "last_updated", None),
+        "is_published": published,
+    })
 
 
 def _sort_rows(rows: list, sort: str) -> list:
@@ -126,11 +150,19 @@ def _sort_rows(rows: list, sort: str) -> list:
     return rows
 
 
-def _filter_rows(rows: list, filt: str) -> list:
+def _filter_rows(rows: list, filt: str, subnet: int = 97) -> list:
     if filt == "all":
         return rows
     if filt == "committed":
         return [r for r in rows if r.commitment_type != "none"]
+    if filt == "unpublished":
+        return [
+            r for r in rows
+            if not is_published_slot_type(
+                r.commitment_type if isinstance(r.commitment_type, str) else r.commitment_type,
+                subnet,
+            )
+        ]
     if filt == "timelock_encrypted":
         return [r for r in rows if r.commitment_type in ("timelock_encrypted", "binary")]
     if filt in VALID_FILTERS:
@@ -237,5 +269,12 @@ def _summary_from_rows(subnet: int, rows: list) -> SlotStatusSummary:
         unknown=counts.get("unknown", 0),
         none=counts.get("none", 0),
         committed=len(rows) - counts.get("none", 0),
+        unpublished=sum(
+            1 for r in rows
+            if not is_published_slot_type(
+                r.commitment_type if isinstance(r.commitment_type, str) else r.commitment_type,
+                subnet,
+            )
+        ),
         last_scan_at=last_scan or datetime.now(timezone.utc),
     )

@@ -13,19 +13,19 @@ from app.chain_reader.commitment_classifier import (
     classify_commitment_raw,
     classify_plaintext_reveal,
 )
-from app.chain_reader.commitment_scanner import _neuron_index, parse_any_model_commit
+from app.chain_reader.commitment_scanner import _neuron_index, parse_subnet_model_commit
+from app.chain_reader.subnet_commit_rules import is_published_slot_type
 
 logger = logging.getLogger(__name__)
 
 
 def _latest_revealed_per_hotkey(
     entries: list[tuple[str, int, str]],
+    netuid: int,
 ) -> dict[str, ClassifiedCommitment]:
-    """Highest-block valid model reveal per hotkey from RevealedCommitments history."""
+    """Highest-block valid reveal per hotkey from RevealedCommitments history."""
     latest: dict[str, ClassifiedCommitment] = {}
     for hotkey, block, payload in entries:
-        if parse_any_model_commit(payload, hotkey) is None:
-            continue
         classified = classify_plaintext_reveal(payload, block, 0, hotkey)
         if classified.commitment_type not in (
             CommitmentType.V5,
@@ -36,6 +36,21 @@ def _latest_revealed_per_hotkey(
         prev = latest.get(hotkey)
         if prev is None or block > prev.commit_block:
             latest[hotkey] = classified
+    return latest
+
+
+def _published_v6_per_hotkey(
+    entries: list[tuple[str, int, str]],
+    netuid: int,
+) -> dict[str, tuple[int, str]]:
+    """Latest v6 pipe reveal per hotkey (subnet rules applied)."""
+    latest: dict[str, tuple[int, str]] = {}
+    for hotkey, block, payload in entries:
+        if parse_subnet_model_commit(payload, hotkey, netuid) is None:
+            continue
+        prev = latest.get(hotkey)
+        if prev is None or block > prev[0]:
+            latest[hotkey] = (block, payload)
     return latest
 
 
@@ -74,6 +89,7 @@ class SlotStatus:
     reveal_string: str | None
     payload_hash: str | None
     encrypted_hash: str | None
+    is_published: bool = False
 
 
 def scan_slots_from_snapshot(
@@ -97,8 +113,20 @@ def scan_slots_from_snapshot(
             commitments_by_hotkey[hotkey] = classified
 
     if snapshot.revealed is not None:
-        revealed_by_hotkey = _latest_revealed_per_hotkey(snapshot.revealed)
+        revealed_by_hotkey = _latest_revealed_per_hotkey(snapshot.revealed, netuid)
         commitments_by_hotkey = _merge_slot_classifications(commitments_by_hotkey, revealed_by_hotkey)
+
+    published_hotkeys: set[str] = set()
+    for hotkey, classified in commitments_by_hotkey.items():
+        if is_published_slot_type(classified.commitment_type.value, netuid):
+            published_hotkeys.add(hotkey)
+    if snapshot.revealed is not None:
+        for hotkey in _published_v6_per_hotkey(snapshot.revealed, netuid):
+            published_hotkeys.add(hotkey)
+    for hotkey, raw in snapshot.commitment_of.items():
+        classified = classify_commitment_raw(raw, hotkey)
+        if classified and is_published_slot_type(classified.commitment_type.value, netuid):
+            published_hotkeys.add(hotkey)
 
     slots: list[SlotStatus] = []
     for uid in sorted(uid_to_neuron.keys()):
@@ -122,6 +150,7 @@ def scan_slots_from_snapshot(
                     reveal_string=None,
                     payload_hash=None,
                     encrypted_hash=None,
+                    is_published=False,
                 )
             )
         else:
@@ -140,6 +169,7 @@ def scan_slots_from_snapshot(
                     reveal_string=classified.reveal_string,
                     payload_hash=classified.payload_hash,
                     encrypted_hash=classified.encrypted_hash,
+                    is_published=hotkey in published_hotkeys,
                 )
             )
 
