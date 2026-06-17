@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 class CommitmentPoller:
-    """One CommitmentOf read per cycle; revealed history on full/slot intervals."""
+    """One chain snapshot per cycle; revealed history merged every poll for fresh commits."""
 
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -143,7 +143,7 @@ class CommitmentPoller:
                 await session.execute(
                     select(MinerCommitment.hotkey).where(
                         MinerCommitment.subnet == netuid,
-                        MinerCommitment.version == "v6",
+                        MinerCommitment.version.in_(("v5", "v6")),
                     )
                 )
             ).scalars().all()
@@ -264,10 +264,9 @@ class CommitmentPoller:
 
             run_full = now - self._last_full_scan >= self.settings.full_scan_interval_seconds
             run_slot = now - self._last_slot_scan >= self.settings.slot_scan_interval_seconds
-            include_revealed = run_full or run_slot
 
             snapshot = await load_chain_snapshot(
-                self._subtensor, netuid, include_revealed=include_revealed
+                self._subtensor, netuid, include_revealed=True
             )
 
             if run_full:
@@ -276,19 +275,11 @@ class CommitmentPoller:
                 stats = await self._fast_poll(netuid, snapshot)
                 if stats.get("needs_full"):
                     logger.warning("fast/db hotkey mismatch — running full scan")
-                    if snapshot.revealed is None:
-                        snapshot = await load_chain_snapshot(
-                            self._subtensor, netuid, include_revealed=True
-                        )
                     stats = await self._full_poll(netuid, snapshot)
 
             await self._encrypted_poll(netuid, snapshot)
 
             if run_slot:
-                if snapshot.revealed is None:
-                    snapshot = await load_chain_snapshot(
-                        self._subtensor, netuid, include_revealed=True
-                    )
                 await self._slot_poll(netuid, snapshot)
                 self._last_slot_scan = now
 

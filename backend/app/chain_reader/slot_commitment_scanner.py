@@ -21,13 +21,13 @@ logger = logging.getLogger(__name__)
 def _latest_revealed_per_hotkey(
     entries: list[tuple[str, int, str]],
 ) -> dict[str, ClassifiedCommitment]:
-    """Highest-block valid v6 reveal per hotkey from RevealedCommitments history."""
+    """Highest-block valid v5/v6 reveal per hotkey from RevealedCommitments history."""
     latest: dict[str, ClassifiedCommitment] = {}
     for hotkey, block, payload in entries:
         if parse_model_commit(payload, hotkey) is None:
             continue
         classified = classify_plaintext_reveal(payload, block, 0, hotkey)
-        if classified.commitment_type != CommitmentType.V6:
+        if classified.commitment_type not in (CommitmentType.V5, CommitmentType.V6):
             continue
         prev = latest.get(hotkey)
         if prev is None or block > prev.commit_block:
@@ -51,8 +51,7 @@ def _merge_slot_classifications(
             if rev.commit_block >= act.commit_block:
                 merged[hotkey] = rev
             continue
-        if rev.commit_block >= act.commit_block:
-            merged[hotkey] = rev
+        # Active CommitmentOf wins — do not replace with older revealed payload.
     return merged
 
 

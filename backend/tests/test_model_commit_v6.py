@@ -13,9 +13,11 @@ def test_parse_v6_commit():
     assert parse_v6(data, "5Hotkey") is not None
 
 
-def test_v5_not_detected():
+def test_v5_detected():
     data = "v5|owner/my-model|sha256:abc123deadbeef"
-    assert parse_model_commit(data, "5Hotkey") is None
+    parsed = parse_model_commit(data, "5Hotkey")
+    assert parsed is not None
+    assert parsed["version"] == "v5"
     assert parse_v6(data, "5Hotkey") is None
 
 
@@ -44,7 +46,7 @@ def test_classify_v6_on_chain_shape():
     assert classified.reveal_string.startswith("v6|")
 
 
-def test_classify_v5_as_other():
+def test_classify_v5_as_v5():
     raw = {
         "block": 42,
         "deposit": 0,
@@ -60,4 +62,4 @@ def test_classify_v5_as_other():
     }
     classified = classify_commitment_raw(raw, "5Hotkey")
     assert classified is not None
-    assert classified.commitment_type.value == "other"
+    assert classified.commitment_type.value == "v5"

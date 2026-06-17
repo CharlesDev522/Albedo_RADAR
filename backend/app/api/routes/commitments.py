@@ -21,7 +21,8 @@ from app.schemas.commitment import (
 router = APIRouter(prefix="/commitments", tags=["commitments"])
 settings = get_settings()
 
-_V6_ONLY = MinerCommitment.version == "v6"
+_MODEL_VERSIONS = ("v5", "v6")
+_MODEL_ONLY = MinerCommitment.version.in_(_MODEL_VERSIONS)
 
 
 @router.get("", response_model=CommitmentListResponse)
@@ -43,13 +44,13 @@ async def list_commitments(
         await db.execute(
             select(func.count())
             .select_from(MinerCommitment)
-            .where(MinerCommitment.subnet == subnet, _V6_ONLY)
+            .where(MinerCommitment.subnet == subnet, _MODEL_ONLY)
         )
     ).scalar() or 0
 
     result = await db.execute(
         select(MinerCommitment)
-        .where(MinerCommitment.subnet == subnet, _V6_ONLY)
+        .where(MinerCommitment.subnet == subnet, _MODEL_ONLY)
         .order_by(order_col)
         .limit(limit)
         .offset(offset)
@@ -95,14 +96,14 @@ async def commitment_stats(
         await db.execute(
             select(func.count())
             .select_from(MinerCommitment)
-            .where(MinerCommitment.subnet == subnet, _V6_ONLY)
+            .where(MinerCommitment.subnet == subnet, _MODEL_ONLY)
         )
     ).scalar() or 0
 
     latest_block = (
         await db.execute(
             select(func.max(MinerCommitment.commit_block)).where(
-                MinerCommitment.subnet == subnet, _V6_ONLY
+                MinerCommitment.subnet == subnet, _MODEL_ONLY
             )
         )
     ).scalar()
@@ -110,7 +111,7 @@ async def commitment_stats(
     last_scan = (
         await db.execute(
             select(func.max(MinerCommitment.last_updated)).where(
-                MinerCommitment.subnet == subnet, _V6_ONLY
+                MinerCommitment.subnet == subnet, _MODEL_ONLY
             )
         )
     ).scalar()
@@ -144,7 +145,7 @@ async def miner_registry(
     miners = list(miners_result.scalars().all())
 
     commits_result = await db.execute(
-        select(MinerCommitment).where(MinerCommitment.subnet == subnet, _V6_ONLY)
+        select(MinerCommitment).where(MinerCommitment.subnet == subnet, _MODEL_ONLY)
     )
     all_commits = list(commits_result.scalars().all())
     commits_by_uid = {c.uid: c for c in all_commits if c.uid is not None}
@@ -215,7 +216,7 @@ async def get_commitment_by_uid(
         select(MinerCommitment).where(
             MinerCommitment.subnet == subnet,
             MinerCommitment.uid == uid,
-            _V6_ONLY,
+            _MODEL_ONLY,
         )
     )
     row = result.scalar_one_or_none()
@@ -234,7 +235,7 @@ async def get_commitment_by_hotkey(
         select(MinerCommitment).where(
             MinerCommitment.subnet == subnet,
             MinerCommitment.hotkey == hotkey,
-            _V6_ONLY,
+            _MODEL_ONLY,
         )
     )
     row = result.scalar_one_or_none()
@@ -268,7 +269,7 @@ async def sync_status(
         await db.execute(
             select(MinerCommitment).where(
                 MinerCommitment.subnet == subnet,
-                MinerCommitment.version == "v6",
+                _MODEL_ONLY,
             )
         )
     ).scalars().all()

@@ -19,9 +19,18 @@ def test_revealed_v6_used_when_no_timelock():
     assert merged["hk1"][2] == "revealed"
 
 
-def test_active_v6_uses_on_chain_block():
-    active = {"hk1": (2_000_000, "v6|org/model|sha256:abc123deadbeef")}
-    revealed = {"hk1": (1_000_000, "v6|org/model|sha256:abc123deadbeef")}
+def test_active_new_payload_wins_over_stale_revealed():
+    active = {"hk1": (2_100_000, "v6|org/new-model|sha256:newhash")}
+    revealed = {"hk1": (2_200_000, "v6|org/old-model|sha256:oldhash")}
     merged = _merge_model_commit_sources(active, revealed, set())
-    assert merged["hk1"][0] == 2_000_000
+    assert merged["hk1"][1].startswith("v6|org/new-model")
+    assert merged["hk1"][0] == 2_100_000
     assert merged["hk1"][2] == "active"
+
+
+def test_revealed_refines_block_for_same_payload():
+    active = {"hk1": (2_000_000, "v6|org/model|sha256:abc123deadbeef")}
+    revealed = {"hk1": (2_100_000, "v6|org/model|sha256:abc123deadbeef")}
+    merged = _merge_model_commit_sources(active, revealed, set())
+    assert merged["hk1"][0] == 2_100_000
+    assert merged["hk1"][2] == "revealed"

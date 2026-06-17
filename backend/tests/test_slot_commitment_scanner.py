@@ -36,18 +36,19 @@ def test_timelock_active_not_replaced_by_revealed_v6():
     assert merged["hk1"].commitment_type == CommitmentType.TIMELOCK_ENCRYPTED
 
 
-def test_revealed_v6_wins_when_block_newer():
+def test_active_v6_wins_over_stale_revealed_payload():
     active = classify_plaintext_reveal(
-        "v6|org/old|sha256:aaa",
+        "v6|org/new|sha256:bbb",
         commit_block=1_000_000,
     )
     rev = classify_plaintext_reveal(
-        "v6|org/new|sha256:bbb",
+        "v6|org/old|sha256:aaa",
         commit_block=1_500_000,
     )
     merged = _merge_slot_classifications({"hk1": active}, {"hk1": rev})
     assert merged["hk1"].commitment_type == CommitmentType.V6
-    assert merged["hk1"].commit_block == 1_500_000
+    assert merged["hk1"].commit_block == 1_000_000
+    assert "org/new" in (merged["hk1"].reveal_string or "")
 
 
 def test_same_reveal_prefers_higher_block_from_revealed():

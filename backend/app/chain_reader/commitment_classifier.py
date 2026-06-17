@@ -17,6 +17,7 @@ from app.chain_reader.commitment_decoder import (
 
 class CommitmentType(str, Enum):
     NONE = "none"
+    V5 = "v5"
     V6 = "v6"
     JSON = "json"
     TIMELOCK_ENCRYPTED = "timelock_encrypted"
@@ -55,7 +56,7 @@ def _classify_plaintext(
     deposit: int,
     hotkey: str = "",
 ) -> ClassifiedCommitment:
-    if decoded.startswith("v6|"):
+    if decoded.startswith("v5|") or decoded.startswith("v6|"):
         from app.chain_reader.commitment_scanner import parse_model_commit, payload_hash as model_payload_hash
 
         parsed = parse_model_commit(decoded, hotkey)
@@ -68,8 +69,9 @@ def _classify_plaintext(
                 detail=decoded[:120],
                 payload_hash=_payload_hash(decoded),
             )
+        version_type = CommitmentType.V6 if parsed["version"] == "v6" else CommitmentType.V5
         return ClassifiedCommitment(
-            commitment_type=CommitmentType.V6,
+            commitment_type=version_type,
             commit_block=commit_block,
             deposit=deposit,
             reveal_string=decoded,
@@ -172,6 +174,7 @@ def classify_commitment_raw(raw: dict[str, Any], hotkey: str = "") -> Classified
 def commitment_type_label(ct: CommitmentType) -> str:
     return {
         CommitmentType.NONE: "no commit",
+        CommitmentType.V5: "v5",
         CommitmentType.V6: "v6",
         CommitmentType.JSON: "json",
         CommitmentType.TIMELOCK_ENCRYPTED: "encrypted",

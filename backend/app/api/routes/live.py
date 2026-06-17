@@ -82,7 +82,7 @@ async def recent_commits(
     """Lightweight poll endpoint — returns newest v6 commits (for fallback refresh)."""
     result = await db.execute(
         select(MinerCommitment)
-        .where(MinerCommitment.subnet == subnet, MinerCommitment.version == "v6")
+        .where(MinerCommitment.subnet == subnet, MinerCommitment.version.in_(("v5", "v6")))
         .order_by(MinerCommitment.last_updated.desc())
         .limit(limit)
     )

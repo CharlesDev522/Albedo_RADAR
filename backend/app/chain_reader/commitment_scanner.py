@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 _BLOCK_HASH_CACHE: OrderedDict[int, str] = OrderedDict()
 _BLOCK_HASH_CACHE_MAX = 10_000
 
-MODEL_COMMIT_VERSIONS = frozenset({"v6"})
-_MODEL_COMMIT_RE = re.compile(r"^v6\|")
+MODEL_COMMIT_VERSIONS = frozenset({"v5", "v6"})
+_MODEL_COMMIT_RE = re.compile(r"^v[56]\|")
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class Commit:
 
 
 def parse_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
-    """Parse a v6 reveal into a payload dict, or None if not well-formed."""
+    """Parse a v5 or v6 reveal into a payload dict, or None if not well-formed."""
     if not data or not _MODEL_COMMIT_RE.match(data):
         return None
     parts = data.split("|")
@@ -90,10 +90,10 @@ def timelock_hotkeys_from_map(commitment_of: dict[str, dict[str, Any]]) -> set[s
     return blocked
 
 
-def active_v6_from_map(
+def active_model_from_map(
     commitment_of: dict[str, dict[str, Any]],
 ) -> dict[str, tuple[int, str]]:
-    """Active plaintext v6 per hotkey: (on-chain commit_block, reveal_string)."""
+    """Active plaintext v5/v6 per hotkey: (on-chain commit_block, reveal_string)."""
     active: dict[str, tuple[int, str]] = {}
     for hotkey, raw in commitment_of.items():
         decoded = decode_commitment_of_raw(raw)
@@ -107,38 +107,14 @@ def active_v6_from_map(
     return active
 
 
-def _decode_commitment_pair(pair: tuple[Any, Any]) -> tuple[str, list[tuple[int, str]]]:
-    key, data = pair
-    if not isinstance(key, str):
-        key = str(getattr(key, "value", key))
-    entries = getattr(data, "value", data)
-    out: list[tuple[int, str]] = []
-    for entry in entries:
-        text, block = entry
-        if not isinstance(text, str):
-            text = str(text)
-        payload = decode_revealed_payload(text)
-        if payload:
-            out.append((int(block), payload))
-    return key, out
+# Backwards-compatible alias
+active_v6_from_map = active_model_from_map
 
 
 async def _iter_revealed(subtensor: Any, netuid: int) -> list[tuple[str, int, str]]:
-    results: list[tuple[str, int, str]] = []
-    query = await subtensor.query_map(
-        module="Commitments",
-        name="RevealedCommitments",
-        params=[netuid],
-    )
-    async for pair in query:
-        try:
-            hotkey, entries = _decode_commitment_pair(pair)
-        except Exception:
-            logger.debug("failed to decode revealed commitment", exc_info=True)
-            continue
-        for block, payload in entries:
-            results.append((hotkey, block, payload))
-    return results
+    from app.chain_reader.chain_snapshot import iter_revealed
+
+    return await iter_revealed(subtensor, netuid)
 
 
 def _latest_model_commits_per_hotkey(
@@ -159,7 +135,11 @@ def _merge_model_commit_sources(
     revealed: dict[str, tuple[int, str]],
     timelock_hotkeys: set[str],
 ) -> dict[str, tuple[int, str, str]]:
-    """Merge active + revealed v6; timelock-active hotkeys skip stale revealed fallback."""
+    """Merge active + revealed model commits.
+
+    Active CommitmentOf is authoritative for the current commitment — revealed
+    history only fills gaps or refines the block number for the same payload.
+    """
     merged: dict[str, tuple[int, str, str]] = {}
 
     for hotkey, (block, text) in active.items():
@@ -170,11 +150,11 @@ def _merge_model_commit_sources(
     for hotkey, (block, data) in revealed.items():
         if hotkey in timelock_hotkeys:
             continue
-        if hotkey in merged:
-            existing_block, existing_data, _ = merged[hotkey]
-            if data == existing_data or block >= existing_block:
-                merged[hotkey] = (block, data, "revealed")
-        else:
+        if hotkey not in merged:
+            merged[hotkey] = (block, data, "revealed")
+            continue
+        existing_block, existing_data, _ = merged[hotkey]
+        if data == existing_data and block >= existing_block:
             merged[hotkey] = (block, data, "revealed")
 
     return merged
@@ -272,7 +252,7 @@ async def scan_v6_from_snapshot(
 ) -> list[Commit]:
     """Build v6 commit list from a pre-loaded chain snapshot."""
     timelock = timelock_hotkeys_from_map(snapshot.commitment_of)
-    active = active_v6_from_map(snapshot.commitment_of)
+    active = active_model_from_map(snapshot.commitment_of)
 
     revealed_model: dict[str, tuple[int, str]] = {}
     if include_revealed and snapshot.revealed is not None:
@@ -319,13 +299,17 @@ async def scan_v6_active_fast(
     neurons: dict[str, dict[str, Any]],
     snapshot: ChainSnapshot | None = None,
 ) -> list[Commit]:
-    """Fast path: CommitmentOf only from snapshot (no revealed, no block-hash RPCs)."""
+    """Fast path: active + revealed merge every cycle (no block-hash RPCs)."""
     from app.chain_reader.chain_snapshot import load_chain_snapshot
 
     if snapshot is None:
-        snapshot = await load_chain_snapshot(subtensor, netuid, include_revealed=False)
+        snapshot = await load_chain_snapshot(subtensor, netuid, include_revealed=True)
+    elif snapshot.revealed is None:
+        from app.chain_reader.chain_snapshot import iter_revealed
+
+        snapshot.revealed = await iter_revealed(subtensor, netuid)
     return await scan_v6_from_snapshot(
-        snapshot, neurons, include_revealed=False, fetch_block_hashes=False
+        snapshot, neurons, include_revealed=True, fetch_block_hashes=False
     )
 
 
