@@ -3,8 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DEFAULT_SUBNET } from "@/lib/api";
-
-const PRESET_SUBNETS = [97, 24, 21, 1] as const;
+import { DASHBOARD_SUBNETS, OTHER_SUBNETS } from "@/lib/subnets";
 
 function parseSubnet(raw: string | null): number {
   if (!raw) return DEFAULT_SUBNET;
@@ -35,5 +34,12 @@ export function useSubnet() {
     [pathname, router, searchParams]
   );
 
-  return { subnet, setSubnet, presets: PRESET_SUBNETS };
+  return {
+    subnet,
+    setSubnet,
+    dashboardSubnets: DASHBOARD_SUBNETS,
+    otherPresets: OTHER_SUBNETS,
+    /** @deprecated use dashboardSubnets */
+    presets: [...DASHBOARD_SUBNETS, ...OTHER_SUBNETS] as const,
+  };
 }

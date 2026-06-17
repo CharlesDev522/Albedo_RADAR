@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     slot_scan_interval_seconds: int = 30
     mechid: int = 0
 
+    # Primary dashboard subnets (API accepts any netuid via query param)
+    dashboard_subnets: list[int] = [97, 24]
+
     # Albedo SN97 dashboard (king-of-the-hill eval server)
     albedo_dashboard_url: str = "https://us-east-1.hippius.com/albedo/data/dashboard.json"
 

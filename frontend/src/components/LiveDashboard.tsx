@@ -12,12 +12,14 @@ import {
   sortRegistry,
   type DashboardSortKey,
 } from "@/lib/dashboardSort";
+import { getSubnetProfile } from "@/lib/subnets";
 import { DASHBOARD_POLL_MS, useDashboardSync } from "@/lib/DashboardSyncContext";
 import { useSubnet } from "@/lib/useSubnet";
 import TableSortBar from "@/components/TableSortBar";
 
 export default function LiveDashboard() {
   const { subnet } = useSubnet();
+  const profile = getSubnetProfile(subnet);
   const {
     stats,
     commits,
@@ -247,7 +249,7 @@ export default function LiveDashboard() {
                 <th>uid</th>
                 <th>commit</th>
                 <th>reg</th>
-                {subnet === 97 && <th>incentive</th>}
+                {profile.features.incentiveColumn && <th>incentive</th>}
                 <th>st</th>
                 <th>hotkey</th>
                 <th>coldkey</th>
@@ -257,7 +259,7 @@ export default function LiveDashboard() {
             <tbody>
               {sortedRegistry.length === 0 ? (
                 <tr>
-                  <td colSpan={subnet === 97 ? 8 : 7} className="text-center text-zinc-500 py-8 text-[10px]">
+                  <td colSpan={profile.features.incentiveColumn ? 8 : 7} className="text-center text-zinc-500 py-8 text-[10px]">
                     {registry ? "no miners" : "loading registry…"}
                   </td>
                 </tr>
@@ -281,7 +283,7 @@ export default function LiveDashboard() {
                     {m.commit_block?.toLocaleString() ?? "—"}
                   </td>
                   <td className="mono text-zinc-500 tabular-nums">{m.registered_at_block?.toLocaleString() ?? "—"}</td>
-                  {subnet === 97 && (
+                  {profile.features.incentiveColumn && (
                     <td
                       className={`mono tabular-nums ${
                         m.receiving_incentive ? "text-lime-400" : "text-zinc-600"

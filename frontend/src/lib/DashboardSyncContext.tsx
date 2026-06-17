@@ -20,6 +20,7 @@ import {
   type SlotStatusData,
   type SyncStatus,
 } from "@/lib/api";
+import { getSubnetProfile } from "@/lib/subnets";
 import { useSubnet } from "@/lib/useSubnet";
 
 const LIVE_URL = "/api/v1/live/stream";
@@ -179,33 +180,54 @@ export function DashboardSyncProvider({
     }
   }, [subnet]);
 
-  const refreshAlbedo = useCallback(async () => {
-    if (subnet !== 97) {
+  const refreshSubnetExtras = useCallback(async () => {
+    const profile = getSubnetProfile(subnet);
+    const fetchSubnet = subnet;
+
+    if (!profile.features.albedoKing) {
       setAlbedoStatus(null);
       setAlbedoAnalytics(null);
-      setIncentiveOverview(null);
-      return;
     }
-    const fetchSubnet = subnet;
+    if (!profile.features.incentiveColumn) {
+      setIncentiveOverview(null);
+    }
+
     try {
-      const [status, analytics, incentives] = await Promise.all([
-        api.getAlbedoStatus(fetchSubnet),
-        api.getAlbedoAnalytics(fetchSubnet, 50),
-        api.getIncentiveOverview(fetchSubnet, 30, false),
-      ]);
-      if (subnetRef.current === fetchSubnet) {
-        setAlbedoStatus(status);
-        setAlbedoAnalytics(analytics);
-        setIncentiveOverview(incentives);
+      const tasks: Promise<void>[] = [];
+
+      if (profile.features.albedoKing) {
+        tasks.push(
+          (async () => {
+            const [status, analytics] = await Promise.all([
+              api.getAlbedoStatus(fetchSubnet),
+              api.getAlbedoAnalytics(fetchSubnet, 50),
+            ]);
+            if (subnetRef.current === fetchSubnet) {
+              setAlbedoStatus(status);
+              setAlbedoAnalytics(analytics);
+            }
+          })()
+        );
       }
+
+      if (profile.features.incentiveColumn) {
+        tasks.push(
+          (async () => {
+            const incentives = await api.getIncentiveOverview(fetchSubnet, 30, false);
+            if (subnetRef.current === fetchSubnet) setIncentiveOverview(incentives);
+          })()
+        );
+      }
+
+      await Promise.all(tasks);
     } catch {
-      /* albedo metadata is non-critical */
+      /* subnet extras are non-critical */
     }
   }, [subnet]);
 
   const refresh = useCallback(async () => {
-    await Promise.all([refreshCore(), refreshSync(), refreshAlbedo()]);
-  }, [refreshCore, refreshSync, refreshAlbedo]);
+    await Promise.all([refreshCore(), refreshSync(), refreshSubnetExtras()]);
+  }, [refreshCore, refreshSync, refreshSubnetExtras]);
 
   useEffect(() => {
     subnetRef.current = subnet;
@@ -233,13 +255,13 @@ export function DashboardSyncProvider({
     }
     const interval = setInterval(refreshCore, DASHBOARD_POLL_MS);
     const syncInterval = setInterval(refreshSync, SYNC_POLL_MS);
-    const albedoInterval = setInterval(refreshAlbedo, ALBEDO_POLL_MS);
+    const albedoInterval = setInterval(refreshSubnetExtras, ALBEDO_POLL_MS);
     return () => {
       clearInterval(interval);
       clearInterval(syncInterval);
       clearInterval(albedoInterval);
     };
-  }, [refresh, refreshCore, refreshSync, refreshAlbedo]);
+  }, [refresh, refreshCore, refreshSync, refreshSubnetExtras]);
 
   useEffect(() => {
     let es: EventSource | null = null;
