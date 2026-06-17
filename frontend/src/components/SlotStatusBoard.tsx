@@ -19,6 +19,8 @@ import {
   type SlotFilterKey,
 } from "@/lib/subnetTheme";
 import { useSubnet } from "@/lib/useSubnet";
+import SearchBar from "@/components/SearchBar";
+import { isSearchActive, matchesMinerFields } from "@/lib/searchFilter";
 
 function byUid(a: SlotStatusEntry, b: SlotStatusEntry) {
   return a.uid - b.uid;
@@ -43,11 +45,13 @@ export default function SlotStatusBoard() {
   const filters = useMemo(() => getSlotFilters(subnet), [subnet]);
   const { slotData, lastRefresh, loading, apiError } = useDashboardSync();
   const [filter, setFilter] = useState<SlotFilterKey>(theme.slotDefaultFilter);
+  const [search, setSearch] = useState("");
   const [highlightUid, setHighlightUid] = useState<number | null>(null);
   const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
 
   useEffect(() => {
     setFilter(theme.slotDefaultFilter);
+    setSearch("");
     setHighlightUid(null);
   }, [subnet, theme.slotDefaultFilter]);
 
@@ -58,10 +62,24 @@ export default function SlotStatusBoard() {
 
   const summary = useMemo(() => slotData?.summary, [slotData?.summary]);
 
-  const displaySlots = useMemo(
+  const filteredSlots = useMemo(
     () => filterSlots(allSlots, filter, subnet).sort(byUid),
     [allSlots, filter, subnet]
   );
+
+  const displaySlots = useMemo(() => {
+    if (!isSearchActive(search)) return filteredSlots;
+    return filteredSlots.filter((s) =>
+      matchesMinerFields(search, {
+        uid: s.uid,
+        hotkey: s.hotkey,
+        coldkey: s.coldkey,
+        repo: s.detail,
+        commitmentType: s.commitment_type,
+        detail: s.detail,
+      })
+    );
+  }, [filteredSlots, search]);
 
   const jumpToUid = useCallback((uid: number) => {
     setHighlightUid(uid);
@@ -116,6 +134,13 @@ export default function SlotStatusBoard() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
+          <SearchBar
+            value={search}
+            onChange={setSearch}
+            placeholder="uid, hotkey, coldkey, repo…"
+            resultCount={displaySlots.length}
+            totalCount={filteredSlots.length}
+          />
           <span className="text-[9px] text-zinc-600 mono">
             {slotData?.source === "chain" ? "● live chain" : slotData ? "db · synced" : "…"}
           </span>
@@ -152,6 +177,7 @@ export default function SlotStatusBoard() {
           ) · <strong className="text-zinc-400">{summary.none}</strong> empty · showing{" "}
           <strong className="text-zinc-300">{displaySlots.length}</strong>
           {filter !== "all" ? ` (${filters.find((f) => f.key === filter)?.label ?? filter})` : ""}
+          {isSearchActive(search) ? " · search" : ""}
         </div>
       )}
 
@@ -219,7 +245,13 @@ export default function SlotStatusBoard() {
             {displaySlots.length === 0 ? (
               <tr>
                 <td colSpan={8} className="text-center text-zinc-500 py-8 text-[10px]">
-                  {loading ? "loading…" : slotData ? "no slots match filter" : "waiting for data…"}
+                  {loading
+                    ? "loading…"
+                    : slotData
+                      ? isSearchActive(search)
+                        ? "no slots match search"
+                        : "no slots match filter"
+                      : "waiting for data…"}
                 </td>
               </tr>
             ) : (

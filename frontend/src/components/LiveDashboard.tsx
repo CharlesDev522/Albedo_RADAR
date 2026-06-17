@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   shortAddr,
   shortHash,
@@ -17,6 +17,8 @@ import { getSubnetTheme } from "@/lib/subnetTheme";
 import { DASHBOARD_POLL_MS, useDashboardSync } from "@/lib/DashboardSyncContext";
 import { useSubnet } from "@/lib/useSubnet";
 import TableSortBar from "@/components/TableSortBar";
+import SearchBar from "@/components/SearchBar";
+import { isSearchActive, matchesMinerFields } from "@/lib/searchFilter";
 
 function displayVersion(version: string | null | undefined, subnet: number, fallback: string): string {
   const v = version ?? fallback;
@@ -42,6 +44,15 @@ export default function LiveDashboard() {
   } = useDashboardSync();
   const [commitSort, setCommitSort] = useState<DashboardSortKey>("commit_desc");
   const [registrySort, setRegistrySort] = useState<DashboardSortKey>("committed_first");
+  const [feedSearch, setFeedSearch] = useState("");
+  const [commitSearch, setCommitSearch] = useState("");
+  const [registrySearch, setRegistrySearch] = useState("");
+
+  useEffect(() => {
+    setFeedSearch("");
+    setCommitSearch("");
+    setRegistrySearch("");
+  }, [subnet]);
 
   const commitLabel = theme.commitLabel;
   const modelHost = theme.modelHost;
@@ -52,10 +63,52 @@ export default function LiveDashboard() {
   );
 
   const sortedCommits = useMemo(() => sortCommits(commits, commitSort), [commits, commitSort]);
+  const filteredCommits = useMemo(() => {
+    if (!isSearchActive(commitSearch)) return sortedCommits;
+    return sortedCommits.filter((c) =>
+      matchesMinerFields(commitSearch, {
+        uid: c.uid,
+        hotkey: c.hotkey,
+        coldkey: c.coldkey,
+        repo: c.repo,
+        digest: c.digest,
+        modelUri: c.model_uri,
+        version: c.version,
+      })
+    );
+  }, [sortedCommits, commitSearch]);
+
   const sortedRegistry = useMemo(
     () => sortRegistry(registry?.miners ?? [], registrySort),
     [registry?.miners, registrySort]
   );
+  const filteredRegistry = useMemo(() => {
+    if (!isSearchActive(registrySearch)) return sortedRegistry;
+    return sortedRegistry.filter((m) =>
+      matchesMinerFields(registrySearch, {
+        uid: m.uid,
+        hotkey: m.hotkey,
+        coldkey: m.coldkey,
+        repo: m.repo,
+        modelUri: m.model_uri,
+        version: m.version,
+      })
+    );
+  }, [sortedRegistry, registrySearch]);
+
+  const filteredFeed = useMemo(() => {
+    if (!isSearchActive(feedSearch)) return subnetFeed;
+    return subnetFeed.filter((e) =>
+      matchesMinerFields(feedSearch, {
+        uid: e.uid,
+        hotkey: e.hotkey,
+        repo: e.repo,
+        digest: e.digest,
+        modelUri: e.model_uri,
+        version: e.version,
+      })
+    );
+  }, [subnetFeed, feedSearch]);
 
   const fmtIncentive = (n: number | null | undefined) => {
     if (n == null || n <= 0) return "—";
@@ -143,15 +196,28 @@ export default function LiveDashboard() {
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
         <aside className="panel xl:col-span-3 order-2 xl:order-1">
-          <div className="panel-head">
+          <div className="panel-head flex-wrap gap-2">
             <h2 className="text-[12px] font-semibold text-zinc-100">live feed · SN{subnet}</h2>
-            <span className={theme.pill}>instant</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <SearchBar
+                value={feedSearch}
+                onChange={setFeedSearch}
+                placeholder="uid, hotkey, repo…"
+                resultCount={filteredFeed.length}
+                totalCount={subnetFeed.length}
+              />
+              <span className={theme.pill}>instant</span>
+            </div>
           </div>
           <div className="max-h-[320px] overflow-y-auto divide-y divide-zinc-800/50">
-            {subnetFeed.length === 0 ? (
-              <p className="px-3 py-4 text-[10px] text-zinc-500">waiting for new {commitLabel} commits on SN{subnet}…</p>
+            {filteredFeed.length === 0 ? (
+              <p className="px-3 py-4 text-[10px] text-zinc-500">
+                {isSearchActive(feedSearch)
+                  ? "no feed items match search"
+                  : `waiting for new ${commitLabel} commits on SN${subnet}…`}
+              </p>
             ) : (
-              subnetFeed.map((e, i) => {
+              filteredFeed.map((e, i) => {
                 const version = displayVersion(e.version, subnet, commitLabel);
                 return (
                   <div key={`${e.hotkey}-${e.timestamp}-${i}`} className={`px-3 py-2 ${theme.feedItemBg}`}>
@@ -182,7 +248,7 @@ export default function LiveDashboard() {
         </aside>
 
         <section className="panel xl:col-span-9 order-1 xl:order-2">
-          <div className="panel-head">
+          <div className="panel-head flex-wrap gap-2">
             <div>
               <h2 className="text-[12px] font-semibold text-zinc-100">
                 {profile.name} {commitLabel} commits · SN{subnet}
@@ -191,7 +257,16 @@ export default function LiveDashboard() {
                 {profile.tagline} · new rows flash {theme.accent === "violet" ? "violet" : "green"}
               </p>
             </div>
-            <span className={theme.pill}>{commits.length} active</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <SearchBar
+                value={commitSearch}
+                onChange={setCommitSearch}
+                placeholder="uid, hotkey, coldkey, repo…"
+                resultCount={filteredCommits.length}
+                totalCount={sortedCommits.length}
+              />
+              <span className={theme.pill}>{commits.length} active</span>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="tbl">
@@ -207,14 +282,16 @@ export default function LiveDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {sortedCommits.length === 0 ? (
+                {filteredCommits.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="text-center text-zinc-500 py-8">
-                      no {commitLabel} commits on SN{subnet} yet
+                      {isSearchActive(commitSearch)
+                        ? "no commits match search"
+                        : `no ${commitLabel} commits on SN${subnet} yet`}
                     </td>
                   </tr>
                 ) : (
-                  sortedCommits.map((c) => {
+                  filteredCommits.map((c) => {
                     const isNew = c.uid != null && flashUids.has(c.uid);
                     return (
                       <tr
@@ -266,16 +343,25 @@ export default function LiveDashboard() {
       </div>
 
       <section className="panel">
-        <div className="panel-head">
+        <div className="panel-head flex-wrap gap-2">
           <div>
             <h2 className="text-[12px] font-semibold text-zinc-100">
               {profile.name} miner registry · SN{subnet}
             </h2>
             <p className="text-[10px] text-zinc-500">{profile.tagline}</p>
           </div>
-          <span className="text-[10px] text-zinc-500">
-            {registry?.total ?? 0} miners · {registry?.v6_count ?? 0} {commitLabel}
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <SearchBar
+              value={registrySearch}
+              onChange={setRegistrySearch}
+              placeholder="uid, hotkey, coldkey, repo…"
+              resultCount={filteredRegistry.length}
+              totalCount={sortedRegistry.length}
+            />
+            <span className="text-[10px] text-zinc-500">
+              {registry?.total ?? 0} miners · {registry?.v6_count ?? 0} {commitLabel}
+            </span>
+          </div>
         </div>
         <div className="overflow-x-auto max-h-[360px] overflow-y-auto">
           <table className="tbl">
@@ -292,14 +378,18 @@ export default function LiveDashboard() {
               </tr>
             </thead>
             <tbody>
-              {sortedRegistry.length === 0 ? (
+              {filteredRegistry.length === 0 ? (
                 <tr>
                   <td colSpan={profile.features.incentiveColumn ? 8 : 7} className="text-center text-zinc-500 py-8 text-[10px]">
-                    {registry ? `no miners on SN${subnet}` : "loading registry…"}
+                    {registry
+                      ? isSearchActive(registrySearch)
+                        ? "no miners match search"
+                        : `no miners on SN${subnet}`
+                      : "loading registry…"}
                   </td>
                 </tr>
               ) : (
-              sortedRegistry.map((m) => (
+              filteredRegistry.map((m) => (
                 <tr
                   key={m.uid}
                   className={`${m.has_v6 ? "" : "opacity-50"} ${

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   modelCommitUrl,
   shortAddr,
@@ -20,6 +20,8 @@ import {
 import { getSubnetProfile } from "@/lib/subnets";
 import { getSubnetTheme } from "@/lib/subnetTheme";
 import { useSubnet } from "@/lib/useSubnet";
+import SearchBar from "@/components/SearchBar";
+import { isSearchActive, matchesGroup } from "@/lib/searchFilter";
 
 export default function MinerGroupsPanel() {
   const { subnet } = useSubnet();
@@ -28,14 +30,25 @@ export default function MinerGroupsPanel() {
   const { registry, commits } = useDashboardSync();
   const [view, setView] = useState<GroupView>("coldkey");
   const [multiOnly, setMultiOnly] = useState(true);
+  const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setSearch("");
+    setExpanded(new Set());
+  }, [subnet, view]);
 
   const rows = useMemo(() => buildMinerRows(registry, commits), [registry, commits]);
   const summary = useMemo(() => clusterSummary(rows), [rows]);
 
-  const groups = useMemo(() => {
+  const allGroups = useMemo(() => {
     return view === "coldkey" ? groupByColdkey(rows, multiOnly) : groupByOwner(rows, multiOnly);
   }, [rows, view, multiOnly]);
+
+  const groups = useMemo(() => {
+    if (!isSearchActive(search)) return allGroups;
+    return allGroups.filter((g) => matchesGroup(search, g));
+  }, [allGroups, search]);
 
   const toggleExpand = (key: string) => {
     setExpanded((prev) => {
@@ -58,6 +71,13 @@ export default function MinerGroupsPanel() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
+          <SearchBar
+            value={search}
+            onChange={setSearch}
+            placeholder="uid, coldkey, HF owner, repo…"
+            resultCount={groups.length}
+            totalCount={allGroups.length}
+          />
           <ViewToggle view={view} onView={setView} />
           <button
             type="button"
@@ -84,9 +104,11 @@ export default function MinerGroupsPanel() {
 
       {groups.length === 0 ? (
         <div className="px-3 py-10 text-center text-[11px] text-zinc-500">
-          {multiOnly
-            ? `no multi-miner groups on SN${subnet} yet — try “all groups” or wait for more registry data`
-            : "no groups to show"}
+          {isSearchActive(search)
+            ? "no clusters match search"
+            : multiOnly
+              ? `no multi-miner groups on SN${subnet} yet — try “all groups” or wait for more registry data`
+              : "no groups to show"}
         </div>
       ) : (
         <div className="p-3 grid grid-cols-1 lg:grid-cols-2 gap-3 max-h-[720px] overflow-y-auto">
