@@ -17,20 +17,22 @@ from app.chain_reader.commitment_decoder import (
     decode_revealed_payload,
 )
 from app.chain_reader.chain_snapshot import ChainSnapshot
-from app.chain_reader.subnet_commit_rules import QUASAR_NETUID
+from app.chain_reader.subnet_commit_rules import ALBEDO_PIPE_VERSIONS, QUASAR_NETUID
 
 logger = logging.getLogger(__name__)
 
 _BLOCK_HASH_CACHE: OrderedDict[int, str] = OrderedDict()
 _BLOCK_HASH_CACHE_MAX = 10_000
 
-PIPE_MODEL_VERSIONS = frozenset({"v5", "v6"})
+PIPE_MODEL_VERSIONS = frozenset({"v5", "v6", "v7"})
 JSON_MODEL_VERSION = "json"
 # Legacy rows stored before SN97/SN24 JSON split used "quasar" for all JSON commits.
 LEGACY_QUASAR_VERSION = "quasar"
 ALL_MODEL_VERSIONS = frozenset({*PIPE_MODEL_VERSIONS, JSON_MODEL_VERSION, LEGACY_QUASAR_VERSION})
 MODEL_COMMIT_VERSIONS = ALL_MODEL_VERSIONS  # backwards-compatible alias
-_MODEL_COMMIT_RE = re.compile(r"^v[56]\|")
+_PIPE_PREFIX_RE = re.compile(r"^v\d+\|")
+# Backwards-compatible alias
+_MODEL_COMMIT_RE = _PIPE_PREFIX_RE
 
 
 @dataclass(frozen=True)
@@ -49,15 +51,19 @@ class Commit:
     commit_source: str  # "active" | "revealed"
 
 
-def parse_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
-    """Parse a v5 or v6 reveal into a payload dict, or None if not well-formed."""
-    if not data or not _MODEL_COMMIT_RE.match(data):
+def parse_pipe_commit(
+    data: str,
+    chain_hotkey: str,
+    allowed_versions: frozenset[str],
+) -> dict[str, Any] | None:
+    """Parse a pipe reveal (v5/v6/v7|repo|sha256:…) when version is allowed."""
+    if not data or not _PIPE_PREFIX_RE.match(data):
         return None
     parts = data.split("|")
     if len(parts) != 3:
         return None
     version, repo, digest = parts
-    if version not in ("v5", "v6"):
+    if version not in allowed_versions:
         return None
     if "/" not in repo or not digest.startswith("sha256:"):
         return None
@@ -67,6 +73,11 @@ def parse_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
         "digest": digest,
         "author_hotkey": chain_hotkey,
     }
+
+
+def parse_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
+    """Parse a v5/v6/v7 reveal into a payload dict, or None if not well-formed."""
+    return parse_pipe_commit(data, chain_hotkey, PIPE_MODEL_VERSIONS)
 
 
 def parse_json_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
@@ -107,15 +118,20 @@ def parse_subnet_model_commit(
 ) -> dict[str, Any] | None:
     """Parse model commits using subnet-specific rules.
 
-    SN97 Albedo: v6 pipe only (v5, legacy JSON, and other formats ignored).
-    SN24 Quasar: JSON model commits (v5/v6 pipe accepted if present).
+    SN97 Albedo: v6/v7 pipe only (v5, legacy JSON, and other formats ignored).
+    SN24 Quasar: JSON model commits (v5/v6/v7 pipe accepted if present).
     """
     if netuid == QUASAR_NETUID:
         parsed = parse_model_commit(data, chain_hotkey)
         if parsed is not None:
             return parsed
         return parse_json_model_commit(data, chain_hotkey)
-    return parse_v6(data, chain_hotkey)
+    return parse_albedo_pipe_commit(data, chain_hotkey)
+
+
+def parse_albedo_pipe_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
+    """Parse SN97 Albedo pipe commits (v6 and v7)."""
+    return parse_pipe_commit(data, chain_hotkey, ALBEDO_PIPE_VERSIONS)
 
 
 def parse_any_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
@@ -124,11 +140,8 @@ def parse_any_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | Non
 
 
 def parse_v6(data: str, chain_hotkey: str) -> dict[str, Any] | None:
-    """Parse v6 only."""
-    parsed = parse_model_commit(data, chain_hotkey)
-    if parsed is None or parsed["version"] != "v6":
-        return None
-    return parsed
+    """Parse v6 only (backwards-compatible helper)."""
+    return parse_pipe_commit(data, chain_hotkey, frozenset({"v6"}))
 
 
 def is_model_commit(data: str) -> bool:

@@ -262,6 +262,7 @@ def _summary_from_rows(subnet: int, rows: list) -> SlotStatusSummary:
         subnet=subnet,
         total_slots=len(rows),
         v6=counts.get("v6", 0),
+        v7=counts.get("v7", 0),
         json=counts.get("json", 0),
         timelock_encrypted=counts.get("timelock_encrypted", 0),
         binary=counts.get("binary", 0),

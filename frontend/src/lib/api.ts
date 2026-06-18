@@ -136,6 +136,7 @@ export interface SlotStatusSummary {
   subnet: number;
   total_slots: number;
   v6: number;
+  v7?: number;
   json: number;
   timelock_encrypted: number;
   binary?: number;

@@ -7,9 +7,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chain_reader.subnet_commit_rules import (
-    ALBEDO_MODEL_VERSIONS,
+    ALBEDO_PIPE_VERSIONS,
     is_albedo_subnet,
-    is_v6_history_row,
+    is_albedo_pipe_history_row,
     model_versions_sql_tuple,
 )
 from app.config import get_settings
@@ -269,7 +269,7 @@ async def get_commitment_history(
     )
     rows = list(result.scalars().all())
     if is_albedo_subnet(subnet):
-        rows = [h for h in rows if is_v6_history_row(h.reveal_string, h.commit_payload)]
+        rows = [h for h in rows if is_albedo_pipe_history_row(h.reveal_string, h.commit_payload)]
     return [CommitmentHistoryResponse.model_validate(h) for h in rows]
 
 
@@ -353,11 +353,11 @@ async def unpublished_miners(
     live: bool = Query(default=False, description="Run on-chain scan (slow)"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """SN97: registered miners with no v6 pipe publish."""
+    """SN97: registered miners with no v6/v7 pipe publish."""
     if not is_albedo_subnet(subnet):
         return {
             "subnet": subnet,
-            "note": "v6-only unpublished detection applies to SN97 Albedo",
+            "note": "v6/v7 pipe unpublished detection applies to SN97 Albedo",
             "unpublished_uids": [],
             "unpublished_count": 0,
         }
@@ -389,7 +389,7 @@ async def unpublished_miners(
         commits_result = await db.execute(
             select(MinerCommitment.uid).where(
                 MinerCommitment.subnet == subnet,
-                MinerCommitment.version.in_(tuple(ALBEDO_MODEL_VERSIONS)),
+                MinerCommitment.version.in_(tuple(ALBEDO_PIPE_VERSIONS)),
             )
         )
         published_uids = {r[0] for r in commits_result.all() if r[0] is not None}
@@ -403,7 +403,7 @@ async def unpublished_miners(
         "published_count": len(published_uids),
         "unpublished_count": len(unpublished),
         "unpublished_uids": unpublished,
-        "detection_rule": "registered miner with no v6 pipe in active CommitmentOf ∪ latest revealed v6",
+        "detection_rule": "registered miner with no v6/v7 pipe in active CommitmentOf ∪ latest revealed pipe",
     }
 
 

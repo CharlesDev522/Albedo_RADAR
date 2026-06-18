@@ -13,6 +13,7 @@ from app.chain_reader.commitment_decoder import (
     parse_timelock_encrypted,
 )
 from app.chain_reader.commitment_scanner import _neuron_index, parse_model_commit
+from app.chain_reader.subnet_commit_rules import ALBEDO_PIPE_VERSIONS
 from app.chain_reader.chain_snapshot import ChainSnapshot
 
 logger = logging.getLogger(__name__)
@@ -120,7 +121,7 @@ def encrypted_breakdown_from_map(commitment_of: dict[str, dict[str, Any]]) -> di
             continue
         if decoded.kind == CommitmentKind.PLAINTEXT and decoded.reveal_string:
             parsed = parse_model_commit(decoded.reveal_string, hotkey)
-            if parsed and parsed.get("version") == "v6":
+            if parsed and parsed.get("version") in ALBEDO_PIPE_VERSIONS:
                 v6_plain += 1
             else:
                 other_plain += 1

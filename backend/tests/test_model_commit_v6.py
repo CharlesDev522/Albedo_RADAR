@@ -46,6 +46,22 @@ def test_classify_v6_on_chain_shape():
     assert classified.reveal_string.startswith("v6|")
 
 
+def test_v7_detected():
+    data = "v7|owner/my-model|sha256:abc123deadbeef"
+    parsed = parse_model_commit(data, "5Hotkey")
+    assert parsed is not None
+    assert parsed["version"] == "v7"
+
+
+def test_classify_v7_as_v7():
+    from app.chain_reader.commitment_classifier import classify_plaintext_reveal
+
+    classified = classify_plaintext_reveal(
+        "v7|owner/my-model|sha256:abc123deadbeef", 42, 0, "5Hotkey"
+    )
+    assert classified.commitment_type.value == "v7"
+
+
 def test_classify_v5_as_v5():
     raw = {
         "block": 42,

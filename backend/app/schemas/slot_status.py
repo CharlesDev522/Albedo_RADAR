@@ -25,6 +25,7 @@ class SlotStatusSummary(BaseModel):
     subnet: int
     total_slots: int
     v6: int = 0
+    v7: int = 0
     json: int = 0
     timelock_encrypted: int = 0
     binary: int = 0

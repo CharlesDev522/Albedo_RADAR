@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chain_reader.commitment_scanner import Commit
 from app.chain_reader.subnet_commit_rules import (
     QUASAR_NETUID,
-    is_v6_history_row,
+    is_albedo_pipe_history_row,
     model_versions_for_subnet,
     model_versions_sql_tuple,
     normalize_stored_version,
@@ -177,8 +177,8 @@ class CommitmentStateBuilder:
             await session.flush()
         return removed
 
-    async def prune_non_v6_history(self, session: AsyncSession, netuid: int) -> int:
-        """SN97: drop commitment history rows that are not v6 pipe commits."""
+    async def prune_non_pipe_history(self, session: AsyncSession, netuid: int) -> int:
+        """SN97: drop commitment history rows that are not v6/v7 pipe commits."""
         if netuid == QUASAR_NETUID:
             return 0
         result = await session.execute(
@@ -186,13 +186,16 @@ class CommitmentStateBuilder:
         )
         removed = 0
         for row in result.scalars().all():
-            if not is_v6_history_row(row.reveal_string, row.commit_payload):
+            if not is_albedo_pipe_history_row(row.reveal_string, row.commit_payload):
                 await session.delete(row)
                 removed += 1
         if removed:
-            logger.info("pruned %d non-v6 history rows netuid=%d", removed, netuid)
+            logger.info("pruned %d non-pipe history rows netuid=%d", removed, netuid)
             await session.flush()
         return removed
+
+    # Backwards-compatible alias
+    prune_non_v6_history = prune_non_pipe_history
 
     # Backwards-compatible alias
     prune_absent_v6 = prune_absent_model_commits
@@ -307,7 +310,7 @@ class CommitmentStateBuilder:
         )
 
     async def _record_history(self, session: AsyncSession, commit: Commit) -> None:
-        if not is_v6_history_row(commit.reveal_string, commit.commit_payload) and commit.netuid != QUASAR_NETUID:
+        if not is_albedo_pipe_history_row(commit.reveal_string, commit.commit_payload) and commit.netuid != QUASAR_NETUID:
             return
         result = await session.execute(
             select(CommitmentHistory).where(

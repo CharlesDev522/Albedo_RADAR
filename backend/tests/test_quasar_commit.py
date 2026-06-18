@@ -26,11 +26,15 @@ def test_parse_json_hf_repo_alias():
     assert parsed["version"] == "json"
 
 
-def test_sn97_ignores_json_and_v5():
+def test_sn97_ignores_json_and_v5_accepts_v6_v7():
     json_data = '{"model": "divinequest/m9n2", "revision": "cca9b0d"}'
     assert parse_subnet_model_commit(json_data, "5Hotkey", netuid=97) is None
     v5_data = "v5|owner/repo|sha256:abc123deadbeef"
     assert parse_subnet_model_commit(v5_data, "5Hotkey", netuid=97) is None
+    v7_data = "v7|owner/repo|sha256:abc123deadbeef"
+    parsed = parse_subnet_model_commit(v7_data, "5Hotkey", netuid=97)
+    assert parsed is not None
+    assert parsed["version"] == "v7"
 
 
 def test_sn97_accepts_v6():

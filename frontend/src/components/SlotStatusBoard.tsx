@@ -13,6 +13,8 @@ import { getSubnetProfile } from "@/lib/subnets";
 import {
   getSlotFilters,
   getSubnetTheme,
+  isAlbedoPipeType,
+  isPublishedPipeType,
   slotGridColor,
   slotTypeLabel,
   slotTypeStyle,
@@ -29,8 +31,14 @@ function byUid(a: SlotStatusEntry, b: SlotStatusEntry) {
 function filterSlots(slots: SlotStatusEntry[], filter: SlotFilterKey, subnet: number): SlotStatusEntry[] {
   if (filter === "all") return slots;
   if (filter === "unpublished")
-    return slots.filter((s) => s.is_published === false || (s.is_published == null && s.commitment_type !== "v6"));
+    return slots.filter(
+      (s) =>
+        s.is_published === false ||
+        (s.is_published == null && !isPublishedPipeType(s.commitment_type, subnet))
+    );
   if (filter === "committed") return slots.filter((s) => s.commitment_type !== "none");
+  if (filter === "v6" && subnet === 97)
+    return slots.filter((s) => isAlbedoPipeType(s.commitment_type));
   if (filter === "timelock_encrypted")
     return slots.filter((s) => s.commitment_type === "timelock_encrypted" || s.commitment_type === "binary");
   if (filter === "other")
@@ -104,7 +112,9 @@ export default function SlotStatusBoard() {
   };
 
   const primaryCount =
-    theme.slotPrimaryType === "json" ? summary?.json ?? 0 : summary?.v6 ?? 0;
+    theme.slotPrimaryType === "json"
+      ? summary?.json ?? 0
+      : (summary?.v6 ?? 0) + (summary?.v7 ?? 0);
 
   const gridLegend = useMemo(() => {
     if (subnet === 24) {
@@ -114,7 +124,7 @@ export default function SlotStatusBoard() {
         label: slotTypeLabel(subnet, k === "timelock_encrypted" ? "timelock_encrypted" : k),
       }));
     }
-    return ["v6", "timelock_encrypted", "unpublished", "none"].map((k) => ({
+    return ["v6", "v7", "timelock_encrypted", "unpublished", "none"].map((k) => ({
       key: k,
       color: slotGridColor(subnet, k === "unpublished" ? "json" : k),
       label: k === "unpublished" ? "unpublished" : slotTypeLabel(subnet, k),
@@ -165,6 +175,12 @@ export default function SlotStatusBoard() {
           </span>
           {subnet === 97 && (
             <>
+              , <span className="text-lime-400">{summary.v6} v6</span>
+              {(summary.v7 ?? 0) > 0 && (
+                <>
+                  , <span className="text-emerald-400">{summary.v7} v7</span>
+                </>
+              )}
               , <span className="text-violet-400">{summary.timelock_encrypted + (summary.binary ?? 0)} enc</span>
               , <span className="text-rose-400">{summary.unpublished ?? 0} unpublished</span>
             </>
@@ -304,9 +320,10 @@ function SlotDetail({ subnet, slot }: { subnet: number; slot: SlotStatusEntry })
 
   const isModelSlot =
     subnet === 97
-      ? slot.commitment_type === "v6"
+      ? isAlbedoPipeType(slot.commitment_type)
       : slot.commitment_type === "v6" ||
         slot.commitment_type === "v5" ||
+        slot.commitment_type === "v7" ||
         slot.commitment_type === "json";
 
   if (isModelSlot) {

@@ -30,6 +30,7 @@ def _latest_revealed_per_hotkey(
         if classified.commitment_type not in (
             CommitmentType.V5,
             CommitmentType.V6,
+            CommitmentType.V7,
             CommitmentType.JSON,
         ):
             continue
@@ -39,11 +40,11 @@ def _latest_revealed_per_hotkey(
     return latest
 
 
-def _published_v6_per_hotkey(
+def _published_pipe_per_hotkey(
     entries: list[tuple[str, int, str]],
     netuid: int,
 ) -> dict[str, tuple[int, str]]:
-    """Latest v6 pipe reveal per hotkey (subnet rules applied)."""
+    """Latest v6/v7 pipe reveal per hotkey (subnet rules applied)."""
     latest: dict[str, tuple[int, str]] = {}
     for hotkey, block, payload in entries:
         if parse_subnet_model_commit(payload, hotkey, netuid) is None:
@@ -121,7 +122,7 @@ def scan_slots_from_snapshot(
         if is_published_slot_type(classified.commitment_type.value, netuid):
             published_hotkeys.add(hotkey)
     if snapshot.revealed is not None:
-        for hotkey in _published_v6_per_hotkey(snapshot.revealed, netuid):
+        for hotkey in _published_pipe_per_hotkey(snapshot.revealed, netuid):
             published_hotkeys.add(hotkey)
     for hotkey, raw in snapshot.commitment_of.items():
         classified = classify_commitment_raw(raw, hotkey)
