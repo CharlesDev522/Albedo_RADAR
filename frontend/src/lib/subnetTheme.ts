@@ -1,6 +1,7 @@
-/** Per-subnet UI theme — SN97 (Albedo v6/v7 pipe) vs SN24 (Quasar/JSON). */
+/** Per-subnet UI theme — SN97 (Albedo model era by repo) vs SN24 (Quasar/JSON). */
 
 import { getSubnetProfile } from "@/lib/subnets";
+import { inferAlbedoModelFamily } from "@/lib/modelFamily";
 
 export const ALBEDO_PIPE_TYPES = new Set(["v6", "v7"]);
 
@@ -42,10 +43,10 @@ export interface SlotFilterDef {
 
 const SN97_SLOT_FILTERS: SlotFilterDef[] = [
   { key: "all", label: "all 256", color: "text-zinc-300 border-zinc-600" },
-  { key: "v6", label: "v6/v7", color: "text-lime-400 border-lime-500/40 bg-lime-500/10", hint: "published v6 or v7 pipe" },
   { key: "qwen36_35b", label: "Qwen3.6-35B", color: "text-sky-300 border-sky-500/40 bg-sky-500/10", hint: "albedo-qwen3.6-35b-* repos" },
   { key: "qwen3_4b", label: "Qwen3-4B", color: "text-amber-300 border-amber-500/40 bg-amber-500/10", hint: "legacy albedo-qwen3-4b-* repos" },
-  { key: "unpublished", label: "unpublished", color: "text-rose-300 border-rose-500/40 bg-rose-500/10", hint: "registered, no v6/v7" },
+  { key: "v6", label: "published", color: "text-lime-400 border-lime-500/40 bg-lime-500/10", hint: "any on-chain pipe publish" },
+  { key: "unpublished", label: "unpublished", color: "text-rose-300 border-rose-500/40 bg-rose-500/10", hint: "registered, no pipe publish" },
   { key: "timelock_encrypted", label: "encrypted", color: "text-violet-300 border-violet-500/40 bg-violet-500/10", hint: "TimelockEncrypted" },
   { key: "none", label: "no commit", color: "text-zinc-500 border-zinc-700 bg-zinc-800/30" },
 ];
@@ -105,9 +106,9 @@ export function getSubnetTheme(netuid: number): SubnetTheme {
     rowFlashSubtle: "bg-lime-500/10",
     uidChipCommitted: "border-lime-500/40 bg-lime-500/15 text-lime-300",
     kpiAccent: "text-lime-400",
-    slotDefaultFilter: "v6",
+    slotDefaultFilter: "qwen36_35b",
     slotPrimaryType: "v6",
-    slotSummaryPrimaryLabel: "v6/v7",
+    slotSummaryPrimaryLabel: "published",
   };
 }
 
@@ -130,8 +131,7 @@ export function slotGridColor(netuid: number, type: string): string {
     };
     return sn24[type] ?? "bg-zinc-700";
   }
-  if (type === "v6") return "bg-lime-500";
-  if (type === "v7") return "bg-emerald-500";
+  if (type === "v6" || type === "v7") return "bg-lime-500";
   if (type === "timelock_encrypted" || type === "binary") return "bg-violet-500";
   if (type === "none") return "bg-zinc-700";
   return "bg-rose-500";
@@ -141,11 +141,8 @@ export function slotTypeStyle(netuid: number, type: string): string {
   if (netuid === 24 && type === "json") {
     return "text-violet-300 border-violet-500/30 bg-violet-500/10";
   }
-  if (netuid !== 24 && type === "v6") {
+  if (netuid !== 24 && (type === "v6" || type === "v7")) {
     return "text-lime-400 border-lime-500/30 bg-lime-500/10";
-  }
-  if (netuid !== 24 && type === "v7") {
-    return "text-emerald-400 border-emerald-500/30 bg-emerald-500/10";
   }
   if (type === "timelock_encrypted" || type === "binary") {
     return "text-violet-300 border-violet-500/30 bg-violet-500/10";
@@ -167,10 +164,38 @@ export function slotTypeStyle(netuid: number, type: string): string {
   return base[type] ?? base.unknown;
 }
 
-export function slotTypeLabel(netuid: number, type: string): string {
+export function slotTypeLabel(
+  netuid: number,
+  type: string,
+  detail?: string | null,
+  modelFamily?: string | null
+): string {
   if (type === "timelock_encrypted" || type === "binary") return "encrypted";
   if (type === "none") return "—";
   if (netuid === 24 && type === "json") return "quasar";
   if (netuid !== 24 && !isAlbedoPipeType(type)) return "unpublished";
+  if (netuid === 97) {
+    const family = modelFamily ?? inferAlbedoModelFamily(detail);
+    if (family === "qwen3.6-35b") return "Qwen3.6-35B";
+    if (family === "qwen3-4b") return "Qwen3-4B";
+    return "pipe";
+  }
   return type;
+}
+
+/** SN97 UID grid color — model era when repo is known, else generic published pipe. */
+export function slotGridColorForAlbedo(
+  commitmentType: string,
+  detail: string | null | undefined,
+  modelFamily?: string | null
+): string {
+  if (commitmentType === "none") return "bg-zinc-700";
+  if (commitmentType === "timelock_encrypted" || commitmentType === "binary") return "bg-violet-500";
+  if (isAlbedoPipeType(commitmentType)) {
+    const family = modelFamily ?? inferAlbedoModelFamily(detail);
+    if (family === "qwen3.6-35b") return "bg-sky-500";
+    if (family === "qwen3-4b") return "bg-amber-500";
+    return "bg-lime-500";
+  }
+  return "bg-rose-500";
 }

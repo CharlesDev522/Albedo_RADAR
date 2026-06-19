@@ -20,9 +20,19 @@ import TableSortBar from "@/components/TableSortBar";
 import SearchBar from "@/components/SearchBar";
 import { ModelFamilyBadge } from "@/components/ModelFamilyBadge";
 import { isSearchActive, matchesMinerFields } from "@/lib/searchFilter";
-import { inferAlbedoModelFamily } from "@/lib/modelFamily";
+import { inferAlbedoModelFamily, modelFamilyLabel } from "@/lib/modelFamily";
 
-function displayVersion(version: string | null | undefined, subnet: number, fallback: string): string {
+function displayCommitEra(
+  subnet: number,
+  repo: string | null | undefined,
+  modelFamily: string | null | undefined,
+  version: string | null | undefined,
+  fallback: string
+): string {
+  if (subnet === 97) {
+    const family = modelFamily ?? inferAlbedoModelFamily(repo);
+    return modelFamilyLabel(family as "qwen3.6-35b" | "qwen3-4b" | null) ?? "";
+  }
   const v = version ?? fallback;
   if (subnet === 24 && (v === "json" || v === "quasar")) return "quasar";
   return v;
@@ -222,11 +232,15 @@ export default function LiveDashboard() {
               </p>
             ) : (
               filteredFeed.map((e, i) => {
-                const version = displayVersion(e.version, subnet, commitLabel);
+                const era = displayCommitEra(subnet, e.repo, null, e.version, commitLabel);
                 return (
                   <div key={`${e.hotkey}-${e.timestamp}-${i}`} className={`px-3 py-2 ${theme.feedItemBg}`}>
                     <div className="flex justify-between gap-2">
-                      <span className={`${theme.pill} text-[9px]`}>{version}</span>
+                      {subnet === 97 ? (
+                        <ModelFamilyBadge repo={e.repo} family={inferAlbedoModelFamily(e.repo)} />
+                      ) : (
+                        <span className={`${theme.pill} text-[9px]`}>{era || commitLabel}</span>
+                      )}
                       <span className="text-[9px] text-zinc-600">{e.timestamp ? fmtTime(e.timestamp) : "now"}</span>
                     </div>
                     <p className={`mono text-[11px] ${theme.textAccent} mt-1`}>uid {e.uid ?? "?"}</p>
@@ -304,9 +318,11 @@ export default function LiveDashboard() {
                       >
                         <td className="mono font-medium text-zinc-200">
                           {c.uid ?? "—"}
-                          <span className={`ml-1 text-[8px] uppercase ${theme.textAccent}`}>
-                            {displayVersion(c.version, subnet, commitLabel)}
-                          </span>
+                          {displayCommitEra(subnet, c.repo, c.model_family, c.version, commitLabel) && (
+                            <span className={`ml-1 text-[8px] uppercase ${theme.textAccent}`}>
+                              {displayCommitEra(subnet, c.repo, c.model_family, c.version, commitLabel)}
+                            </span>
+                          )}
                           {isNew && <span className={`ml-1 text-[9px] ${theme.textAccent}`}>NEW</span>}
                         </td>
                         <td className="mono text-zinc-300 tabular-nums">{c.commit_block.toLocaleString()}</td>
@@ -424,7 +440,16 @@ export default function LiveDashboard() {
                   )}
                   <td>
                     {m.has_v6 ? (
-                      <span className={theme.pill}>{displayVersion(m.version, subnet, commitLabel)}</span>
+                      subnet === 97 ? (
+                        <ModelFamilyBadge
+                          repo={m.repo}
+                          family={m.model_family ?? inferAlbedoModelFamily(m.repo)}
+                        />
+                      ) : (
+                        <span className={theme.pill}>
+                          {displayCommitEra(subnet, m.repo, m.model_family, m.version, commitLabel) || commitLabel}
+                        </span>
+                      )
                     ) : (
                       <span className="pill-none">—</span>
                     )}

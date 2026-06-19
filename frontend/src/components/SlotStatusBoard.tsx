@@ -16,6 +16,7 @@ import {
   isAlbedoPipeType,
   isPublishedPipeType,
   slotGridColor,
+  slotGridColorForAlbedo,
   slotTypeLabel,
   slotTypeStyle,
   type SlotFilterKey,
@@ -136,11 +137,14 @@ export default function SlotStatusBoard() {
         label: slotTypeLabel(subnet, k === "timelock_encrypted" ? "timelock_encrypted" : k),
       }));
     }
-    return ["v6", "v7", "timelock_encrypted", "unpublished", "none"].map((k) => ({
-      key: k,
-      color: slotGridColor(subnet, k === "unpublished" ? "json" : k),
-      label: k === "unpublished" ? "unpublished" : slotTypeLabel(subnet, k),
-    }));
+    return [
+      { key: "qwen36_35b", color: "bg-sky-500", label: "Qwen3.6-35B" },
+      { key: "qwen3_4b", color: "bg-amber-500", label: "Qwen3-4B" },
+      { key: "pipe", color: "bg-lime-500", label: "pipe (era unknown)" },
+      { key: "unpublished", color: "bg-rose-500", label: "unpublished" },
+      { key: "enc", color: "bg-violet-500", label: "encrypted" },
+      { key: "none", color: "bg-zinc-700", label: "empty" },
+    ];
   }, [subnet]);
 
   return (
@@ -187,12 +191,6 @@ export default function SlotStatusBoard() {
           </span>
           {subnet === 97 && (
             <>
-              , <span className="text-lime-400">{summary.v6} v6</span>
-              {(summary.v7 ?? 0) > 0 && (
-                <>
-                  , <span className="text-emerald-400">{summary.v7} v7</span>
-                </>
-              )}
               {(summary.qwen36_35b ?? 0) > 0 && (
                 <>
                   , <span className="text-sky-400">{summary.qwen36_35b} Qwen3.6-35B</span>
@@ -246,9 +244,13 @@ export default function SlotStatusBoard() {
               <button
                 key={s.uid}
                 type="button"
-                title={`uid ${s.uid} · ${slotTypeLabel(subnet, s.commitment_type)}${s.registered_at_block ? ` · reg ${s.registered_at_block}` : ""}`}
+                title={`uid ${s.uid} · ${slotTypeLabel(subnet, s.commitment_type, s.detail, slotModelFamily(s))}${s.registered_at_block ? ` · reg ${s.registered_at_block}` : ""}`}
                 onClick={() => jumpToUid(s.uid)}
-                className={`w-[10px] h-[10px] shrink-0 rounded-[2px] p-0 border-0 ${slotGridColor(subnet, s.commitment_type)} ${
+                className={`w-[10px] h-[10px] shrink-0 rounded-[2px] p-0 border-0 ${
+                  subnet === 97
+                    ? slotGridColorForAlbedo(s.commitment_type, s.detail, slotModelFamily(s))
+                    : slotGridColor(subnet, s.commitment_type)
+                } ${
                   filter !== "all" && !filterSlots([s], filter, subnet).length ? "opacity-30 saturate-50" : "opacity-100"
                 } ${highlightUid === s.uid ? "ring-2 ring-white/90 ring-offset-1 ring-offset-zinc-950 scale-110 z-10" : ""} hover:ring-1 hover:ring-white/70 hover:brightness-110 cursor-pointer transition-all duration-100`}
               />
@@ -306,7 +308,7 @@ export default function SlotStatusBoard() {
                 >
                   <td className="mono font-medium text-zinc-200 tabular-nums">{s.uid}</td>
                   <td>
-                    <TypeBadge subnet={subnet} type={s.commitment_type} />
+                    <TypeBadge subnet={subnet} slot={s} />
                   </td>
                   <td className="mono text-zinc-400 tabular-nums">
                     {s.registered_at_block?.toLocaleString() ?? "—"}
@@ -368,11 +370,15 @@ function SlotDetail({ subnet, slot }: { subnet: number; slot: SlotStatusEntry })
   return <>{slot.detail}</>;
 }
 
-function TypeBadge({ subnet, type }: { subnet: number; type: string }) {
-  const label = slotTypeLabel(subnet, type);
+function TypeBadge({ subnet, slot }: { subnet: number; slot: SlotStatusEntry }) {
+  const family = slotModelFamily(slot);
+  const label = slotTypeLabel(subnet, slot.commitment_type, slot.detail, family);
+  if (subnet === 97 && isAlbedoPipeType(slot.commitment_type) && family) {
+    return <ModelFamilyBadge repo={slot.detail} family={family} />;
+  }
   return (
     <span
-      className={`inline-flex px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wide ${slotTypeStyle(subnet, type)}`}
+      className={`inline-flex px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wide ${slotTypeStyle(subnet, slot.commitment_type)}`}
     >
       {label}
     </span>

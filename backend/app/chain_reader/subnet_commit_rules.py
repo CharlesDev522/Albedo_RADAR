@@ -1,11 +1,11 @@
-"""Per-subnet model commitment rules — SN97 Albedo (v6/v7 pipe) vs SN24 Quasar (JSON)."""
+"""Per-subnet model commitment rules — SN97 Albedo (pipe) vs SN24 Quasar (JSON)."""
 
 from __future__ import annotations
 
 QUASAR_NETUID = 24
 ALBEDO_NETUID = 97
 
-# Albedo SN97: v6/v7 pipe publishes. v5, legacy JSON, and other formats are ignored.
+# Albedo SN97: accept v6/v7 pipe wire formats; competition era comes from repo name.
 ALBEDO_PIPE_VERSIONS = frozenset({"v6", "v7"})
 
 # Backwards-compatible alias used by DB filters and poller.

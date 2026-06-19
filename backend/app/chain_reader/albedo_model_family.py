@@ -35,7 +35,7 @@ def infer_albedo_model_family(repo: str | None) -> str | None:
 
 
 def repo_from_slot_detail(detail: str | None, commitment_type: str | None) -> str | None:
-    """Slot `detail` is the repo for published v6/v7 pipe commits."""
+    """Slot `detail` holds the Hippius repo for published pipe commits."""
     if not detail or "/" not in detail:
         return None
     if commitment_type in ("v6", "v7"):
