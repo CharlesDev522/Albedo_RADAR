@@ -7,6 +7,37 @@
     @apply bg-[#09090b] text-zinc-300 antialiased;
     font-feature-settings: "tnum" 1, "ss01" 1;
   }
+
+  /* Firefox — thin, dark-theme scrollbars everywhere */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(82, 82, 91, 0.45) transparent;
+  }
+
+  /* WebKit — slim thumb, no track gutter */
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: rgba(63, 63, 70, 0.55);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(113, 113, 122, 0.8);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
 
 @layer components {
@@ -76,5 +107,32 @@
 
   .stat-value {
     @apply text-lg font-semibold text-zinc-100 mt-0.5 tabular-nums;
+  }
+
+  /* Dashboard scroll regions — subtle thumb, clearer on hover */
+  .scroll-pane {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(63, 63, 70, 0.3) transparent;
+  }
+
+  .scroll-pane:hover {
+    scrollbar-color: rgba(113, 113, 122, 0.55) transparent;
+  }
+
+  .scroll-pane::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  .scroll-pane::-webkit-scrollbar-thumb {
+    background-color: rgba(63, 63, 70, 0.35);
+  }
+
+  .scroll-pane:hover::-webkit-scrollbar-thumb {
+    background-color: rgba(113, 113, 122, 0.6);
+  }
+
+  .scroll-pane::-webkit-scrollbar-thumb:active {
+    background-color: rgba(161, 161, 170, 0.75);
   }
 }

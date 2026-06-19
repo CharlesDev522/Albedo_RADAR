@@ -111,7 +111,7 @@ export default function MinerGroupsPanel() {
               : "no groups to show"}
         </div>
       ) : (
-        <div className="p-3 grid grid-cols-1 lg:grid-cols-2 gap-3 max-h-[720px] overflow-y-auto">
+        <div className="scroll-pane p-3 grid grid-cols-1 lg:grid-cols-2 gap-3 max-h-[720px] overflow-y-auto">
           {groups.map((g) => (
             <GroupCard
               key={`${g.kind}-${g.key}`}

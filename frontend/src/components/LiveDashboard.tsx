@@ -223,7 +223,7 @@ export default function LiveDashboard() {
               <span className={theme.pill}>instant</span>
             </div>
           </div>
-          <div className="max-h-[320px] overflow-y-auto divide-y divide-zinc-800/50">
+          <div className="scroll-pane max-h-[320px] overflow-y-auto divide-y divide-zinc-800/50">
             {filteredFeed.length === 0 ? (
               <p className="px-3 py-4 text-[10px] text-zinc-500">
                 {isSearchActive(feedSearch)
@@ -286,7 +286,7 @@ export default function LiveDashboard() {
               <span className={theme.pill}>{commits.length} active</span>
             </div>
           </div>
-          <div className="overflow-x-auto">
+          <div className="scroll-pane overflow-x-auto">
             <table className="tbl">
               <thead>
                 <tr>
@@ -391,7 +391,7 @@ export default function LiveDashboard() {
             </span>
           </div>
         </div>
-        <div className="overflow-x-auto max-h-[360px] overflow-y-auto">
+        <div className="scroll-pane overflow-x-auto max-h-[360px] overflow-y-auto">
           <table className="tbl">
             <thead className="sticky top-0 z-10 bg-zinc-950">
               <tr>

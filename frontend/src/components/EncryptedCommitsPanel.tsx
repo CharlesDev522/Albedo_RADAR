@@ -80,7 +80,7 @@ export default function EncryptedCommitsPanel() {
         <MiniStat label="reveal round" value={fmt(stats?.latest_reveal_round)} mono />
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="scroll-pane overflow-x-auto">
         <table className="tbl">
           <thead>
             <tr>

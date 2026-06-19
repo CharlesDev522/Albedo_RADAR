@@ -267,7 +267,7 @@ export default function SlotStatusBoard() {
         </div>
       )}
 
-      <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
+      <div className="scroll-pane overflow-x-auto max-h-[520px] overflow-y-auto">
         <table className="tbl">
           <thead className="sticky top-0 z-10 bg-zinc-950">
             <tr>
