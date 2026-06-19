@@ -2,7 +2,9 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, computed_field
+
+from app.chain_reader.albedo_model_family import infer_albedo_model_family, repo_from_slot_detail
 
 
 class SlotStatusEntry(BaseModel):
@@ -20,6 +22,12 @@ class SlotStatusEntry(BaseModel):
     last_updated: datetime | None = None
     is_published: bool = False
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def model_family(self) -> str | None:
+        repo = repo_from_slot_detail(self.detail, self.commitment_type)
+        return infer_albedo_model_family(repo)
+
 
 class SlotStatusSummary(BaseModel):
     subnet: int
@@ -34,6 +42,8 @@ class SlotStatusSummary(BaseModel):
     none: int = 0
     committed: int = 0
     unpublished: int = 0
+    qwen36_35b: int = 0
+    qwen3_4b: int = 0
     last_scan_at: datetime | None = None
 
 

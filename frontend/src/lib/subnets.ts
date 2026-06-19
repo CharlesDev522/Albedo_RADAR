@@ -26,7 +26,7 @@ const PROFILES: Record<number, SubnetProfile> = {
     netuid: 97,
     name: "Albedo",
     shortName: "Albedo",
-    tagline: "Model distillation · Qwen3-4B · v6/v7 pipe commits",
+    tagline: "Model distillation · Qwen3.6-35B era · v6/v7 pipe commits",
     accent: "amber",
     features: {
       quasarStatus: false,

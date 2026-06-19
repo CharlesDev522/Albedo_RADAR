@@ -6,6 +6,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chain_reader.albedo_model_family import (
+    FAMILY_QWEN36_35B,
+    FAMILY_QWEN3_4B,
+    infer_albedo_model_family,
+    repo_from_slot_detail,
+)
 from app.chain_reader.subnet_commit_rules import is_published_slot_type
 from app.config import get_settings
 from app.db.models import MinerSlotStatus
@@ -254,9 +260,18 @@ def _summary_from_rows(subnet: int, rows: list) -> SlotStatusSummary:
         counts[ct] = counts.get(ct, 0) + 1
 
     last_scan = None
+    qwen36_35b = 0
+    qwen3_4b = 0
     for r in rows:
         if getattr(r, "last_updated", None):
             last_scan = r.last_updated if last_scan is None else max(last_scan, r.last_updated)
+        if subnet == 97:
+            ct = r.commitment_type if isinstance(r.commitment_type, str) else r.commitment_type
+            family = infer_albedo_model_family(repo_from_slot_detail(r.detail, ct))
+            if family == FAMILY_QWEN36_35B:
+                qwen36_35b += 1
+            elif family == FAMILY_QWEN3_4B:
+                qwen3_4b += 1
 
     return SlotStatusSummary(
         subnet=subnet,
@@ -277,5 +292,7 @@ def _summary_from_rows(subnet: int, rows: list) -> SlotStatusSummary:
                 subnet,
             )
         ),
+        qwen36_35b=qwen36_35b,
+        qwen3_4b=qwen3_4b,
         last_scan_at=last_scan or datetime.now(timezone.utc),
     )

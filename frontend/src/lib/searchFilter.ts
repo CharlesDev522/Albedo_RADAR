@@ -28,6 +28,7 @@ export function matchesMinerFields(
     version?: string | null;
     commitmentType?: string | null;
     detail?: string | null;
+    modelFamily?: string | null;
   }
 ): boolean {
   const q = normalizeSearchQuery(query);
@@ -46,7 +47,8 @@ export function matchesMinerFields(
     fields.modelUri,
     fields.version,
     fields.commitmentType,
-    fields.detail
+    fields.detail,
+    fields.modelFamily
   ).includes(q);
 }
 

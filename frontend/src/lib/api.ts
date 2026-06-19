@@ -25,6 +25,7 @@ export interface Commitment {
   repo: string;
   digest: string;
   model_uri: string;
+  model_family?: string | null;
   commit_source: string;
   first_seen: string;
   last_updated: string;
@@ -50,6 +51,7 @@ export interface RegistryMiner {
   commit_block: number | null;
   repo: string | null;
   model_uri: string | null;
+  model_family?: string | null;
   commit_source: string | null;
   last_updated: string | null;
   incentive?: number | null;
@@ -130,6 +132,7 @@ export interface SlotStatusEntry {
   detail: string | null;
   last_updated: string | null;
   is_published?: boolean;
+  model_family?: string | null;
 }
 
 export interface SlotStatusSummary {
@@ -145,6 +148,8 @@ export interface SlotStatusSummary {
   none: number;
   committed: number;
   unpublished?: number;
+  qwen36_35b?: number;
+  qwen3_4b?: number;
   last_scan_at: string | null;
 }
 

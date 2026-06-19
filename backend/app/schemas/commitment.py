@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+
+from app.chain_reader.albedo_model_family import infer_albedo_model_family
 
 
 class CommitmentResponse(BaseModel):
@@ -27,6 +29,13 @@ class CommitmentResponse(BaseModel):
     commit_source: str = "active"
     first_seen: datetime
     last_updated: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def model_family(self) -> str | None:
+        if self.subnet != 97:
+            return None
+        return infer_albedo_model_family(self.repo)
 
     @field_validator("commit_source", mode="before")
     @classmethod
@@ -68,6 +77,11 @@ class MinerRegistryEntry(BaseModel):
     emission: float | None = None
     rank_position: int | None = None
     receiving_incentive: bool | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def model_family(self) -> str | None:
+        return infer_albedo_model_family(self.repo)
 
 
 class MinerRegistryResponse(BaseModel):

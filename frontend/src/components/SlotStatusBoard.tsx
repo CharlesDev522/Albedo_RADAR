@@ -22,7 +22,13 @@ import {
 } from "@/lib/subnetTheme";
 import { useSubnet } from "@/lib/useSubnet";
 import SearchBar from "@/components/SearchBar";
+import { ModelFamilyBadge } from "@/components/ModelFamilyBadge";
 import { isSearchActive, matchesMinerFields } from "@/lib/searchFilter";
+import { inferAlbedoModelFamily } from "@/lib/modelFamily";
+
+function slotModelFamily(slot: SlotStatusEntry): string | null {
+  return slot.model_family ?? inferAlbedoModelFamily(slot.detail);
+}
 
 function byUid(a: SlotStatusEntry, b: SlotStatusEntry) {
   return a.uid - b.uid;
@@ -39,6 +45,10 @@ function filterSlots(slots: SlotStatusEntry[], filter: SlotFilterKey, subnet: nu
   if (filter === "committed") return slots.filter((s) => s.commitment_type !== "none");
   if (filter === "v6" && subnet === 97)
     return slots.filter((s) => isAlbedoPipeType(s.commitment_type));
+  if (filter === "qwen36_35b" && subnet === 97)
+    return slots.filter((s) => slotModelFamily(s) === "qwen3.6-35b");
+  if (filter === "qwen3_4b" && subnet === 97)
+    return slots.filter((s) => slotModelFamily(s) === "qwen3-4b");
   if (filter === "timelock_encrypted")
     return slots.filter((s) => s.commitment_type === "timelock_encrypted" || s.commitment_type === "binary");
   if (filter === "other")
@@ -101,7 +111,9 @@ export default function SlotStatusBoard() {
     const map: Record<SlotFilterKey, number | undefined> = {
       all: s.total_slots,
       committed: s.committed,
-      v6: s.v6 ?? 0,
+      v6: (s.v6 ?? 0) + (s.v7 ?? 0),
+      qwen36_35b: s.qwen36_35b ?? 0,
+      qwen3_4b: s.qwen3_4b ?? 0,
       unpublished: s.unpublished ?? 0,
       timelock_encrypted: s.timelock_encrypted + (s.binary ?? 0),
       json: s.json,
@@ -179,6 +191,16 @@ export default function SlotStatusBoard() {
               {(summary.v7 ?? 0) > 0 && (
                 <>
                   , <span className="text-emerald-400">{summary.v7} v7</span>
+                </>
+              )}
+              {(summary.qwen36_35b ?? 0) > 0 && (
+                <>
+                  , <span className="text-sky-400">{summary.qwen36_35b} Qwen3.6-35B</span>
+                </>
+              )}
+              {(summary.qwen3_4b ?? 0) > 0 && (
+                <>
+                  , <span className="text-amber-400">{summary.qwen3_4b} Qwen3-4B</span>
                 </>
               )}
               , <span className="text-violet-400">{summary.timelock_encrypted + (summary.binary ?? 0)} enc</span>
@@ -327,15 +349,19 @@ function SlotDetail({ subnet, slot }: { subnet: number; slot: SlotStatusEntry })
         slot.commitment_type === "json";
 
   if (isModelSlot) {
+    const family = slot.model_family ?? inferAlbedoModelFamily(slot.detail);
     return (
-      <a
-        href={modelCommitUrl(slot.detail, "", theme.modelHost)}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={`${theme.textAccent} opacity-90 hover:underline`}
-      >
-        {shortRepo(slot.detail, 28)}
-      </a>
+      <span className="inline-flex items-center gap-1.5 max-w-full">
+        <a
+          href={modelCommitUrl(slot.detail, "", theme.modelHost)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`${theme.textAccent} opacity-90 hover:underline truncate`}
+        >
+          {shortRepo(slot.detail, 28)}
+        </a>
+        <ModelFamilyBadge repo={slot.detail} family={family} />
+      </span>
     );
   }
 

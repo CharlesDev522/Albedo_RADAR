@@ -18,7 +18,9 @@ import { DASHBOARD_POLL_MS, useDashboardSync } from "@/lib/DashboardSyncContext"
 import { useSubnet } from "@/lib/useSubnet";
 import TableSortBar from "@/components/TableSortBar";
 import SearchBar from "@/components/SearchBar";
+import { ModelFamilyBadge } from "@/components/ModelFamilyBadge";
 import { isSearchActive, matchesMinerFields } from "@/lib/searchFilter";
+import { inferAlbedoModelFamily } from "@/lib/modelFamily";
 
 function displayVersion(version: string | null | undefined, subnet: number, fallback: string): string {
   const v = version ?? fallback;
@@ -74,6 +76,7 @@ export default function LiveDashboard() {
         digest: c.digest,
         modelUri: c.model_uri,
         version: c.version,
+        modelFamily: c.model_family ?? inferAlbedoModelFamily(c.repo),
       })
     );
   }, [sortedCommits, commitSearch]);
@@ -92,6 +95,7 @@ export default function LiveDashboard() {
         repo: m.repo,
         modelUri: m.model_uri,
         version: m.version,
+        modelFamily: m.model_family ?? inferAlbedoModelFamily(m.repo),
       })
     );
   }, [sortedRegistry, registrySearch]);
@@ -315,16 +319,24 @@ export default function LiveDashboard() {
                         <td className="mono text-zinc-500" title={c.coldkey ?? ""}>
                           {c.coldkey ? shortAddr(c.coldkey, 4) : "—"}
                         </td>
-                        <td className="max-w-[160px]">
-                          <a
-                            href={modelCommitUrl(c.repo, c.digest, modelHost)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sky-400/90 hover:underline truncate block text-[10px]"
-                            title={modelCommitUrl(c.repo, c.digest, modelHost)}
-                          >
-                            {shortRepo(c.repo)}
-                          </a>
+                        <td className="max-w-[200px]">
+                          <span className="inline-flex items-center gap-1.5 max-w-full">
+                            <a
+                              href={modelCommitUrl(c.repo, c.digest, modelHost)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sky-400/90 hover:underline truncate block text-[10px]"
+                              title={modelCommitUrl(c.repo, c.digest, modelHost)}
+                            >
+                              {shortRepo(c.repo)}
+                            </a>
+                            {subnet === 97 && (
+                              <ModelFamilyBadge
+                                repo={c.repo}
+                                family={c.model_family ?? inferAlbedoModelFamily(c.repo)}
+                              />
+                            )}
+                          </span>
                         </td>
                         <td className="mono text-[10px] text-zinc-500">
                           {c.digest.startsWith("revision:")
