@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     # Hippius registry repo tracking
     hippius_registry_url: str = "https://registry.hippius.com"
+    huggingface_api_url: str = "https://huggingface.co/api"
     repo_track_interval_seconds: int = 120
     repo_track_revision: str = "main"
 

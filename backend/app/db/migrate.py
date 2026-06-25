@@ -30,6 +30,10 @@ MIGRATIONS: list[str] = [
     """
     CREATE INDEX IF NOT EXISTS ix_hippius_repo_tracks_repo ON hippius_repo_tracks (subnet, repo)
     """,
+    """
+    ALTER TABLE hippius_repo_tracks
+    ADD COLUMN IF NOT EXISTS repo_host VARCHAR(16) DEFAULT 'hippius'
+    """,
 ]
 
 

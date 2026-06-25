@@ -1,4 +1,4 @@
-"""Hippius repo tracking and miner activity feed."""
+"""Hippius + Hugging Face repo tracking and miner activity feed."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -8,14 +8,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import HippiusRepoRevision, HippiusRepoTrack, RepoActivityEvent
 from app.db.session import get_db
+from app.processing.repo_track_builder import RepoTrackBuilder
 from app.schemas.repo_activity import (
     RepoActivityEventResponse,
     RepoActivityOverview,
     RepoRevisionResponse,
     RepoTrackEntry,
 )
+from app.services.repo_activity_service import merged_repo_tracks
 
 router = APIRouter(prefix="/repo-activity", tags=["repo-activity"])
+
+
+@router.post("/sync")
+async def sync_repo_activity(
+    subnet: int = Query(default=97, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """On-demand Hippius/HF poll — use when collector has not run yet."""
+    builder = RepoTrackBuilder()
+    stats = await builder.sync_subnet(db, subnet)
+    await builder.prune_stale_tracks(db, subnet)
+    await db.commit()
+    return {"status": "ok", "subnet": subnet, **stats}
 
 
 @router.get("/overview", response_model=RepoActivityOverview)
@@ -23,9 +38,7 @@ async def repo_activity_overview(
     subnet: int = Query(default=97, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> RepoActivityOverview:
-    tracks = (
-        await db.execute(select(HippiusRepoTrack).where(HippiusRepoTrack.subnet == subnet))
-    ).scalars().all()
+    merged = await merged_repo_tracks(db, subnet)
 
     since = datetime.now(timezone.utc) - timedelta(hours=24)
     events_24h = (
@@ -45,20 +58,23 @@ async def repo_activity_overview(
         )
     ).scalar()
 
-    unique_repos = len({t.repo for t in tracks})
+    unique_repos = len({t.repo for t in merged})
 
     return RepoActivityOverview(
         subnet=subnet,
-        tracked_miners=len(tracks),
+        tracked_miners=len(merged),
         unique_repos=unique_repos,
-        tracked_repos=len(tracks),
-        qwen36_35b_repos=sum(1 for t in tracks if t.model_family == "qwen3.6-35b"),
-        qwen3_4b_repos=sum(1 for t in tracks if t.model_family == "qwen3-4b"),
-        in_sync_count=sum(1 for t in tracks if t.digest_in_sync is True),
-        mismatch_count=sum(1 for t in tracks if t.digest_in_sync is False),
+        tracked_repos=len(merged),
+        qwen36_35b_repos=sum(1 for t in merged if t.model_family == "qwen3.6-35b"),
+        qwen3_4b_repos=sum(1 for t in merged if t.model_family == "qwen3-4b"),
+        in_sync_count=sum(1 for t in merged if t.digest_in_sync is True),
+        mismatch_count=sum(1 for t in merged if t.digest_in_sync is False),
         hub_updates_24h=sum(1 for e in events_24h if e.event_type == "hub_manifest_update"),
         on_chain_events_24h=sum(1 for e in events_24h if e.event_type == "on_chain_commit"),
         last_poll_at=last_poll,
+        hippius_count=sum(1 for t in merged if t.repo_host == "hippius"),
+        huggingface_count=sum(1 for t in merged if t.repo_host == "huggingface"),
+        pending_hub_poll=sum(1 for t in merged if t.pending_hub_poll),
     )
 
 
@@ -69,14 +85,7 @@ async def list_tracked_repos(
     in_sync: bool | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> list[RepoTrackEntry]:
-    q = select(HippiusRepoTrack).where(HippiusRepoTrack.subnet == subnet)
-    if family:
-        q = q.where(HippiusRepoTrack.model_family == family)
-    if in_sync is not None:
-        q = q.where(HippiusRepoTrack.digest_in_sync == in_sync)
-    q = q.order_by(HippiusRepoTrack.uid.asc().nullslast(), HippiusRepoTrack.repo.asc())
-    rows = (await db.execute(q)).scalars().all()
-    return [RepoTrackEntry.model_validate(r) for r in rows]
+    return await merged_repo_tracks(db, subnet, family=family, in_sync=in_sync)
 
 
 @router.get("/feed", response_model=list[RepoActivityEventResponse])

@@ -208,12 +208,16 @@ export interface RepoActivityOverview {
   hub_updates_24h: number;
   on_chain_events_24h: number;
   last_poll_at: string | null;
+  hippius_count: number;
+  huggingface_count: number;
+  pending_hub_poll: number;
 }
 
 export interface RepoTrackEntry {
   id: number;
   subnet: number;
   repo: string;
+  repo_host: string;
   uid: number | null;
   hotkey: string | null;
   coldkey: string | null;
@@ -230,6 +234,7 @@ export interface RepoTrackEntry {
   last_hub_change_at: string | null;
   first_tracked_at: string;
   last_updated: string;
+  pending_hub_poll?: boolean;
 }
 
 export interface RepoActivityEvent {
@@ -315,6 +320,16 @@ export const api = {
     if (opts?.eventType) params.set("event_type", opts.eventType);
     if (opts?.limit) params.set("limit", String(opts.limit));
     return fetchApi<RepoActivityEvent[]>(`/repo-activity/feed?${params}`);
+  },
+  syncRepoActivity: async (subnet = DEFAULT_SUBNET) => {
+    const res = await fetch(`${apiBase()}/repo-activity/sync?subnet=${subnet}`, {
+      method: "POST",
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      throw new Error(`sync failed: HTTP ${res.status}`);
+    }
+    return res.json() as Promise<Record<string, unknown>>;
   },
 };
 

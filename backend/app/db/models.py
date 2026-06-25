@@ -361,6 +361,7 @@ class HippiusRepoTrack(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     subnet: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     repo: Mapped[str] = mapped_column(String(512), nullable=False)
+    repo_host: Mapped[str] = mapped_column(String(16), default="hippius")
     uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
     hotkey: Mapped[str | None] = mapped_column(String(64), nullable=True)
     coldkey: Mapped[str | None] = mapped_column(String(64), nullable=True)

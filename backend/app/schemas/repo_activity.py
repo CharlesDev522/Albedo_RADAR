@@ -12,6 +12,7 @@ class RepoTrackEntry(BaseModel):
     id: int
     subnet: int
     repo: str
+    repo_host: str = "hippius"
     uid: int | None
     hotkey: str | None
     coldkey: str | None
@@ -28,6 +29,7 @@ class RepoTrackEntry(BaseModel):
     last_hub_change_at: datetime | None
     first_tracked_at: datetime
     last_updated: datetime
+    pending_hub_poll: bool = False
 
 
 class RepoActivityEventResponse(BaseModel):
@@ -64,6 +66,9 @@ class RepoActivityOverview(BaseModel):
     hub_updates_24h: int
     on_chain_events_24h: int
     last_poll_at: datetime | None
+    hippius_count: int = 0
+    huggingface_count: int = 0
+    pending_hub_poll: int = 0
 
 
 class RepoRevisionResponse(BaseModel):

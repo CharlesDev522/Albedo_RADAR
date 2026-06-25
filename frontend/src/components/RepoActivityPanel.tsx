@@ -3,7 +3,9 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   api,
+  hfModelUrl,
   hippiusModelUrl,
+  modelCommitUrl,
   shortAddr,
   shortHash,
   shortRepo,
@@ -13,7 +15,6 @@ import {
 } from "@/lib/api";
 import { ModelFamilyBadge } from "@/components/ModelFamilyBadge";
 import { inferAlbedoModelFamily } from "@/lib/modelFamily";
-import { getSubnetProfile } from "@/lib/subnets";
 import { useSubnet } from "@/lib/useSubnet";
 
 const POLL_MS = 30_000;
@@ -35,6 +36,13 @@ function fmtTime(iso: string | null | undefined): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function repoUrl(entry: RepoTrackEntry): string {
+  if (entry.repo_host === "huggingface") {
+    return hfModelUrl(entry.repo, entry.chain_digest ?? entry.hub_digest ?? undefined);
+  }
+  return hippiusModelUrl(entry.repo, entry.hub_revision);
 }
 
 function eventLabel(type: string): string {
@@ -63,14 +71,20 @@ function eventColor(type: string): string {
   }
 }
 
+function hostBadge(host: string): string {
+  return host === "huggingface"
+    ? "text-orange-300 border-orange-500/30 bg-orange-500/10"
+    : "text-sky-300 border-sky-500/30 bg-sky-500/10";
+}
+
 export default function RepoActivityPanel() {
   const { subnet } = useSubnet();
-  const profile = getSubnetProfile(subnet);
   const [overview, setOverview] = useState<RepoActivityOverview | null>(null);
   const [tracks, setTracks] = useState<RepoTrackEntry[]>([]);
   const [feed, setFeed] = useState<RepoActivityEvent[]>([]);
-  const [family, setFamily] = useState<FamilyFilter>("qwen3.6-35b");
+  const [family, setFamily] = useState<FamilyFilter>("all");
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedRepo, setExpandedRepo] = useState<string | null>(null);
 
@@ -94,6 +108,18 @@ export default function RepoActivityPanel() {
     }
   }, [subnet, familyParam]);
 
+  const runSync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      await api.syncRepoActivity(subnet);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "registry sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }, [subnet, refresh]);
+
   useEffect(() => {
     setLoading(true);
     refresh();
@@ -101,15 +127,29 @@ export default function RepoActivityPanel() {
     return () => clearInterval(id);
   }, [refresh]);
 
+  useEffect(() => {
+    void api.syncRepoActivity(subnet).then(() => refresh()).catch(() => undefined);
+  }, [subnet, refresh]);
 
   return (
     <div className="space-y-3">
-      <div className="panel px-3 py-2">
-        <h2 className="text-[12px] font-semibold text-zinc-100">Hippius repo tracker</h2>
-        <p className="text-[10px] text-zinc-500 mt-0.5">
-          Every published miner on SN{subnet} — one Hippius repo row per miner (uid). Polls Hippius Hub
-          for manifest changes, on-chain commits, and digest sync. Unpublished miners are not tracked.
-        </p>
+      <div className="panel px-3 py-2 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-[12px] font-semibold text-zinc-100">Model repo activity</h2>
+          <p className="text-[10px] text-zinc-500 mt-0.5 max-w-2xl">
+            Every published miner on SN{subnet} — Hippius (<span className="text-sky-400">sha256:</span>{" "}
+            digests) and Hugging Face (<span className="text-orange-400">revision:</span> digests).
+            Shows on-chain repos immediately; hub poll fills sync status.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void runSync()}
+          disabled={syncing}
+          className="px-2 py-1 rounded text-[10px] border border-zinc-700 text-zinc-300 hover:border-sky-500/40 hover:text-sky-200 disabled:opacity-50"
+        >
+          {syncing ? "syncing…" : "sync registries"}
+        </button>
       </div>
 
       {error && (
@@ -118,8 +158,15 @@ export default function RepoActivityPanel() {
         </div>
       )}
 
+      {overview && overview.tracked_miners === 0 && !loading && (
+        <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[10px] text-amber-300">
+          No published commits in the database yet. Check Overview tab and ensure the collector is
+          running (<code className="mono">docker compose logs collector --tail 30</code>).
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
-        {(["qwen3.6-35b", "qwen3-4b", "all"] as FamilyFilter[]).map((f) => (
+        {(["all", "qwen3.6-35b", "qwen3-4b"] as FamilyFilter[]).map((f) => (
           <button
             key={f}
             type="button"
@@ -134,25 +181,26 @@ export default function RepoActivityPanel() {
                 : "border-zinc-800 text-zinc-500 hover:border-zinc-700"
             }`}
           >
-            {f === "all" ? "all families" : f === "qwen3.6-35b" ? "Qwen3.6-35B" : "Qwen3-4B"}
+            {f === "all" ? "all miners" : f === "qwen3.6-35b" ? "Qwen3.6-35B" : "Qwen3-4B"}
           </button>
         ))}
         <span className="text-[9px] text-zinc-600 ml-auto">
-          {loading ? "loading…" : `poll ${POLL_MS / 1000}s · last ${fmtTime(overview?.last_poll_at)}`}
+          {loading ? "loading…" : `refresh ${POLL_MS / 1000}s · hub poll ${fmtTime(overview?.last_poll_at)}`}
         </span>
       </div>
 
-      {overview && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-2">
+      {overview && overview.tracked_miners > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-10 gap-2">
           <Kpi label="miners" value={String(overview.tracked_miners)} />
           <Kpi label="unique repos" value={String(overview.unique_repos)} small />
-          <Kpi label="Qwen3.6-35B" value={String(overview.qwen36_35b_repos)} accent="text-sky-400" />
-          <Kpi label="Qwen3-4B" value={String(overview.qwen3_4b_repos)} accent="text-amber-400" />
+          <Kpi label="hippius" value={String(overview.hippius_count)} accent="text-sky-400" />
+          <Kpi label="hugging face" value={String(overview.huggingface_count)} accent="text-orange-400" />
+          <Kpi label="Qwen3.6-35B" value={String(overview.qwen36_35b_repos)} accent="text-sky-300" />
           <Kpi label="in sync" value={String(overview.in_sync_count)} accent="text-lime-400" />
           <Kpi label="mismatch" value={String(overview.mismatch_count)} warn={overview.mismatch_count > 0} />
+          <Kpi label="pending poll" value={String(overview.pending_hub_poll)} />
           <Kpi label="hub 24h" value={String(overview.hub_updates_24h)} accent="text-sky-300" />
           <Kpi label="chain 24h" value={String(overview.on_chain_events_24h)} accent="text-lime-300" />
-          <Kpi label="shown" value={String(tracks.length)} small />
         </div>
       )}
 
@@ -165,7 +213,11 @@ export default function RepoActivityPanel() {
           <div className="scroll-pane max-h-[420px] overflow-y-auto divide-y divide-zinc-800/50">
             {feed.length === 0 ? (
               <p className="px-3 py-6 text-[10px] text-zinc-500 text-center">
-                {loading ? "loading activity…" : "no repo activity yet — collector polls Hippius every ~2 min"}
+                {loading
+                  ? "loading activity…"
+                  : tracks.length > 0
+                    ? "no events yet — click sync registries to poll Hippius/HF"
+                    : "no published miners to track"}
               </p>
             ) : (
               feed.map((e) => (
@@ -181,7 +233,11 @@ export default function RepoActivityPanel() {
                     <span className="mono text-zinc-500">{e.hotkey ? shortAddr(e.hotkey, 5) : ""}</span>
                   </p>
                   <a
-                    href={hippiusModelUrl(e.repo)}
+                    href={modelCommitUrl(
+                      e.repo,
+                      e.chain_digest ?? e.hub_digest ?? "",
+                      (e.meta?.host as string) === "huggingface" ? "huggingface" : "hippius"
+                    )}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-[10px] text-sky-400/90 hover:underline truncate block mt-0.5"
@@ -193,25 +249,10 @@ export default function RepoActivityPanel() {
                       <ModelFamilyBadge repo={e.repo} family={e.model_family} />
                     </div>
                   )}
-                  {e.commit_message && (
-                    <p className="text-[9px] text-zinc-500 mt-1 truncate" title={e.commit_message}>
-                      {e.commit_message}
-                    </p>
-                  )}
                   {(e.chain_digest || e.hub_digest) && (
                     <p className="text-[9px] mono text-zinc-600 mt-1">
                       {e.chain_digest && <>chain {shortHash(e.chain_digest)} </>}
-                      {e.hub_digest && <>hub {shortHash(e.hub_digest)}</>}
-                    </p>
-                  )}
-                  {e.changed_files.length > 0 && (
-                    <p className="text-[9px] text-zinc-500 mt-1">
-                      {e.changed_files.length} file change{e.changed_files.length !== 1 ? "s" : ""}
-                      {e.changed_files.slice(0, 3).map((f) => (
-                        <span key={f.name} className="ml-1 text-zinc-600">
-                          {f.change}:{f.name}
-                        </span>
-                      ))}
+                      {e.hub_digest && <>remote {shortHash(e.hub_digest)}</>}
                     </p>
                   )}
                 </div>
@@ -226,8 +267,7 @@ export default function RepoActivityPanel() {
               <h3 className="text-[11px] font-semibold text-zinc-100">All published miner repos</h3>
               <p className="text-[10px] text-zinc-500">
                 {tracks.length} miners
-                {overview ? ` · ${overview.unique_repos} unique Hippius repos` : ""}
-                {family === "qwen3.6-35b" ? " · Qwen3.6-35B filter" : ""}
+                {overview ? ` · ${overview.unique_repos} unique repos` : ""}
               </p>
             </div>
           </div>
@@ -236,35 +276,43 @@ export default function RepoActivityPanel() {
               <thead className="sticky top-0 z-10 bg-zinc-950">
                 <tr>
                   <th>uid</th>
+                  <th>host</th>
                   <th>repo</th>
                   <th>era</th>
                   <th>sync</th>
                   <th>files</th>
-                  <th>hub updated</th>
-                  <th>chain digest</th>
-                  <th>hub digest</th>
+                  <th>remote updated</th>
+                  <th>chain</th>
+                  <th>remote</th>
                 </tr>
               </thead>
               <tbody>
                 {tracks.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center text-zinc-500 py-8 text-[10px]">
-                      {loading ? "loading repos…" : "no tracked repos for this filter"}
+                    <td colSpan={9} className="text-center text-zinc-500 py-8 text-[10px]">
+                      {loading ? "loading…" : "no published miners — check Overview tab"}
                     </td>
                   </tr>
                 ) : (
                   tracks.map((t) => {
-                    const expanded = expandedRepo === t.repo;
+                    const expanded = expandedRepo === `${t.hotkey}-${t.repo}`;
                     return (
-                      <Fragment key={t.id}>
+                      <Fragment key={`${t.hotkey}-${t.repo}`}>
                         <tr
                           className="cursor-pointer"
-                          onClick={() => setExpandedRepo(expanded ? null : t.repo)}
+                          onClick={() => setExpandedRepo(expanded ? null : `${t.hotkey}-${t.repo}`)}
                         >
                           <td className="mono text-zinc-200">{t.uid ?? "—"}</td>
-                          <td className="max-w-[160px]">
+                          <td>
+                            <span
+                              className={`inline-flex px-1 py-px rounded border text-[8px] uppercase ${hostBadge(t.repo_host)}`}
+                            >
+                              {t.repo_host === "huggingface" ? "HF" : "hippius"}
+                            </span>
+                          </td>
+                          <td className="max-w-[140px]">
                             <a
-                              href={hippiusModelUrl(t.repo, t.hub_revision)}
+                              href={repoUrl(t)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-sky-400/90 hover:underline text-[10px] truncate block"
@@ -280,17 +328,18 @@ export default function RepoActivityPanel() {
                             />
                           </td>
                           <td>
-                            {t.digest_in_sync === true && (
+                            {t.pending_hub_poll && (
+                              <span className="text-zinc-500 text-[9px]">pending</span>
+                            )}
+                            {!t.pending_hub_poll && t.digest_in_sync === true && (
                               <span className="text-lime-400 text-[9px]">synced</span>
                             )}
-                            {t.digest_in_sync === false && (
+                            {!t.pending_hub_poll && t.digest_in_sync === false && (
                               <span className="text-rose-400 text-[9px]">mismatch</span>
                             )}
-                            {t.digest_in_sync == null && <span className="text-zinc-600 text-[9px]">—</span>}
                           </td>
                           <td className="mono text-[10px] text-zinc-500 tabular-nums">
                             {t.file_count ?? "—"}
-                            <span className="text-zinc-700 ml-1">{fmtBytes(t.total_bytes)}</span>
                           </td>
                           <td className="text-[10px] text-zinc-500">{fmtTime(t.hub_updated_at)}</td>
                           <td className="mono text-[9px] text-zinc-600">
@@ -300,12 +349,16 @@ export default function RepoActivityPanel() {
                             {t.hub_digest ? `${shortHash(t.hub_digest)}…` : "—"}
                           </td>
                         </tr>
-                        {expanded && t.hub_commit_message && (
+                        {expanded && (t.hub_commit_message || t.coldkey) && (
                           <tr className="bg-zinc-900/40">
-                            <td colSpan={8} className="text-[10px] text-zinc-500 py-2">
-                              <span className="text-zinc-400">last hub message:</span> {t.hub_commit_message}
+                            <td colSpan={9} className="text-[10px] text-zinc-500 py-2">
+                              {t.hub_commit_message && (
+                                <>
+                                  <span className="text-zinc-400">remote:</span> {t.hub_commit_message}{" "}
+                                </>
+                              )}
                               {t.coldkey && (
-                                <span className="ml-3 mono text-zinc-600">coldkey {shortAddr(t.coldkey, 4)}</span>
+                                <span className="mono text-zinc-600">coldkey {shortAddr(t.coldkey, 4)}</span>
                               )}
                             </td>
                           </tr>
