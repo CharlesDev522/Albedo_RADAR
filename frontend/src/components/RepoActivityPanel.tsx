@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   api,
   hippiusModelUrl,
@@ -101,10 +101,6 @@ export default function RepoActivityPanel() {
     return () => clearInterval(id);
   }, [refresh]);
 
-  const qwen36Tracks = useMemo(
-    () => tracks.filter((t) => t.model_family === "qwen3.6-35b"),
-    [tracks]
-  );
 
   return (
     <div className="space-y-3">
