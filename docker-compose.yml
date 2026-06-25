@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: minerwatch
+      POSTGRES_PASSWORD: minerwatch
+      POSTGRES_DB: minerwatch
+    # No host port mapping — api/collector reach postgres via Docker network.
+    # If you need host access (psql/pgAdmin), uncomment and pick a free port:
+    # ports:
+    #   - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minerwatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    # Internal only; uncomment if you need host Redis access:
+    # ports:
+    #   - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
+      REDIS_URL: redis://redis:6379/0
+      BITTENSOR_NETWORK: finney
+      DEFAULT_SUBNET: "97"
+      POLL_INTERVAL_SECONDS: "3"
+      METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
+      FULL_SCAN_INTERVAL_SECONDS: "300"
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000"]'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  collector:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.collector
+    environment:
+      DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
+      REDIS_URL: redis://redis:6379/0
+      BITTENSOR_NETWORK: finney
+      DEFAULT_SUBNET: "97"
+      POLL_INTERVAL_SECONDS: "3"
+      METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
+      FULL_SCAN_INTERVAL_SECONDS: "300"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      # Server-side fetch from inside Docker network
+      API_URL: http://api:8000/api/v1
+      # Optional: set if browser also needs direct API access
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      NEXT_PUBLIC_LIVE_URL: http://localhost:8000/api/v1/live/stream
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
