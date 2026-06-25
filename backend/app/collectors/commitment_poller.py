@@ -29,6 +29,7 @@ from app.processing.commitment_state_builder import CommitmentStateBuilder
 from app.processing.encrypted_commitment_state_builder import EncryptedCommitmentStateBuilder
 from app.processing.incentive_sync import sync_metagraph_incentives
 from app.processing.repo_track_builder import RepoTrackBuilder
+from app.processing.slot_status_builder import SlotStatusBuilder
 from sqlalchemy import func, select
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,11 @@ class CommitmentPoller:
                 self._last_incentive_sync[netuid] = time.monotonic()
             except Exception:
                 logger.exception("Initial incentive sync failed netuid=%d", netuid)
+            try:
+                await self._repo_track_poll(netuid)
+                self._last_repo_track[netuid] = time.monotonic()
+            except Exception:
+                logger.exception("Initial repo track failed netuid=%d", netuid)
 
     async def _slot_poll(self, netuid: int, snapshot: ChainSnapshot) -> dict[str, int]:
         assert self._subtensor is not None

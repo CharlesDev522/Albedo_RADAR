@@ -86,6 +86,7 @@ export default function RepoActivityPanel() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [expandedRepo, setExpandedRepo] = useState<string | null>(null);
 
   const familyParam = family === "all" ? undefined : family;
@@ -110,11 +111,19 @@ export default function RepoActivityPanel() {
 
   const runSync = useCallback(async () => {
     setSyncing(true);
+    setSyncError(null);
     try {
-      await api.syncRepoActivity(subnet);
+      const result = await api.syncRepoActivity(subnet);
       await refresh();
+      if ((result.miners_checked as number) === 0) {
+        setSyncError(
+          "sync ran but found 0 published miners in DB — collector may not be writing commits yet"
+        );
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "registry sync failed");
+      const msg = e instanceof Error ? e.message : "registry sync failed";
+      setSyncError(msg);
+      setError(msg);
     } finally {
       setSyncing(false);
     }
@@ -128,7 +137,13 @@ export default function RepoActivityPanel() {
   }, [refresh]);
 
   useEffect(() => {
-    void api.syncRepoActivity(subnet).then(() => refresh()).catch(() => undefined);
+    void api
+      .syncRepoActivity(subnet)
+      .then(() => refresh())
+      .catch((e) => {
+        const msg = e instanceof Error ? e.message : "auto-sync failed";
+        setSyncError(msg);
+      });
   }, [subnet, refresh]);
 
   return (
@@ -151,6 +166,12 @@ export default function RepoActivityPanel() {
           {syncing ? "syncing…" : "sync registries"}
         </button>
       </div>
+
+      {syncError && (
+        <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[10px] text-amber-300">
+          Registry sync: {syncError}
+        </div>
+      )}
 
       {error && (
         <div className="panel px-3 py-2 border-rose-500/20 bg-rose-500/5 text-[10px] text-rose-300">
