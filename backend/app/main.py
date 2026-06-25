@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -29,11 +30,18 @@ from app.db.session import engine, get_db
 from app.schemas.miner import HealthResponse
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db(engine)
+    try:
+        await init_db(engine)
+    except Exception:
+        logger.exception(
+            "Database init failed — API will start but DB endpoints may error. "
+            "Check: docker compose logs api"
+        )
     yield
     await engine.dispose()
 

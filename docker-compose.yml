@@ -54,12 +54,12 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)",
+          "import socket; s=socket.create_connection(('127.0.0.1',8000),2); s.close()",
         ]
       interval: 5s
-      timeout: 10s
-      retries: 12
-      start_period: 40s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
     restart: unless-stopped
 
   collector:
@@ -80,7 +80,7 @@ services:
       redis:
         condition: service_healthy
       api:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
 
   frontend:
@@ -97,7 +97,7 @@ services:
       NEXT_PUBLIC_LIVE_URL: http://localhost:8000/api/v1/live/stream
     depends_on:
       api:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
 
 volumes:
