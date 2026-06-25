@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     # Quasar SN24 dashboard (validator public API)
     quasar_dashboard_url: str = "https://api.quasarcopilot.com/api/dashboard.json"
 
+    # Market data (TAO price + subnet economics)
+    coingecko_tao_price_url: str = "https://api.coingecko.com/api/v3/simple/price"
+    taomarketcap_api_key: str | None = None
+    taomarketcap_price_url: str | None = None
+    market_price_cache_seconds: int = 60
+    market_subnet_cache_seconds: int = 30
+    market_http_timeout_seconds: float = 10.0
+
     # Database
     database_url: str = "postgresql+asyncpg://minerwatch:minerwatch@localhost:5432/minerwatch"
 

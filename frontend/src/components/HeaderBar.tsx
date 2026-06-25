@@ -1,6 +1,7 @@
 "use client";
 
 import SubnetTabs from "@/components/SubnetTabs";
+import MarketTicker from "@/components/MarketTicker";
 import { getSubnetProfile } from "@/lib/subnets";
 import { useSubnet } from "@/lib/useSubnet";
 
@@ -22,7 +23,8 @@ export default function HeaderBar() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-3 shrink-0 flex-wrap justify-end">
+          <MarketTicker />
           <SubnetTabs />
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-emerald-500/20 bg-emerald-500/5 text-emerald-400 text-[10px]">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />

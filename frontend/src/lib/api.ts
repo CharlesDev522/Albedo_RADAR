@@ -226,6 +226,19 @@ export interface IncentiveOverview {
   note: string;
 }
 
+export interface MarketOverview {
+  subnet: number;
+  tao_price_usd: number | null;
+  tao_price_source: string | null;
+  tao_price_updated_at: string | null;
+  registration_burn_tao: number | null;
+  registration_burn_usd: number | null;
+  alpha_price_tao: number | null;
+  chain_block: number | null;
+  network: string;
+  fetched_at: string;
+}
+
 async function fetchApi<T>(path: string): Promise<T> {
   const res = await fetch(`${apiBase()}${path}`, { cache: "no-store" });
   if (!res.ok) {
@@ -272,6 +285,8 @@ export const api = {
     fetchApi<IncentiveOverview>(
       `/incentives?subnet=${subnet}&limit=${limit}${live ? "&live=true" : ""}`
     ),
+  getMarketOverview: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<MarketOverview>(`/market/overview?subnet=${subnet}`),
 };
 
 export function hippiusModelUrl(repo: string, branch = "main"): string {

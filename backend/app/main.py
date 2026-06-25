@@ -17,6 +17,7 @@ from app.api.routes import (
     incentives,
     leaderboards,
     live,
+    market,
     miners,
     quasar,
     slot_status,
@@ -63,6 +64,7 @@ app.include_router(hotkeys.router, prefix=api_prefix)
 app.include_router(coldkeys.router, prefix=api_prefix)
 app.include_router(events.router, prefix=api_prefix)
 app.include_router(incentives.router, prefix=api_prefix)
+app.include_router(market.router, prefix=api_prefix)
 app.include_router(quasar.router, prefix=api_prefix)
 
 
