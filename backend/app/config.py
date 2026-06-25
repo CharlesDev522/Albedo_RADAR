@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     market_subnet_cache_seconds: int = 30
     market_http_timeout_seconds: float = 10.0
 
+    # Hippius registry repo tracking
+    hippius_registry_url: str = "https://registry.hippius.com"
+    repo_track_interval_seconds: int = 120
+    repo_track_revision: str = "main"
+    repo_track_max_repos: int = 96
+
     # Database
     database_url: str = "postgresql+asyncpg://minerwatch:minerwatch@localhost:5432/minerwatch"
 

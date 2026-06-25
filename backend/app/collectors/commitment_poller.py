@@ -28,7 +28,7 @@ from app.db.session import AsyncSessionLocal, engine
 from app.processing.commitment_state_builder import CommitmentStateBuilder
 from app.processing.encrypted_commitment_state_builder import EncryptedCommitmentStateBuilder
 from app.processing.incentive_sync import sync_metagraph_incentives
-from app.processing.slot_status_builder import SlotStatusBuilder
+from app.processing.repo_track_builder import RepoTrackBuilder
 from sqlalchemy import func, select
 
 logger = logging.getLogger(__name__)
@@ -45,12 +45,14 @@ class CommitmentPoller:
         self.state_builder = CommitmentStateBuilder(publisher=self.publisher)
         self.encrypted_state_builder = EncryptedCommitmentStateBuilder()
         self.slot_status_builder = SlotStatusBuilder()
+        self.repo_track_builder = RepoTrackBuilder()
         self._running = False
         self._neurons: dict[int, dict[str, dict]] = {}
         self._last_full_scan: dict[int, float] = {}
         self._last_slot_scan: dict[int, float] = {}
         self._last_metagraph_sync: dict[int, float] = {}
         self._last_incentive_sync: dict[int, float] = {}
+        self._last_repo_track: dict[int, float] = {}
         self._poll_lock = asyncio.Lock()
         self._seen_hotkeys: dict[int, set[str]] = {}
 
@@ -280,6 +282,23 @@ class CommitmentPoller:
             await sync_metagraph_incentives(session, snapshot)
             await session.commit()
 
+    async def _repo_track_poll(self, netuid: int) -> None:
+        t0 = time.monotonic()
+        async with AsyncSessionLocal() as session:
+            stats = await self.repo_track_builder.sync_subnet(session, netuid)
+            await session.commit()
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(
+            "REPO_TRACK netuid=%d checked=%d hub_updates=%d on_chain=%d mismatches=%d errors=%d %dms",
+            netuid,
+            stats["repos_checked"],
+            stats["hub_updates"],
+            stats["on_chain_events"],
+            stats["mismatches"],
+            stats["errors"],
+            elapsed_ms,
+        )
+
     async def poll_once(self, netuid: int | None = None) -> dict[str, int]:
         netuid = netuid or self.settings.default_subnet
         assert self._subtensor is not None
@@ -318,6 +337,13 @@ class CommitmentPoller:
             if run_slot:
                 await self._slot_poll(netuid, snapshot)
                 self._last_slot_scan[netuid] = now
+
+            if now - self._last_repo_track.get(netuid, 0.0) >= self.settings.repo_track_interval_seconds:
+                try:
+                    await self._repo_track_poll(netuid)
+                except Exception:
+                    logger.exception("Repo track poll failed netuid=%d", netuid)
+                self._last_repo_track[netuid] = now
 
             return stats
 

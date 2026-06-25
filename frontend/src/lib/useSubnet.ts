@@ -4,23 +4,29 @@ import { useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DEFAULT_SUBNET, type DashboardView } from "@/lib/subnets";
 
+function parseView(raw: string | null): DashboardView {
+  if (raw === "clusters") return "clusters";
+  if (raw === "activity") return "activity";
+  return "dashboard";
+}
+
 export function useSubnet() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const view: DashboardView = useMemo(
-    () => (searchParams.get("view") === "clusters" ? "clusters" : "dashboard"),
+    () => parseView(searchParams.get("view")),
     [searchParams]
   );
 
   const setView = useCallback(
     (next: DashboardView) => {
       const params = new URLSearchParams(searchParams.toString());
-      if (next === "clusters") {
-        params.set("view", "clusters");
-      } else {
+      if (next === "dashboard") {
         params.delete("view");
+      } else {
+        params.set("view", next);
       }
       params.delete("subnet");
       const qs = params.toString();

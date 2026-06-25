@@ -196,6 +196,60 @@ export interface MarketOverview {
   fetched_at: string;
 }
 
+export interface RepoActivityOverview {
+  subnet: number;
+  tracked_repos: number;
+  qwen36_35b_repos: number;
+  qwen3_4b_repos: number;
+  in_sync_count: number;
+  mismatch_count: number;
+  hub_updates_24h: number;
+  on_chain_events_24h: number;
+  last_poll_at: string | null;
+}
+
+export interface RepoTrackEntry {
+  id: number;
+  subnet: number;
+  repo: string;
+  uid: number | null;
+  hotkey: string | null;
+  coldkey: string | null;
+  model_family: string | null;
+  chain_digest: string | null;
+  hub_digest: string | null;
+  hub_revision: string;
+  hub_commit_message: string | null;
+  hub_updated_at: string | null;
+  file_count: number | null;
+  total_bytes: number | null;
+  digest_in_sync: boolean | null;
+  last_checked_at: string | null;
+  last_hub_change_at: string | null;
+  first_tracked_at: string;
+  last_updated: string;
+}
+
+export interface RepoActivityEvent {
+  id: number;
+  subnet: number;
+  event_type: string;
+  repo: string;
+  uid: number | null;
+  hotkey: string | null;
+  coldkey: string | null;
+  model_family: string | null;
+  chain_digest: string | null;
+  hub_digest: string | null;
+  previous_digest: string | null;
+  revision: string | null;
+  commit_block: number | null;
+  commit_message: string | null;
+  changed_files: { name: string; change: string; digest?: string; size?: number }[];
+  detected_at: string;
+  meta: Record<string, unknown>;
+}
+
 async function fetchApi<T>(path: string): Promise<T> {
   const res = await fetch(`${apiBase()}${path}`, { cache: "no-store" });
   if (!res.ok) {
@@ -242,6 +296,24 @@ export const api = {
     ),
   getMarketOverview: (subnet = DEFAULT_SUBNET) =>
     fetchApi<MarketOverview>(`/market/overview?subnet=${subnet}`),
+  getRepoActivityOverview: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<RepoActivityOverview>(`/repo-activity/overview?subnet=${subnet}`),
+  getRepoTracks: (subnet = DEFAULT_SUBNET, family?: string, inSync?: boolean) => {
+    const params = new URLSearchParams({ subnet: String(subnet) });
+    if (family) params.set("family", family);
+    if (inSync !== undefined) params.set("in_sync", String(inSync));
+    return fetchApi<RepoTrackEntry[]>(`/repo-activity/repos?${params}`);
+  },
+  getRepoActivityFeed: (
+    subnet = DEFAULT_SUBNET,
+    opts?: { family?: string; eventType?: string; limit?: number }
+  ) => {
+    const params = new URLSearchParams({ subnet: String(subnet) });
+    if (opts?.family) params.set("family", opts.family);
+    if (opts?.eventType) params.set("event_type", opts.eventType);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    return fetchApi<RepoActivityEvent[]>(`/repo-activity/feed?${params}`);
+  },
 };
 
 export function hippiusModelUrl(repo: string, branch = "main"): string {

@@ -346,3 +346,91 @@ class SubnetSnapshot(Base):
     neuron_count: Mapped[int] = mapped_column(Integer, default=0)
     total_stake: Mapped[float] = mapped_column(Float, default=0.0)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class HippiusRepoTrack(Base):
+    """Latest Hippius hub state for a miner model repo."""
+
+    __tablename__ = "hippius_repo_tracks"
+    __table_args__ = (
+        UniqueConstraint("subnet", "repo", name="uq_hippius_repo_track_subnet_repo"),
+        Index("ix_hippius_repo_tracks_family", "subnet", "model_family"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    subnet: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    repo: Mapped[str] = mapped_column(String(512), nullable=False)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hotkey: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    coldkey: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model_family: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    chain_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    hub_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    hub_revision: Mapped[str] = mapped_column(String(64), default="main")
+    hub_commit_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    hub_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    file_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    digest_in_sync: Mapped[bool | None] = mapped_column(default=None)
+
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_hub_change_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_tracked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_updated: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class HippiusRepoRevision(Base):
+    """Historical Hippius manifest snapshots per repo revision."""
+
+    __tablename__ = "hippius_repo_revisions"
+    __table_args__ = (
+        UniqueConstraint("subnet", "repo", "manifest_digest", name="uq_hippius_revision_digest"),
+        Index("ix_hippius_revisions_subnet_repo_ts", "subnet", "repo", "detected_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    subnet: Mapped[int] = mapped_column(Integer, nullable=False)
+    repo: Mapped[str] = mapped_column(String(512), nullable=False)
+    revision: Mapped[str] = mapped_column(String(64), default="main")
+    manifest_digest: Mapped[str] = mapped_column(String(128), nullable=False)
+    commit_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    hub_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    file_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    files_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    changed_files: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RepoActivityEvent(Base):
+    """Unified miner repo activity feed (on-chain + Hippius hub)."""
+
+    __tablename__ = "repo_activity_events"
+    __table_args__ = (
+        UniqueConstraint("source_key", name="uq_repo_activity_source_key"),
+        Index("ix_repo_activity_subnet_ts", "subnet", "detected_at"),
+        Index("ix_repo_activity_family", "subnet", "model_family"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    subnet: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    repo: Mapped[str] = mapped_column(String(512), nullable=False)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hotkey: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    coldkey: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model_family: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    chain_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    hub_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    previous_digest: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    commit_block: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    commit_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    changed_files: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    source_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    meta: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)

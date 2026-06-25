@@ -13,6 +13,10 @@ MIGRATIONS: list[str] = [
     SET commit_source = 'active'
     WHERE commit_source IS NULL
     """,
+    """
+    ALTER TABLE hippius_repo_revisions
+    ADD COLUMN IF NOT EXISTS files_json JSONB DEFAULT '[]'::jsonb
+    """,
 ]
 
 

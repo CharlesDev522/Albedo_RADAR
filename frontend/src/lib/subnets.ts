@@ -2,7 +2,7 @@
 
 export const DEFAULT_SUBNET = 97;
 
-export type DashboardView = "dashboard" | "clusters";
+export type DashboardView = "dashboard" | "clusters" | "activity";
 
 export interface SubnetFeatures {
   incentiveColumn: boolean;
@@ -37,6 +37,7 @@ export function getSubnetProfile(_netuid: number = DEFAULT_SUBNET): SubnetProfil
 }
 
 export const DASHBOARD_TABS: { view: DashboardView; label: string; hint: string }[] = [
-  { view: "dashboard", label: "SN97", hint: "Albedo dashboard" },
-  { view: "clusters", label: "Miner clusters", hint: "Coldkey & model-owner groups" },
+  { view: "dashboard", label: "Overview", hint: "Slots, commits, and live feed" },
+  { view: "activity", label: "Repo activity", hint: "Hippius hub changes and miner model updates" },
+  { view: "clusters", label: "Clusters", hint: "Coldkey and model-owner groups" },
 ];

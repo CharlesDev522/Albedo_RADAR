@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import LiveDashboard from "@/components/LiveDashboard";
 import MinerGroupsPanel from "@/components/MinerGroupsPanel";
+import RepoActivityPanel from "@/components/RepoActivityPanel";
 import SlotStatusBoard from "@/components/SlotStatusBoard";
 import { DashboardSyncProvider } from "@/lib/DashboardSyncContext";
 import {
@@ -24,7 +25,9 @@ async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
 }
 
 function parseView(raw: string | undefined): DashboardView {
-  return raw === "clusters" ? "clusters" : "dashboard";
+  if (raw === "clusters") return "clusters";
+  if (raw === "activity") return "activity";
+  return "dashboard";
 }
 
 export default async function Page({
@@ -57,6 +60,10 @@ export default async function Page({
         {view === "clusters" ? (
           <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading clusters…</div>}>
             <MinerGroupsPanel />
+          </Suspense>
+        ) : view === "activity" ? (
+          <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading repo activity…</div>}>
+            <RepoActivityPanel />
           </Suspense>
         ) : (
           <>

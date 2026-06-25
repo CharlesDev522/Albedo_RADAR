@@ -19,6 +19,7 @@ from app.api.routes import (
     live,
     market,
     miners,
+    repo_activity,
     slot_status,
 )
 from app.config import get_settings
@@ -64,6 +65,7 @@ app.include_router(coldkeys.router, prefix=api_prefix)
 app.include_router(events.router, prefix=api_prefix)
 app.include_router(incentives.router, prefix=api_prefix)
 app.include_router(market.router, prefix=api_prefix)
+app.include_router(repo_activity.router, prefix=api_prefix)
 
 
 @app.get("/health", response_model=HealthResponse)
