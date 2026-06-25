@@ -1,6 +1,5 @@
 import { Suspense } from "react";
 import LiveDashboard from "@/components/LiveDashboard";
-import QuasarStatusPanel from "@/components/QuasarStatusPanel";
 import MinerGroupsPanel from "@/components/MinerGroupsPanel";
 import SlotStatusBoard from "@/components/SlotStatusBoard";
 import { DashboardSyncProvider } from "@/lib/DashboardSyncContext";
@@ -31,6 +30,14 @@ function parseSubnet(raw: string | undefined): number {
   return n;
 }
 
+function ClustersPanel({ subnet }: { subnet: number }) {
+  return (
+    <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading clusters…</div>}>
+      <MinerGroupsPanel key={`clusters-${subnet}`} />
+    </Suspense>
+  );
+}
+
 export default async function Page({
   searchParams,
 }: {
@@ -48,6 +55,8 @@ export default async function Page({
     safe(() => api.getSyncStatus(subnet, false), null),
   ]);
 
+  const clustersTop = profile.features.minerClustersTop;
+
   return (
     <DashboardSyncProvider
       key={subnet}
@@ -58,20 +67,14 @@ export default async function Page({
       initialSyncStatus={syncStatus}
     >
       <div className="space-y-3" key={`dashboard-${subnet}`}>
-        {profile.features.quasarStatus && (
-          <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading quasar…</div>}>
-            <QuasarStatusPanel key={`quasar-${subnet}`} />
-          </Suspense>
-        )}
+        {clustersTop && <ClustersPanel subnet={subnet} />}
         <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading slots…</div>}>
           <SlotStatusBoard key={`slots-${subnet}`} />
         </Suspense>
         <Suspense fallback={null}>
           <LiveDashboard key={`live-${subnet}`} />
         </Suspense>
-        <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading clusters…</div>}>
-          <MinerGroupsPanel key={`clusters-${subnet}`} />
-        </Suspense>
+        {!clustersTop && <ClustersPanel subnet={subnet} />}
       </div>
     </DashboardSyncProvider>
   );

@@ -14,7 +14,6 @@ import {
   type Commitment,
   type CommitmentStats,
   type IncentiveOverview,
-  type QuasarStatus,
   type Registry,
   type SlotStatusData,
   type SyncStatus,
@@ -55,7 +54,6 @@ interface DashboardSyncContextValue {
   liveStatus: "connecting" | "live" | "polling";
   flashUids: Set<number>;
   feed: LiveEvent[];
-  quasarStatus: QuasarStatus | null;
   incentiveOverview: IncentiveOverview | null;
   refresh: () => Promise<void>;
 }
@@ -102,7 +100,6 @@ export function DashboardSyncProvider({
   const [liveStatus, setLiveStatus] = useState<"connecting" | "live" | "polling">("connecting");
   const [flashUids, setFlashUids] = useState<Set<number>>(new Set());
   const [feed, setFeed] = useState<LiveEvent[]>([]);
-  const [quasarStatus, setQuasarStatus] = useState<QuasarStatus | null>(null);
   const [incentiveOverview, setIncentiveOverview] = useState<IncentiveOverview | null>(null);
 
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -183,35 +180,14 @@ export function DashboardSyncProvider({
     const profile = getSubnetProfile(subnet);
     const fetchSubnet = subnet;
 
-    if (!profile.features.quasarStatus) {
-      setQuasarStatus(null);
-    }
     if (!profile.features.incentiveColumn) {
       setIncentiveOverview(null);
+      return;
     }
 
     try {
-      const tasks: Promise<void>[] = [];
-
-      if (profile.features.quasarStatus) {
-        tasks.push(
-          (async () => {
-            const status = await api.getQuasarStatus(fetchSubnet);
-            if (subnetRef.current === fetchSubnet) setQuasarStatus(status);
-          })()
-        );
-      }
-
-      if (profile.features.incentiveColumn) {
-        tasks.push(
-          (async () => {
-            const incentives = await api.getIncentiveOverview(fetchSubnet, 30, false);
-            if (subnetRef.current === fetchSubnet) setIncentiveOverview(incentives);
-          })()
-        );
-      }
-
-      await Promise.all(tasks);
+      const incentives = await api.getIncentiveOverview(fetchSubnet, 30, false);
+      if (subnetRef.current === fetchSubnet) setIncentiveOverview(incentives);
     } catch {
       /* subnet extras are non-critical */
     }
@@ -229,7 +205,6 @@ export function DashboardSyncProvider({
     setSyncStatus(null);
     setSlotData(null);
     setFeed([]);
-    setQuasarStatus(null);
     setIncentiveOverview(null);
     setApiError(null);
     setLoading(true);
@@ -304,7 +279,6 @@ export function DashboardSyncProvider({
         liveStatus,
         flashUids,
         feed,
-        quasarStatus,
         incentiveOverview,
         refresh,
       }}

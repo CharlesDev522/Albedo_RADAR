@@ -6,7 +6,8 @@ export type DashboardSubnet = (typeof DASHBOARD_SUBNETS)[number];
 export const OTHER_SUBNETS = [21, 1] as const;
 
 export interface SubnetFeatures {
-  quasarStatus: boolean;
+  /** When true, miner clusters panel is the first block on the dashboard (SN24). */
+  minerClustersTop: boolean;
   incentiveColumn: boolean;
   commitLabel: string;
   modelHost: "hippius" | "huggingface";
@@ -29,7 +30,7 @@ const PROFILES: Record<number, SubnetProfile> = {
     tagline: "Model distillation · Qwen3.6-35B vs Qwen3-4B · Hippius pipe commits",
     accent: "amber",
     features: {
-      quasarStatus: false,
+      minerClustersTop: false,
       incentiveColumn: true,
       commitLabel: "published",
       modelHost: "hippius",
@@ -42,7 +43,7 @@ const PROFILES: Record<number, SubnetProfile> = {
     tagline: "Quasar 3B MoE · king-of-the-hill · JSON commits",
     accent: "violet",
     features: {
-      quasarStatus: true,
+      minerClustersTop: true,
       incentiveColumn: true,
       commitLabel: "quasar",
       modelHost: "huggingface",
@@ -59,7 +60,7 @@ export function getSubnetProfile(netuid: number): SubnetProfile {
       tagline: "Bittensor subnet",
       accent: "emerald",
       features: {
-        quasarStatus: false,
+        minerClustersTop: false,
         incentiveColumn: true,
         commitLabel: "model",
         modelHost: "huggingface",
