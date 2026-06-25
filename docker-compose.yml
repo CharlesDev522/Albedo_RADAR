@@ -48,6 +48,18 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)",
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 40s
     restart: unless-stopped
 
   collector:
@@ -68,7 +80,7 @@ services:
       redis:
         condition: service_healthy
       api:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
@@ -78,13 +90,14 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Server-side fetch from inside Docker network
+      # Server-side fetch from inside Docker network (Next.js proxy + SSR)
       API_URL: http://api:8000/api/v1
-      # Optional: set if browser also needs direct API access
+      # Browser direct API (optional; default path uses /api/v1 proxy)
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
       NEXT_PUBLIC_LIVE_URL: http://localhost:8000/api/v1/live/stream
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

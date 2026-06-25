@@ -14,25 +14,35 @@ MIGRATIONS: list[str] = [
     WHERE commit_source IS NULL
     """,
     """
-    ALTER TABLE hippius_repo_revisions
-    ADD COLUMN IF NOT EXISTS files_json JSONB DEFAULT '[]'::jsonb
-    """,
-    """
-    ALTER TABLE hippius_repo_tracks DROP CONSTRAINT IF EXISTS uq_hippius_repo_track_subnet_repo
-    """,
-    """
     DO $$ BEGIN
-      ALTER TABLE hippius_repo_tracks
-      ADD CONSTRAINT uq_hippius_repo_track_subnet_hotkey UNIQUE (subnet, hotkey);
-    EXCEPTION WHEN duplicate_object THEN NULL;
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'hippius_repo_revisions'
+      ) THEN
+        ALTER TABLE hippius_repo_revisions
+        ADD COLUMN IF NOT EXISTS files_json JSONB DEFAULT '[]'::jsonb;
+      END IF;
     END $$
     """,
     """
-    CREATE INDEX IF NOT EXISTS ix_hippius_repo_tracks_repo ON hippius_repo_tracks (subnet, repo)
-    """,
-    """
-    ALTER TABLE hippius_repo_tracks
-    ADD COLUMN IF NOT EXISTS repo_host VARCHAR(16) DEFAULT 'hippius'
+    DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'hippius_repo_tracks'
+      ) THEN
+        ALTER TABLE hippius_repo_tracks
+        DROP CONSTRAINT IF EXISTS uq_hippius_repo_track_subnet_repo;
+        BEGIN
+          ALTER TABLE hippius_repo_tracks
+          ADD CONSTRAINT uq_hippius_repo_track_subnet_hotkey UNIQUE (subnet, hotkey);
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END;
+        CREATE INDEX IF NOT EXISTS ix_hippius_repo_tracks_repo
+          ON hippius_repo_tracks (subnet, repo);
+        ALTER TABLE hippius_repo_tracks
+        ADD COLUMN IF NOT EXISTS repo_host VARCHAR(16) DEFAULT 'hippius';
+      END IF;
+    END $$
     """,
 ]
 
