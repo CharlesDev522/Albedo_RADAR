@@ -1,7 +1,7 @@
-/** Per-subnet UI theme — SN97 (Albedo model era by repo) vs SN24 (Quasar/JSON). */
+/** SN97 Albedo UI theme. */
 
-import { getSubnetProfile } from "@/lib/subnets";
 import { inferAlbedoModelFamily } from "@/lib/modelFamily";
+import { getSubnetProfile } from "@/lib/subnets";
 
 export const ALBEDO_PIPE_TYPES = new Set(["v6", "v7"]);
 
@@ -18,9 +18,9 @@ export type SlotFilterKey =
   | "none";
 
 export interface SubnetTheme {
-  accent: "amber" | "violet" | "emerald";
+  accent: "amber";
   commitLabel: string;
-  modelHost: "hippius" | "huggingface";
+  modelHost: "hippius";
   pill: string;
   textAccent: string;
   textAccentSoft: string;
@@ -30,7 +30,7 @@ export interface SubnetTheme {
   uidChipCommitted: string;
   kpiAccent: string;
   slotDefaultFilter: SlotFilterKey;
-  slotPrimaryType: "v6" | "json";
+  slotPrimaryType: "v6";
   slotSummaryPrimaryLabel: string;
 }
 
@@ -41,7 +41,7 @@ export interface SlotFilterDef {
   hint?: string;
 }
 
-const SN97_SLOT_FILTERS: SlotFilterDef[] = [
+const SLOT_FILTERS: SlotFilterDef[] = [
   { key: "all", label: "all 256", color: "text-zinc-300 border-zinc-600" },
   { key: "qwen36_35b", label: "Qwen3.6-35B", color: "text-sky-300 border-sky-500/40 bg-sky-500/10", hint: "albedo-qwen3.6-35b-* repos" },
   { key: "qwen3_4b", label: "Qwen3-4B", color: "text-amber-300 border-amber-500/40 bg-amber-500/10", hint: "legacy albedo-qwen3-4b-* repos" },
@@ -51,49 +51,16 @@ const SN97_SLOT_FILTERS: SlotFilterDef[] = [
   { key: "none", label: "no commit", color: "text-zinc-500 border-zinc-700 bg-zinc-800/30" },
 ];
 
-const SN24_SLOT_FILTERS: SlotFilterDef[] = [
-  { key: "all", label: "all 256", color: "text-zinc-300 border-zinc-600" },
-  { key: "committed", label: "has commit", color: "text-zinc-200 border-zinc-500 bg-zinc-800/40", hint: "any on-chain commit" },
-  { key: "json", label: "quasar", color: "text-violet-400 border-violet-500/40 bg-violet-500/10", hint: "JSON model commits" },
-  { key: "v6", label: "v5/v6/v7", color: "text-lime-400 border-lime-500/40 bg-lime-500/10", hint: "pipe-format commits (rare on SN24)" },
-  { key: "timelock_encrypted", label: "encrypted", color: "text-violet-300 border-violet-500/40 bg-violet-500/10" },
-  { key: "other", label: "other", color: "text-orange-300 border-orange-500/40 bg-orange-500/10" },
-  { key: "none", label: "no commit", color: "text-zinc-500 border-zinc-700 bg-zinc-800/30" },
-];
-
 export function isAlbedoPipeType(type: string): boolean {
   return ALBEDO_PIPE_TYPES.has(type);
 }
 
-export function isPublishedPipeType(type: string, netuid: number): boolean {
-  if (netuid === 24) {
-    return type === "v5" || type === "v6" || type === "v7" || type === "json";
-  }
+export function isPublishedPipeType(type: string, _netuid?: number): boolean {
   return isAlbedoPipeType(type);
 }
 
-export function getSubnetTheme(netuid: number): SubnetTheme {
-  const profile = getSubnetProfile(netuid);
-
-  if (profile.netuid === 24) {
-    return {
-      accent: "violet",
-      commitLabel: profile.features.commitLabel,
-      modelHost: profile.features.modelHost,
-      pill: "pill-violet",
-      textAccent: "text-violet-400",
-      textAccentSoft: "text-violet-300",
-      feedItemBg: "bg-violet-500/5",
-      rowFlash: "bg-violet-500/15 ring-1 ring-violet-500/40",
-      rowFlashSubtle: "bg-violet-500/10",
-      uidChipCommitted: "border-violet-500/40 bg-violet-500/15 text-violet-300",
-      kpiAccent: "text-violet-400",
-      slotDefaultFilter: "json",
-      slotPrimaryType: "json",
-      slotSummaryPrimaryLabel: "quasar",
-    };
-  }
-
+export function getSubnetTheme(_netuid?: number): SubnetTheme {
+  const profile = getSubnetProfile();
   return {
     accent: "amber",
     commitLabel: profile.features.commitLabel,
@@ -112,36 +79,19 @@ export function getSubnetTheme(netuid: number): SubnetTheme {
   };
 }
 
-export function getSlotFilters(netuid: number): SlotFilterDef[] {
-  return netuid === 24 ? SN24_SLOT_FILTERS : SN97_SLOT_FILTERS;
+export function getSlotFilters(_netuid?: number): SlotFilterDef[] {
+  return SLOT_FILTERS;
 }
 
-export function slotGridColor(netuid: number, type: string): string {
-  if (netuid === 24) {
-    const sn24: Record<string, string> = {
-      json: "bg-violet-500",
-      v6: "bg-lime-500",
-      v7: "bg-emerald-500",
-      v5: "bg-lime-600",
-      timelock_encrypted: "bg-violet-600",
-      binary: "bg-violet-700",
-      other: "bg-orange-500",
-      unknown: "bg-rose-500",
-      none: "bg-zinc-700",
-    };
-    return sn24[type] ?? "bg-zinc-700";
-  }
+export function slotGridColor(_netuid: number, type: string): string {
   if (type === "v6" || type === "v7") return "bg-lime-500";
   if (type === "timelock_encrypted" || type === "binary") return "bg-violet-500";
   if (type === "none") return "bg-zinc-700";
   return "bg-rose-500";
 }
 
-export function slotTypeStyle(netuid: number, type: string): string {
-  if (netuid === 24 && type === "json") {
-    return "text-violet-300 border-violet-500/30 bg-violet-500/10";
-  }
-  if (netuid !== 24 && (type === "v6" || type === "v7")) {
+export function slotTypeStyle(_netuid: number, type: string): string {
+  if (type === "v6" || type === "v7") {
     return "text-lime-400 border-lime-500/30 bg-lime-500/10";
   }
   if (type === "timelock_encrypted" || type === "binary") {
@@ -150,40 +100,24 @@ export function slotTypeStyle(netuid: number, type: string): string {
   if (type === "none") {
     return "text-zinc-500 border-zinc-700 bg-zinc-800/20";
   }
-  if (netuid !== 24) {
-    return "text-rose-300 border-rose-500/30 bg-rose-500/10";
-  }
-  const base: Record<string, string> = {
-    v6: "text-lime-400 border-lime-500/30 bg-lime-500/10",
-    v7: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10",
-    v5: "text-lime-400 border-lime-500/30 bg-lime-500/10",
-    json: "text-amber-300 border-amber-500/30 bg-amber-500/10",
-    other: "text-orange-300 border-orange-500/30 bg-orange-500/10",
-    unknown: "text-rose-300 border-rose-500/30 bg-rose-500/10",
-  };
-  return base[type] ?? base.unknown;
+  return "text-rose-300 border-rose-500/30 bg-rose-500/10";
 }
 
 export function slotTypeLabel(
-  netuid: number,
+  _netuid: number,
   type: string,
   detail?: string | null,
   modelFamily?: string | null
 ): string {
   if (type === "timelock_encrypted" || type === "binary") return "encrypted";
   if (type === "none") return "—";
-  if (netuid === 24 && type === "json") return "quasar";
-  if (netuid !== 24 && !isAlbedoPipeType(type)) return "unpublished";
-  if (netuid === 97) {
-    const family = modelFamily ?? inferAlbedoModelFamily(detail);
-    if (family === "qwen3.6-35b") return "Qwen3.6-35B";
-    if (family === "qwen3-4b") return "Qwen3-4B";
-    return "pipe";
-  }
-  return type;
+  if (!isAlbedoPipeType(type)) return "unpublished";
+  const family = modelFamily ?? inferAlbedoModelFamily(detail);
+  if (family === "qwen3.6-35b") return "Qwen3.6-35B";
+  if (family === "qwen3-4b") return "Qwen3-4B";
+  return "pipe";
 }
 
-/** SN97 UID grid color — model era when repo is known, else generic published pipe. */
 export function slotGridColorForAlbedo(
   commitmentType: string,
   detail: string | null | undefined,

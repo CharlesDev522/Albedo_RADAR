@@ -1,8 +1,7 @@
-"""Subnet-specific commit parsing rules."""
+"""Subnet-specific commit parsing rules (SN97 Albedo)."""
 
 from app.chain_reader.commitment_scanner import parse_subnet_model_commit
 from app.chain_reader.subnet_commit_rules import (
-    ALBEDO_PIPE_VERSIONS,
     is_published_slot_type,
     model_versions_for_subnet,
     normalize_stored_version,
@@ -13,10 +12,6 @@ from app.chain_reader.subnet_commit_rules import (
 
 def test_sn97_model_versions_v6_v7():
     assert model_versions_for_subnet(97) == frozenset({"v6", "v7"})
-
-
-def test_sn24_model_versions_json():
-    assert model_versions_for_subnet(24) == frozenset({"quasar", "json"})
 
 
 def test_sn97_ignores_v5():
@@ -41,13 +36,6 @@ def test_sn97_accepts_v7():
 def test_sn97_ignores_legacy_json():
     data = '{"model": "divinequest/m9n2", "revision": "cca9b0d"}'
     assert parse_subnet_model_commit(data, "5Hotkey", netuid=97) is None
-
-
-def test_sn24_accepts_json():
-    data = '{"model": "user/quasar-model", "revision": "abc123"}'
-    parsed = parse_subnet_model_commit(data, "5Hotkey", netuid=24)
-    assert parsed is not None
-    assert parsed["version"] == "json"
 
 
 def test_normalize_sn97_accepts_v6_v7():

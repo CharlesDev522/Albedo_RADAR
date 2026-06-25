@@ -124,28 +124,19 @@ export default function SlotStatusBoard() {
     return String(map[key] ?? 0);
   };
 
-  const primaryCount =
-    theme.slotPrimaryType === "json"
-      ? summary?.json ?? 0
-      : (summary?.v6 ?? 0) + (summary?.v7 ?? 0);
+  const primaryCount = (summary?.v6 ?? 0) + (summary?.v7 ?? 0);
 
-  const gridLegend = useMemo(() => {
-    if (subnet === 24) {
-      return ["json", "v6", "timelock_encrypted", "other", "none"].map((k) => ({
-        key: k,
-        color: slotGridColor(subnet, k),
-        label: slotTypeLabel(subnet, k === "timelock_encrypted" ? "timelock_encrypted" : k),
-      }));
-    }
-    return [
+  const gridLegend = useMemo(
+    () => [
       { key: "qwen36_35b", color: "bg-sky-500", label: "Qwen3.6-35B" },
       { key: "qwen3_4b", color: "bg-amber-500", label: "Qwen3-4B" },
       { key: "pipe", color: "bg-lime-500", label: "pipe (era unknown)" },
       { key: "unpublished", color: "bg-rose-500", label: "unpublished" },
       { key: "enc", color: "bg-violet-500", label: "encrypted" },
       { key: "none", color: "bg-zinc-700", label: "empty" },
-    ];
-  }, [subnet]);
+    ],
+    []
+  );
 
   return (
     <section className="panel">
@@ -189,27 +180,18 @@ export default function SlotStatusBoard() {
           <span className={theme.textAccent}>
             {primaryCount} {theme.slotSummaryPrimaryLabel}
           </span>
-          {subnet === 97 && (
+          {(summary.qwen36_35b ?? 0) > 0 && (
             <>
-              {(summary.qwen36_35b ?? 0) > 0 && (
-                <>
-                  , <span className="text-sky-400">{summary.qwen36_35b} Qwen3.6-35B</span>
-                </>
-              )}
-              {(summary.qwen3_4b ?? 0) > 0 && (
-                <>
-                  , <span className="text-amber-400">{summary.qwen3_4b} Qwen3-4B</span>
-                </>
-              )}
-              , <span className="text-violet-400">{summary.timelock_encrypted + (summary.binary ?? 0)} enc</span>
-              , <span className="text-rose-400">{summary.unpublished ?? 0} unpublished</span>
+              , <span className="text-sky-400">{summary.qwen36_35b} Qwen3.6-35B</span>
             </>
           )}
-          {subnet === 24 && (summary.v6 ?? 0) > 0 && (
+          {(summary.qwen3_4b ?? 0) > 0 && (
             <>
-              , <span className="text-lime-400">{summary.v6} v5/v6</span>
+              , <span className="text-amber-400">{summary.qwen3_4b} Qwen3-4B</span>
             </>
           )}
+          , <span className="text-violet-400">{summary.timelock_encrypted + (summary.binary ?? 0)} enc</span>
+          , <span className="text-rose-400">{summary.unpublished ?? 0} unpublished</span>
           ) · <strong className="text-zinc-400">{summary.none}</strong> empty · showing{" "}
           <strong className="text-zinc-300">{displaySlots.length}</strong>
           {filter !== "all" ? ` (${filters.find((f) => f.key === filter)?.label ?? filter})` : ""}

@@ -162,49 +162,6 @@ export interface SlotStatusData {
   source: string;
 }
 
-export interface QuasarKing {
-  uid: number | null;
-  hf_repo: string | null;
-  king_revision: string | null;
-  reign_number: number | null;
-  crowned_at: string | null;
-  weights_block: number | null;
-}
-
-export interface QuasarChainKing {
-  uid: number | null;
-  hf_repo: string | null;
-  revision: string | null;
-  support_fraction: number | null;
-  block: number | null;
-}
-
-export interface QuasarEvalPhase {
-  active: boolean;
-  phase: string | null;
-  label: string | null;
-  detail: string | null;
-  state_king_uid: number | null;
-  chain_king_uid: number | null;
-  winner_uid: number | null;
-  weight_reveal_pending: boolean;
-  current_block: number | null;
-}
-
-export interface QuasarStatus {
-  subnet: number;
-  source_url: string;
-  dashboard_url: string;
-  king: QuasarKing | null;
-  consensus_king: QuasarChainKing | null;
-  state_king_uid: number | null;
-  eval_phase: QuasarEvalPhase | null;
-  current_eval: string | null;
-  queue_len: number;
-  submission_counts: Record<string, number>;
-  policy: Record<string, unknown> | null;
-}
-
 export interface MinerIncentiveEntry {
   uid: number;
   hotkey: string;
@@ -279,8 +236,6 @@ export const api = {
     ),
   getRecent: (subnet = DEFAULT_SUBNET) =>
     fetchApi<{ commits: Commitment[] }>(`/live/recent?subnet=${subnet}`),
-  getQuasarStatus: (subnet = 24) =>
-    fetchApi<QuasarStatus>(`/quasar/status?subnet=${subnet}`),
   getIncentiveOverview: (subnet = DEFAULT_SUBNET, limit = 30, live = false) =>
     fetchApi<IncentiveOverview>(
       `/incentives?subnet=${subnet}&limit=${limit}${live ? "&live=true" : ""}`

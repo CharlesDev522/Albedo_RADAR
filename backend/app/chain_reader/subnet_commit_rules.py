@@ -1,8 +1,7 @@
-"""Per-subnet model commitment rules — SN97 Albedo (pipe) vs SN24 Quasar (JSON)."""
+"""SN97 Albedo model commitment rules."""
 
 from __future__ import annotations
 
-QUASAR_NETUID = 24
 ALBEDO_NETUID = 97
 
 # Albedo SN97: accept v6/v7 pipe wire formats; competition era comes from repo name.
@@ -11,16 +10,10 @@ ALBEDO_PIPE_VERSIONS = frozenset({"v6", "v7"})
 # Backwards-compatible alias used by DB filters and poller.
 ALBEDO_MODEL_VERSIONS = ALBEDO_PIPE_VERSIONS
 
-# Quasar SN24: JSON model commits (stored as quasar; json kept for legacy rows).
-QUASAR_JSON_VERSIONS = frozenset({"quasar", "json"})
-
-# All pipe versions we can parse on chain (incl. legacy v5 for classification / SN24).
 LEGACY_PIPE_VERSIONS = frozenset({"v5", "v6", "v7"})
 
 
 def model_versions_for_subnet(netuid: int) -> frozenset[str]:
-    if netuid == QUASAR_NETUID:
-        return QUASAR_JSON_VERSIONS
     return ALBEDO_PIPE_VERSIONS
 
 
@@ -29,7 +22,7 @@ def model_versions_sql_tuple(netuid: int) -> tuple[str, ...]:
 
 
 def is_albedo_subnet(netuid: int) -> bool:
-    return netuid != QUASAR_NETUID
+    return True
 
 
 def is_albedo_pipe_version(version: str | None) -> bool:
@@ -45,20 +38,14 @@ def pipe_version_from_reveal(reveal_string: str) -> str | None:
 
 
 def normalize_stored_version(version: str | None, netuid: int) -> str | None:
-    """Map stored labels to canonical version for a subnet."""
+    """Map stored labels to canonical version for SN97."""
     if not version:
         return None
-    if netuid == QUASAR_NETUID:
-        if version == "json":
-            return "quasar"
-        return version if version in QUASAR_JSON_VERSIONS else None
     return version if version in ALBEDO_PIPE_VERSIONS else None
 
 
 def is_published_slot_type(commitment_type: str, netuid: int) -> bool:
-    """Whether a slot has a current model publish for this subnet."""
-    if netuid == QUASAR_NETUID:
-        return commitment_type in ("v5", "v6", "v7", "json")
+    """Whether a slot has a current model publish on SN97."""
     return commitment_type in ALBEDO_PIPE_VERSIONS
 
 

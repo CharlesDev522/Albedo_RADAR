@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chain_reader.commitment_scanner import Commit
 from app.chain_reader.subnet_commit_rules import (
-    QUASAR_NETUID,
     is_albedo_pipe_history_row,
     model_versions_for_subnet,
     model_versions_sql_tuple,
@@ -178,9 +177,7 @@ class CommitmentStateBuilder:
         return removed
 
     async def prune_non_pipe_history(self, session: AsyncSession, netuid: int) -> int:
-        """SN97: drop commitment history rows that are not v6/v7 pipe commits."""
-        if netuid == QUASAR_NETUID:
-            return 0
+        """Drop commitment history rows that are not v6/v7 pipe commits."""
         result = await session.execute(
             select(CommitmentHistory).where(CommitmentHistory.subnet == netuid)
         )
@@ -284,8 +281,6 @@ class CommitmentStateBuilder:
     @staticmethod
     def _normalize_version(version: str | None, netuid: int) -> str:
         normalized = normalize_stored_version(version, netuid)
-        if netuid == QUASAR_NETUID:
-            return normalized or "quasar"
         return normalized or "v6"
 
     def _build_commitment(self, commit: Commit, miner: Miner | None) -> MinerCommitment:
@@ -310,7 +305,7 @@ class CommitmentStateBuilder:
         )
 
     async def _record_history(self, session: AsyncSession, commit: Commit) -> None:
-        if not is_albedo_pipe_history_row(commit.reveal_string, commit.commit_payload) and commit.netuid != QUASAR_NETUID:
+        if not is_albedo_pipe_history_row(commit.reveal_string, commit.commit_payload):
             return
         result = await session.execute(
             select(CommitmentHistory).where(

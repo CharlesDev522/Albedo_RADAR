@@ -17,7 +17,7 @@ from app.chain_reader.commitment_decoder import (
     decode_revealed_payload,
 )
 from app.chain_reader.chain_snapshot import ChainSnapshot
-from app.chain_reader.subnet_commit_rules import ALBEDO_PIPE_VERSIONS, QUASAR_NETUID
+from app.chain_reader.subnet_commit_rules import ALBEDO_PIPE_VERSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +26,8 @@ _BLOCK_HASH_CACHE_MAX = 10_000
 
 PIPE_MODEL_VERSIONS = frozenset({"v5", "v6", "v7"})
 JSON_MODEL_VERSION = "json"
-# Legacy rows stored before SN97/SN24 JSON split used "quasar" for all JSON commits.
-LEGACY_QUASAR_VERSION = "quasar"
-ALL_MODEL_VERSIONS = frozenset({*PIPE_MODEL_VERSIONS, JSON_MODEL_VERSION, LEGACY_QUASAR_VERSION})
+# Legacy DB rows may store "json" or older "quasar" version labels.
+ALL_MODEL_VERSIONS = frozenset({*PIPE_MODEL_VERSIONS, JSON_MODEL_VERSION, "quasar"})
 MODEL_COMMIT_VERSIONS = ALL_MODEL_VERSIONS  # backwards-compatible alias
 _PIPE_PREFIX_RE = re.compile(r"^v\d+\|")
 # Backwards-compatible alias
@@ -83,7 +82,7 @@ def parse_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
 def parse_json_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | None:
     """Parse JSON model commit: {"model": "user/repo", "revision": "git_sha"}.
 
-    Used on SN97 (legacy Albedo JSON) and SN24 (Quasar). Stored as version ``json``.
+    Used for legacy JSON reveals in history; SN97 active tracking is v6/v7 pipe only.
     """
     if not data or not data.lstrip().startswith("{"):
         return None
@@ -107,25 +106,12 @@ def parse_json_model_commit(data: str, chain_hotkey: str) -> dict[str, Any] | No
     }
 
 
-# Backwards-compatible alias (SN24 Quasar uses the same JSON wire format).
-parse_quasar_commit = parse_json_model_commit
-
-
 def parse_subnet_model_commit(
     data: str,
     chain_hotkey: str,
     netuid: int | None = None,
 ) -> dict[str, Any] | None:
-    """Parse model commits using subnet-specific rules.
-
-    SN97 Albedo: v6/v7 pipe only (v5, legacy JSON, and other formats ignored).
-    SN24 Quasar: JSON model commits (v5/v6/v7 pipe accepted if present).
-    """
-    if netuid == QUASAR_NETUID:
-        parsed = parse_model_commit(data, chain_hotkey)
-        if parsed is not None:
-            return parsed
-        return parse_json_model_commit(data, chain_hotkey)
+    """Parse SN97 Albedo pipe commits (v6/v7 only)."""
     return parse_albedo_pipe_commit(data, chain_hotkey)
 
 

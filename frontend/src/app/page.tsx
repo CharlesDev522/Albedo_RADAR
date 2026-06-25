@@ -11,7 +11,7 @@ import {
   type Registry,
   type SlotStatusData,
 } from "@/lib/api";
-import { getSubnetProfile } from "@/lib/subnets";
+import type { DashboardView } from "@/lib/subnets";
 
 export const dynamic = "force-dynamic";
 
@@ -23,29 +23,18 @@ async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   }
 }
 
-function parseSubnet(raw: string | undefined): number {
-  if (!raw) return DEFAULT_SUBNET;
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 0 || n > 65535) return DEFAULT_SUBNET;
-  return n;
-}
-
-function ClustersPanel({ subnet }: { subnet: number }) {
-  return (
-    <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading clusters…</div>}>
-      <MinerGroupsPanel key={`clusters-${subnet}`} />
-    </Suspense>
-  );
+function parseView(raw: string | undefined): DashboardView {
+  return raw === "clusters" ? "clusters" : "dashboard";
 }
 
 export default async function Page({
   searchParams,
 }: {
-  searchParams?: Promise<{ subnet?: string }>;
+  searchParams?: Promise<{ view?: string }>;
 }) {
   const params = (await searchParams) ?? {};
-  const subnet = parseSubnet(params.subnet);
-  const profile = getSubnetProfile(subnet);
+  const view = parseView(params.view);
+  const subnet = DEFAULT_SUBNET;
 
   const [stats, commits, registry, slotData, syncStatus] = await Promise.all([
     safe(() => api.getStats(subnet), null),
@@ -54,8 +43,6 @@ export default async function Page({
     safe(() => api.getSlotStatus(subnet, "all", "uid_asc", false), null as SlotStatusData | null),
     safe(() => api.getSyncStatus(subnet, false), null),
   ]);
-
-  const clustersTop = profile.features.minerClustersTop;
 
   return (
     <DashboardSyncProvider
@@ -66,15 +53,21 @@ export default async function Page({
       initialSlotData={slotData}
       initialSyncStatus={syncStatus}
     >
-      <div className="space-y-3" key={`dashboard-${subnet}`}>
-        {clustersTop && <ClustersPanel subnet={subnet} />}
-        <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading slots…</div>}>
-          <SlotStatusBoard key={`slots-${subnet}`} />
-        </Suspense>
-        <Suspense fallback={null}>
-          <LiveDashboard key={`live-${subnet}`} />
-        </Suspense>
-        {!clustersTop && <ClustersPanel subnet={subnet} />}
+      <div className="space-y-3" key={`dashboard-${view}`}>
+        {view === "clusters" ? (
+          <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading clusters…</div>}>
+            <MinerGroupsPanel />
+          </Suspense>
+        ) : (
+          <>
+            <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading slots…</div>}>
+              <SlotStatusBoard />
+            </Suspense>
+            <Suspense fallback={null}>
+              <LiveDashboard />
+            </Suspense>
+          </>
+        )}
       </div>
     </DashboardSyncProvider>
   );

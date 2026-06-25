@@ -22,13 +22,8 @@ class Settings(BaseSettings):
     slot_scan_interval_seconds: int = 30
     mechid: int = 0
 
-    # Primary dashboard subnets (API accepts any netuid via query param)
-    dashboard_subnets: list[int] = [97, 24]
-
-    # Quasar SN24 dashboard (validator public API)
-    quasar_dashboard_url: str = "https://api.quasarcopilot.com/api/dashboard.json"
-
-    # Market data (TAO price + subnet economics)
+    # Primary dashboard subnet (SN97 Albedo)
+    dashboard_subnets: list[int] = [97]
     coingecko_tao_price_url: str = "https://api.coingecko.com/api/v3/simple/price"
     taomarketcap_api_key: str | None = None
     taomarketcap_price_url: str | None = None

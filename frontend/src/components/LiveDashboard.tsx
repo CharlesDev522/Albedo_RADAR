@@ -23,19 +23,11 @@ import { isSearchActive, matchesMinerFields } from "@/lib/searchFilter";
 import { inferAlbedoModelFamily, modelFamilyLabel } from "@/lib/modelFamily";
 
 function displayCommitEra(
-  subnet: number,
   repo: string | null | undefined,
-  modelFamily: string | null | undefined,
-  version: string | null | undefined,
-  fallback: string
+  modelFamily: string | null | undefined
 ): string {
-  if (subnet === 97) {
-    const family = modelFamily ?? inferAlbedoModelFamily(repo);
-    return modelFamilyLabel(family as "qwen3.6-35b" | "qwen3-4b" | null) ?? "";
-  }
-  const v = version ?? fallback;
-  if (subnet === 24 && (v === "json" || v === "quasar")) return "quasar";
-  return v;
+  const family = modelFamily ?? inferAlbedoModelFamily(repo);
+  return modelFamilyLabel(family as "qwen3.6-35b" | "qwen3-4b" | null) ?? "";
 }
 
 export default function LiveDashboard() {
@@ -132,8 +124,7 @@ export default function LiveDashboard() {
 
   const waiting = registry?.miners.filter((m) => !m.has_v6) ?? [];
   const committedCount = registry?.v6_count ?? commits.length;
-  const unpublishedCount =
-    subnet === 97 ? (stats?.uncommitted_miners ?? waiting.length) : (stats?.uncommitted_miners ?? waiting.length);
+  const unpublishedCount = stats?.uncommitted_miners ?? waiting.length;
 
   return (
     <div className="space-y-3">
@@ -199,7 +190,7 @@ export default function LiveDashboard() {
         <Kpi label={`${commitLabel} committed`} value={String(stats?.committed_miners ?? "—")} accentClass={theme.kpiAccent} />
         <Kpi label={`${commitLabel} active`} value={String(committedCount)} accentClass={theme.kpiAccent} />
         <Kpi
-          label={subnet === 97 ? "unpublished" : "no commit"}
+          label="unpublished"
           value={String(unpublishedCount)}
           warn={unpublishedCount > 0}
         />
@@ -232,15 +223,10 @@ export default function LiveDashboard() {
               </p>
             ) : (
               filteredFeed.map((e, i) => {
-                const era = displayCommitEra(subnet, e.repo, null, e.version, commitLabel);
                 return (
                   <div key={`${e.hotkey}-${e.timestamp}-${i}`} className={`px-3 py-2 ${theme.feedItemBg}`}>
                     <div className="flex justify-between gap-2">
-                      {subnet === 97 ? (
-                        <ModelFamilyBadge repo={e.repo} family={inferAlbedoModelFamily(e.repo)} />
-                      ) : (
-                        <span className={`${theme.pill} text-[9px]`}>{era || commitLabel}</span>
-                      )}
+                      <ModelFamilyBadge repo={e.repo} family={inferAlbedoModelFamily(e.repo)} />
                       <span className="text-[9px] text-zinc-600">{e.timestamp ? fmtTime(e.timestamp) : "now"}</span>
                     </div>
                     <p className={`mono text-[11px] ${theme.textAccent} mt-1`}>uid {e.uid ?? "?"}</p>
@@ -272,7 +258,7 @@ export default function LiveDashboard() {
                 {profile.name} {commitLabel} commits · SN{subnet}
               </h2>
               <p className="text-[10px] text-zinc-500">
-                {profile.tagline} · new rows flash {theme.accent === "violet" ? "violet" : "green"}
+                {profile.tagline} · new rows flash green
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -286,9 +272,9 @@ export default function LiveDashboard() {
               <span className={theme.pill}>{commits.length} active</span>
             </div>
           </div>
-          <div className="scroll-pane overflow-x-auto">
+          <div className="scroll-pane overflow-x-auto max-h-[360px] overflow-y-auto">
             <table className="tbl">
-              <thead>
+              <thead className="sticky top-0 z-10 bg-zinc-950">
                 <tr>
                   <th>uid</th>
                   <th>commit</th>
@@ -296,7 +282,7 @@ export default function LiveDashboard() {
                   <th>hotkey</th>
                   <th>coldkey</th>
                   <th>model</th>
-                  <th>{modelHost === "huggingface" ? "revision" : "hash"}</th>
+                  <th>hash</th>
                 </tr>
               </thead>
               <tbody>
@@ -318,9 +304,9 @@ export default function LiveDashboard() {
                       >
                         <td className="mono font-medium text-zinc-200">
                           {c.uid ?? "—"}
-                          {displayCommitEra(subnet, c.repo, c.model_family, c.version, commitLabel) && (
+                          {displayCommitEra(c.repo, c.model_family) && (
                             <span className={`ml-1 text-[8px] uppercase ${theme.textAccent}`}>
-                              {displayCommitEra(subnet, c.repo, c.model_family, c.version, commitLabel)}
+                              {displayCommitEra(c.repo, c.model_family)}
                             </span>
                           )}
                           {isNew && <span className={`ml-1 text-[9px] ${theme.textAccent}`}>NEW</span>}
@@ -346,12 +332,10 @@ export default function LiveDashboard() {
                             >
                               {shortRepo(c.repo)}
                             </a>
-                            {subnet === 97 && (
-                              <ModelFamilyBadge
-                                repo={c.repo}
-                                family={c.model_family ?? inferAlbedoModelFamily(c.repo)}
-                              />
-                            )}
+                            <ModelFamilyBadge
+                              repo={c.repo}
+                              family={c.model_family ?? inferAlbedoModelFamily(c.repo)}
+                            />
                           </span>
                         </td>
                         <td className="mono text-[10px] text-zinc-500">
@@ -440,16 +424,10 @@ export default function LiveDashboard() {
                   )}
                   <td>
                     {m.has_v6 ? (
-                      subnet === 97 ? (
-                        <ModelFamilyBadge
-                          repo={m.repo}
-                          family={m.model_family ?? inferAlbedoModelFamily(m.repo)}
-                        />
-                      ) : (
-                        <span className={theme.pill}>
-                          {displayCommitEra(subnet, m.repo, m.model_family, m.version, commitLabel) || commitLabel}
-                        </span>
-                      )
+                      <ModelFamilyBadge
+                        repo={m.repo}
+                        family={m.model_family ?? inferAlbedoModelFamily(m.repo)}
+                      />
                     ) : (
                       <span className="pill-none">—</span>
                     )}
@@ -495,12 +473,10 @@ function SubnetChip({
 }: {
   netuid: number;
   name: string;
-  accent: "amber" | "violet" | "emerald";
+  accent: "amber";
 }) {
   const styles = {
     amber: "border-amber-500/40 bg-amber-500/10 text-amber-300",
-    violet: "border-violet-500/40 bg-violet-500/10 text-violet-300",
-    emerald: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
   };
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${styles[accent]}`}>

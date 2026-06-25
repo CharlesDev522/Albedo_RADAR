@@ -13,7 +13,7 @@ const mono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "MinerWatch",
-  description: "Model commitment tracker for Bittensor SN97 (Albedo) and SN24 (Quasar)",
+  description: "Model commitment tracker for Bittensor SN97 (Albedo)",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

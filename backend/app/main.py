@@ -19,7 +19,6 @@ from app.api.routes import (
     live,
     market,
     miners,
-    quasar,
     slot_status,
 )
 from app.config import get_settings
@@ -40,7 +39,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    description="Real-time model commitment tracking for Bittensor subnets (SN97 Albedo, SN24 Quasar)",
+    description="Real-time model commitment tracking for Bittensor SN97 (Albedo)",
     version=__version__,
     lifespan=lifespan,
 )
@@ -65,7 +64,6 @@ app.include_router(coldkeys.router, prefix=api_prefix)
 app.include_router(events.router, prefix=api_prefix)
 app.include_router(incentives.router, prefix=api_prefix)
 app.include_router(market.router, prefix=api_prefix)
-app.include_router(quasar.router, prefix=api_prefix)
 
 
 @app.get("/health", response_model=HealthResponse)

@@ -2,32 +2,27 @@
 
 import { useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { DEFAULT_SUBNET } from "@/lib/api";
-import { DASHBOARD_SUBNETS, OTHER_SUBNETS } from "@/lib/subnets";
-
-function parseSubnet(raw: string | null): number {
-  if (!raw) return DEFAULT_SUBNET;
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 0 || n > 65535) return DEFAULT_SUBNET;
-  return n;
-}
+import { DEFAULT_SUBNET, type DashboardView } from "@/lib/subnets";
 
 export function useSubnet() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const subnet = useMemo(() => parseSubnet(searchParams.get("subnet")), [searchParams]);
+  const view: DashboardView = useMemo(
+    () => (searchParams.get("view") === "clusters" ? "clusters" : "dashboard"),
+    [searchParams]
+  );
 
-  const setSubnet = useCallback(
-    (next: number) => {
-      const safe = Math.max(0, Math.min(65535, Math.trunc(next)));
+  const setView = useCallback(
+    (next: DashboardView) => {
       const params = new URLSearchParams(searchParams.toString());
-      if (safe === DEFAULT_SUBNET) {
-        params.delete("subnet");
+      if (next === "clusters") {
+        params.set("view", "clusters");
       } else {
-        params.set("subnet", String(safe));
+        params.delete("view");
       }
+      params.delete("subnet");
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
@@ -35,11 +30,8 @@ export function useSubnet() {
   );
 
   return {
-    subnet,
-    setSubnet,
-    dashboardSubnets: DASHBOARD_SUBNETS,
-    otherPresets: OTHER_SUBNETS,
-    /** @deprecated use dashboardSubnets */
-    presets: [...DASHBOARD_SUBNETS, ...OTHER_SUBNETS] as const,
+    subnet: DEFAULT_SUBNET,
+    view,
+    setView,
   };
 }

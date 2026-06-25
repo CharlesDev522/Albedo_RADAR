@@ -9,11 +9,11 @@ from app.chain_reader.commitment_scanner import (
 
 
 def test_parse_json_model_commit():
-    data = '{"model": "user/quasar-model", "revision": "abc123deadbeef"}'
+    data = '{"model": "user/example-model", "revision": "abc123deadbeef"}'
     parsed = parse_json_model_commit(data, "5Hotkey")
     assert parsed is not None
     assert parsed["version"] == JSON_MODEL_VERSION
-    assert parsed["repo"] == "user/quasar-model"
+    assert parsed["repo"] == "user/example-model"
     assert parsed["digest"] == "revision:abc123deadbeef"
     assert parsed["revision"] == "abc123deadbeef"
 
