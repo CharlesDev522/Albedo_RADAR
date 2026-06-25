@@ -45,8 +45,12 @@ async def repo_activity_overview(
         )
     ).scalar()
 
+    unique_repos = len({t.repo for t in tracks})
+
     return RepoActivityOverview(
         subnet=subnet,
+        tracked_miners=len(tracks),
+        unique_repos=unique_repos,
         tracked_repos=len(tracks),
         qwen36_35b_repos=sum(1 for t in tracks if t.model_family == "qwen3.6-35b"),
         qwen3_4b_repos=sum(1 for t in tracks if t.model_family == "qwen3-4b"),
@@ -70,7 +74,7 @@ async def list_tracked_repos(
         q = q.where(HippiusRepoTrack.model_family == family)
     if in_sync is not None:
         q = q.where(HippiusRepoTrack.digest_in_sync == in_sync)
-    q = q.order_by(HippiusRepoTrack.last_hub_change_at.desc().nullslast(), HippiusRepoTrack.repo.asc())
+    q = q.order_by(HippiusRepoTrack.uid.asc().nullslast(), HippiusRepoTrack.repo.asc())
     rows = (await db.execute(q)).scalars().all()
     return [RepoTrackEntry.model_validate(r) for r in rows]
 

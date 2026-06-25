@@ -54,7 +54,9 @@ class RepoActivityEventResponse(BaseModel):
 
 class RepoActivityOverview(BaseModel):
     subnet: int
-    tracked_repos: int
+    tracked_miners: int
+    unique_repos: int
+    tracked_repos: int  # backwards-compatible alias for tracked_miners
     qwen36_35b_repos: int
     qwen3_4b_repos: int
     in_sync_count: int

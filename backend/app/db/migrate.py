@@ -17,6 +17,19 @@ MIGRATIONS: list[str] = [
     ALTER TABLE hippius_repo_revisions
     ADD COLUMN IF NOT EXISTS files_json JSONB DEFAULT '[]'::jsonb
     """,
+    """
+    ALTER TABLE hippius_repo_tracks DROP CONSTRAINT IF EXISTS uq_hippius_repo_track_subnet_repo
+    """,
+    """
+    DO $$ BEGIN
+      ALTER TABLE hippius_repo_tracks
+      ADD CONSTRAINT uq_hippius_repo_track_subnet_hotkey UNIQUE (subnet, hotkey);
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_hippius_repo_tracks_repo ON hippius_repo_tracks (subnet, repo)
+    """,
 ]
 
 

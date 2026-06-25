@@ -111,8 +111,8 @@ export default function RepoActivityPanel() {
       <div className="panel px-3 py-2">
         <h2 className="text-[12px] font-semibold text-zinc-100">Hippius repo tracker</h2>
         <p className="text-[10px] text-zinc-500 mt-0.5">
-          Tracks published miner repos on Hippius Hub ({profile.name} SN{subnet}) — manifest changes,
-          on-chain commits, and digest sync status. Focus: Qwen3.6-35B competition repos.
+          Every published miner on SN{subnet} — one Hippius repo row per miner (uid). Polls Hippius Hub
+          for manifest changes, on-chain commits, and digest sync. Unpublished miners are not tracked.
         </p>
       </div>
 
@@ -147,8 +147,9 @@ export default function RepoActivityPanel() {
       </div>
 
       {overview && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-          <Kpi label="tracked" value={String(overview.tracked_repos)} />
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-2">
+          <Kpi label="miners" value={String(overview.tracked_miners)} />
+          <Kpi label="unique repos" value={String(overview.unique_repos)} small />
           <Kpi label="Qwen3.6-35B" value={String(overview.qwen36_35b_repos)} accent="text-sky-400" />
           <Kpi label="Qwen3-4B" value={String(overview.qwen3_4b_repos)} accent="text-amber-400" />
           <Kpi label="in sync" value={String(overview.in_sync_count)} accent="text-lime-400" />
@@ -226,11 +227,11 @@ export default function RepoActivityPanel() {
         <section className="panel xl:col-span-7">
           <div className="panel-head flex-wrap gap-2">
             <div>
-              <h3 className="text-[11px] font-semibold text-zinc-100">Tracked miner repos</h3>
+              <h3 className="text-[11px] font-semibold text-zinc-100">All published miner repos</h3>
               <p className="text-[10px] text-zinc-500">
-                {family === "qwen3.6-35b"
-                  ? `${qwen36Tracks.length} Qwen3.6-35B repos · chain vs Hippius main digest`
-                  : "on-chain published repos polled on Hippius registry"}
+                {tracks.length} miners
+                {overview ? ` · ${overview.unique_repos} unique Hippius repos` : ""}
+                {family === "qwen3.6-35b" ? " · Qwen3.6-35B filter" : ""}
               </p>
             </div>
           </div>

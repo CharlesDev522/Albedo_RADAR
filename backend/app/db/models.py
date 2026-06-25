@@ -353,8 +353,9 @@ class HippiusRepoTrack(Base):
 
     __tablename__ = "hippius_repo_tracks"
     __table_args__ = (
-        UniqueConstraint("subnet", "repo", name="uq_hippius_repo_track_subnet_repo"),
+        UniqueConstraint("subnet", "hotkey", name="uq_hippius_repo_track_subnet_hotkey"),
         Index("ix_hippius_repo_tracks_family", "subnet", "model_family"),
+        Index("ix_hippius_repo_tracks_repo", "subnet", "repo"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

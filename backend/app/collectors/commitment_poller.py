@@ -286,12 +286,14 @@ class CommitmentPoller:
         t0 = time.monotonic()
         async with AsyncSessionLocal() as session:
             stats = await self.repo_track_builder.sync_subnet(session, netuid)
+            await self.repo_track_builder.prune_stale_tracks(session, netuid)
             await session.commit()
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         logger.info(
-            "REPO_TRACK netuid=%d checked=%d hub_updates=%d on_chain=%d mismatches=%d errors=%d %dms",
+            "REPO_TRACK netuid=%d miners=%d repos=%d hub_updates=%d on_chain=%d mismatches=%d errors=%d %dms",
             netuid,
-            stats["repos_checked"],
+            stats["miners_checked"],
+            stats["unique_repos"],
             stats["hub_updates"],
             stats["on_chain_events"],
             stats["mismatches"],

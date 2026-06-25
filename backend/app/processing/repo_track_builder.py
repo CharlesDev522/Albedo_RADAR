@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class RepoTrackBuilder:
-    """Poll Hippius registry for tracked miner repos and record activity."""
+    """Poll Hippius registry for every published miner repo on the subnet."""
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -39,56 +39,65 @@ class RepoTrackBuilder:
 
     async def sync_subnet(self, session: AsyncSession, netuid: int) -> dict[str, int]:
         stats = {
-            "repos_checked": 0,
+            "miners_checked": 0,
+            "unique_repos": 0,
             "hub_updates": 0,
             "on_chain_events": 0,
             "mismatches": 0,
             "errors": 0,
         }
         await self._ingest_on_chain_history(session, netuid, stats)
-        repos = await self._tracked_repos(session, netuid)
-        if not repos:
+        commits = await self._all_published_commits(session, netuid)
+        stats["unique_repos"] = len({c.repo for c in commits})
+        if not commits:
             await session.flush()
             return stats
 
         revision = self.settings.repo_track_revision
+        manifest_cache: dict[str, HippiusManifest | None] = {}
+
         async with httpx.AsyncClient(timeout=self.settings.market_http_timeout_seconds) as http:
-            for commit in repos:
-                stats["repos_checked"] += 1
+            for commit in commits:
+                stats["miners_checked"] += 1
                 try:
-                    manifest = await self.client.fetch_manifest(commit.repo, revision, client=http)
+                    if commit.repo not in manifest_cache:
+                        manifest_cache[commit.repo] = await self.client.fetch_manifest(
+                            commit.repo, revision, client=http
+                        )
+                    manifest = manifest_cache[commit.repo]
                     if manifest is None:
                         continue
                     await self._apply_manifest(session, netuid, commit, manifest, stats)
                 except httpx.HTTPStatusError as exc:
                     stats["errors"] += 1
                     logger.warning(
-                        "hippius fetch failed repo=%s status=%s",
+                        "hippius fetch failed repo=%s uid=%s status=%s",
                         commit.repo,
+                        commit.uid,
                         exc.response.status_code,
                     )
                 except Exception:
                     stats["errors"] += 1
-                    logger.exception("hippius track failed repo=%s", commit.repo)
+                    logger.exception(
+                        "hippius track failed repo=%s uid=%s hotkey=%s",
+                        commit.repo,
+                        commit.uid,
+                        commit.hotkey,
+                    )
 
         await session.flush()
         return stats
 
-    async def _tracked_repos(self, session: AsyncSession, netuid: int) -> list[MinerCommitment]:
+    async def _all_published_commits(
+        self, session: AsyncSession, netuid: int
+    ) -> list[MinerCommitment]:
+        """Every on-chain published commitment — one row per miner (hotkey)."""
         result = await session.execute(
             select(MinerCommitment)
             .where(MinerCommitment.subnet == netuid)
-            .order_by(MinerCommitment.commit_block.desc())
-            .limit(self.settings.repo_track_max_repos)
+            .order_by(MinerCommitment.uid.asc().nullslast(), MinerCommitment.hotkey.asc())
         )
-        seen: set[str] = set()
-        unique: list[MinerCommitment] = []
-        for row in result.scalars().all():
-            if row.repo in seen:
-                continue
-            seen.add(row.repo)
-            unique.append(row)
-        return unique
+        return list(result.scalars().all())
 
     async def _apply_manifest(
         self,
@@ -103,7 +112,7 @@ class RepoTrackBuilder:
         hub_digest = normalize_digest(manifest.manifest_digest)
         in_sync = digests_match(chain_digest, hub_digest)
 
-        track = await self._get_track(session, netuid, commit.repo)
+        track = await self._get_track(session, netuid, commit.hotkey)
         previous_digest = track.hub_digest if track else None
         hub_changed = bool(previous_digest and previous_digest != hub_digest)
         is_new_track = track is None
@@ -121,6 +130,7 @@ class RepoTrackBuilder:
             )
             session.add(track)
 
+        track.repo = commit.repo
         track.uid = commit.uid
         track.hotkey = commit.hotkey
         track.coldkey = commit.coldkey
@@ -141,8 +151,7 @@ class RepoTrackBuilder:
             track.hub_digest = hub_digest
             track.last_hub_change_at = manifest.created_at or now
             if hub_changed:
-                stats["hub_updates"] += 1
-                await self._emit_event(
+                emitted = await self._emit_event(
                     session,
                     netuid,
                     event_type="hub_manifest_update",
@@ -158,14 +167,21 @@ class RepoTrackBuilder:
                     commit_message=manifest.commit_message,
                     changed_files=changed_files,
                     source_key=f"hub:{commit.repo}:{hub_digest}",
-                    meta={"file_count": manifest.file_count, "total_bytes": manifest.total_bytes},
+                    meta={
+                        "file_count": manifest.file_count,
+                        "total_bytes": manifest.total_bytes,
+                        "uid": commit.uid,
+                        "hotkey": commit.hotkey,
+                    },
                 )
+                if emitted:
+                    stats["hub_updates"] += 1
             await self._record_revision(session, netuid, commit.repo, manifest, changed_files)
         elif track.hub_digest is None and hub_digest:
             track.hub_digest = hub_digest
 
         if chain_digest and hub_digest and not in_sync:
-            mismatch_key = f"mismatch:{commit.repo}:{chain_digest}:{hub_digest}"
+            mismatch_key = f"mismatch:{commit.hotkey}:{chain_digest}:{hub_digest}"
             if await self._emit_event(
                 session,
                 netuid,
@@ -194,7 +210,6 @@ class RepoTrackBuilder:
             select(CommitmentHistory)
             .where(CommitmentHistory.subnet == netuid, CommitmentHistory.revealed_at >= cutoff)
             .order_by(CommitmentHistory.revealed_at.desc())
-            .limit(500)
         )
         for row in result.scalars().all():
             source_key = f"onchain:{row.id}"
@@ -222,12 +237,12 @@ class RepoTrackBuilder:
             stats["on_chain_events"] += 1
 
     async def _get_track(
-        self, session: AsyncSession, netuid: int, repo: str
+        self, session: AsyncSession, netuid: int, hotkey: str
     ) -> HippiusRepoTrack | None:
         result = await session.execute(
             select(HippiusRepoTrack).where(
                 HippiusRepoTrack.subnet == netuid,
-                HippiusRepoTrack.repo == repo,
+                HippiusRepoTrack.hotkey == hotkey,
             )
         )
         return result.scalar_one_or_none()
@@ -341,3 +356,19 @@ class RepoTrackBuilder:
             )
         )
         return True
+
+    async def prune_stale_tracks(self, session: AsyncSession, netuid: int) -> int:
+        """Remove track rows for miners no longer in miner_commitments."""
+        commits = await self._all_published_commits(session, netuid)
+        active_hotkeys = {c.hotkey for c in commits}
+        result = await session.execute(
+            select(HippiusRepoTrack).where(HippiusRepoTrack.subnet == netuid)
+        )
+        removed = 0
+        for row in result.scalars().all():
+            if row.hotkey not in active_hotkeys:
+                await session.delete(row)
+                removed += 1
+        if removed:
+            logger.info("pruned %d stale repo track rows netuid=%d", removed, netuid)
+        return removed

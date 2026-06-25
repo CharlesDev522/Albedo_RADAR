@@ -35,7 +35,6 @@ class Settings(BaseSettings):
     hippius_registry_url: str = "https://registry.hippius.com"
     repo_track_interval_seconds: int = 120
     repo_track_revision: str = "main"
-    repo_track_max_repos: int = 96
 
     # Database
     database_url: str = "postgresql+asyncpg://minerwatch:minerwatch@localhost:5432/minerwatch"

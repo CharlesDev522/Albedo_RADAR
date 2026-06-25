@@ -198,6 +198,8 @@ export interface MarketOverview {
 
 export interface RepoActivityOverview {
   subnet: number;
+  tracked_miners: number;
+  unique_repos: number;
   tracked_repos: number;
   qwen36_35b_repos: number;
   qwen3_4b_repos: number;
