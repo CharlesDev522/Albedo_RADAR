@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
   hfModelUrl,
@@ -14,7 +14,19 @@ import {
   type RepoTrackEntry,
 } from "@/lib/api";
 import { ModelFamilyBadge } from "@/components/ModelFamilyBadge";
+import SearchBar from "@/components/SearchBar";
 import { inferAlbedoModelFamily } from "@/lib/modelFamily";
+import {
+  REPO_TRACK_SORT_OPTIONS,
+  type RepoTrackSortKey,
+  hasDefiniteRemoteTime,
+  sortRepoTracks,
+} from "@/lib/repoActivitySort";
+import {
+  isSearchActive,
+  matchesRepoActivityEvent,
+  matchesRepoTrack,
+} from "@/lib/searchFilter";
 import { useSubnet } from "@/lib/useSubnet";
 
 const POLL_MS = 30_000;
@@ -112,6 +124,8 @@ export default function RepoActivityPanel() {
   const [error, setError] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [expandedRepo, setExpandedRepo] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<RepoTrackSortKey>("remote_newest");
 
   const familyParam = family === "all" ? undefined : family;
 
@@ -170,6 +184,24 @@ export default function RepoActivityPanel() {
       });
   }, [subnet, refresh]);
 
+  useEffect(() => {
+    setSearch("");
+  }, [subnet]);
+
+  const filteredFeed = useMemo(() => {
+    if (!isSearchActive(search)) return feed;
+    return feed.filter((e) => matchesRepoActivityEvent(search, e));
+  }, [feed, search]);
+
+  const filteredTracks = useMemo(() => {
+    const matched = isSearchActive(search)
+      ? tracks.filter((t) => matchesRepoTrack(search, t))
+      : tracks;
+    return sortRepoTracks(matched, sortKey);
+  }, [tracks, search, sortKey]);
+
+  const searchActive = isSearchActive(search);
+
   return (
     <div className="space-y-3">
       <div className="panel px-3 py-2 flex flex-wrap items-start justify-between gap-2">
@@ -211,6 +243,29 @@ export default function RepoActivityPanel() {
       )}
 
       <div className="flex flex-wrap items-center gap-2">
+        <SearchBar
+          value={search}
+          onChange={setSearch}
+          placeholder="Search uid, hotkey, repo, digest, host…"
+          resultCount={searchActive ? filteredTracks.length : undefined}
+          totalCount={searchActive ? tracks.length : undefined}
+          className="w-full sm:w-auto sm:flex-1"
+        />
+        <select
+          value={sortKey}
+          onChange={(e) => setSortKey(e.target.value as RepoTrackSortKey)}
+          aria-label="Sort repos"
+          className="px-2 py-1 rounded text-[10px] border border-zinc-800 bg-zinc-950/80 text-zinc-300 focus:outline-none focus:border-zinc-600"
+        >
+          {REPO_TRACK_SORT_OPTIONS.map((opt) => (
+            <option key={opt.key} value={opt.key}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
         {(["all", "qwen3.6-35b", "qwen3-4b"] as FamilyFilter[]).map((f) => (
           <button
             key={f}
@@ -230,7 +285,9 @@ export default function RepoActivityPanel() {
           </button>
         ))}
         <span className="text-[9px] text-zinc-600 ml-auto">
-          {loading ? "loading…" : `refresh ${POLL_MS / 1000}s · hub poll ${fmtTime(overview?.last_poll_at)}`}
+          {loading
+            ? "loading…"
+            : `${searchActive ? `${filteredTracks.length}/${tracks.length} repos` : `${tracks.length} repos`} · refresh ${POLL_MS / 1000}s · hub poll ${fmtTime(overview?.last_poll_at)}`}
         </span>
       </div>
 
@@ -254,19 +311,23 @@ export default function RepoActivityPanel() {
         <section className="panel xl:col-span-5">
           <div className="panel-head">
             <h3 className="text-[11px] font-semibold text-zinc-100">Activity feed</h3>
-            <span className="text-[9px] text-zinc-600">{feed.length} events</span>
+            <span className="text-[9px] text-zinc-600">
+              {searchActive ? `${filteredFeed.length}/${feed.length}` : feed.length} events
+            </span>
           </div>
           <div className="scroll-pane max-h-[420px] overflow-y-auto divide-y divide-zinc-800/50">
-            {feed.length === 0 ? (
+            {filteredFeed.length === 0 ? (
               <p className="px-3 py-6 text-[10px] text-zinc-500 text-center">
                 {loading
                   ? "loading activity…"
-                  : tracks.length > 0
-                    ? "no events yet — click sync registries to poll Hippius/HF"
-                    : "no published miners to track"}
+                  : searchActive
+                    ? "no events match search"
+                    : tracks.length > 0
+                      ? "no events yet — click sync registries to poll Hippius/HF"
+                      : "no published miners to track"}
               </p>
             ) : (
-              feed.map((e) => (
+              filteredFeed.map((e) => (
                 <div key={e.id} className="px-3 py-2 hover:bg-zinc-800/20">
                   <div className="flex items-center justify-between gap-2">
                     <span className={`inline-flex px-1.5 py-px rounded border text-[9px] ${eventColor(e.event_type)}`}>
@@ -312,7 +373,12 @@ export default function RepoActivityPanel() {
             <div>
               <h3 className="text-[11px] font-semibold text-zinc-100">Tracked repos</h3>
               <p className="text-[10px] text-zinc-500">
-                {tracks.length} entries · latest remote update first
+                {searchActive
+                  ? `${filteredTracks.length}/${tracks.length} shown`
+                  : `${tracks.length} entries`}
+                {sortKey === "remote_newest"
+                  ? " · definite remote times first"
+                  : ` · ${REPO_TRACK_SORT_OPTIONS.find((o) => o.key === sortKey)?.label ?? sortKey}`}
                 {overview ? ` · ${overview.unique_repos} unique repos` : ""}
               </p>
             </div>
@@ -334,14 +400,18 @@ export default function RepoActivityPanel() {
                 </tr>
               </thead>
               <tbody>
-                {tracks.length === 0 ? (
+                {filteredTracks.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="text-center text-zinc-500 py-8 text-[10px]">
-                      {loading ? "loading…" : "no published miners — check Overview tab"}
+                      {loading
+                        ? "loading…"
+                        : searchActive
+                          ? "no repos match search"
+                          : "no published miners — check Overview tab"}
                     </td>
                   </tr>
                 ) : (
-                  tracks.map((t) => {
+                  filteredTracks.map((t) => {
                     const expanded = expandedRepo === `${t.hotkey}-${t.repo}`;
                     return (
                       <Fragment key={`${t.hotkey}-${t.repo}`}>
@@ -400,7 +470,12 @@ export default function RepoActivityPanel() {
                             )}
                           </td>
                           <td className="text-[10px] text-zinc-500">
-                            {fmtTime(t.hub_updated_at ?? t.last_hub_change_at)}
+                            <span className={hasDefiniteRemoteTime(t) ? "text-zinc-300" : "text-zinc-600"}>
+                              {fmtTime(t.hub_updated_at ?? t.last_hub_change_at)}
+                            </span>
+                            {!hasDefiniteRemoteTime(t) && t.pending_hub_poll && (
+                              <span className="block text-[8px] text-zinc-600">no remote time</span>
+                            )}
                           </td>
                           <td className="mono text-[9px] text-zinc-600">
                             {t.chain_digest ? `${shortHash(t.chain_digest)}…` : "—"}

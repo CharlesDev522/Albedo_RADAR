@@ -24,9 +24,28 @@ def _activity_timestamp(entry: RepoTrackEntry) -> datetime:
     )
 
 
+def _has_definite_remote_time(entry: RepoTrackEntry) -> bool:
+    return entry.last_hub_change_at is not None or entry.hub_updated_at is not None
+
+
+def _definite_remote_timestamp(entry: RepoTrackEntry) -> datetime | None:
+    return entry.last_hub_change_at or entry.hub_updated_at
+
+
 def _sort_tracks_latest_first(entries: list[RepoTrackEntry]) -> list[RepoTrackEntry]:
+    """Definite hub remote times first, then newest within each tier."""
     epoch = datetime.min.replace(tzinfo=timezone.utc)
-    return sorted(entries, key=lambda e: _activity_timestamp(e) or epoch, reverse=True)
+
+    def sort_key(entry: RepoTrackEntry) -> tuple[int, float]:
+        definite = _has_definite_remote_time(entry)
+        ts = (
+            _definite_remote_timestamp(entry)
+            if definite
+            else _activity_timestamp(entry)
+        ) or epoch
+        return (0 if definite else 1, -ts.timestamp())
+
+    return sorted(entries, key=sort_key)
 
 
 def _track_source_from_entry(entry: RepoTrackEntry) -> str:

@@ -46,3 +46,15 @@ def test_sort_tracks_latest_first():
     ]
     sorted_entries = _sort_tracks_latest_first(entries)
     assert [e.id for e in sorted_entries] == [2, 3, 1]
+
+
+def test_sort_puts_definite_remote_time_before_uncertain():
+    definite_old = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    uncertain_new = datetime(2026, 6, 20, tzinfo=timezone.utc)
+
+    entries = [
+        _entry(id=1, last_checked_at=uncertain_new),
+        _entry(id=2, hub_updated_at=definite_old, repo="b/b"),
+    ]
+    sorted_entries = _sort_tracks_latest_first(entries)
+    assert [e.id for e in sorted_entries] == [2, 1]
