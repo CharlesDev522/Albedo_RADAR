@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import LiveDashboard from "@/components/LiveDashboard";
+import ChampionRewardPanel from "@/components/ChampionRewardPanel";
 import MinerGroupsPanel from "@/components/MinerGroupsPanel";
 import RepoActivityPanel from "@/components/RepoActivityPanel";
 import SlotStatusBoard from "@/components/SlotStatusBoard";
@@ -67,6 +68,9 @@ export default async function Page({
           </Suspense>
         ) : (
           <>
+            <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading champion reward…</div>}>
+              <ChampionRewardPanel />
+            </Suspense>
             <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading slots…</div>}>
               <SlotStatusBoard />
             </Suspense>

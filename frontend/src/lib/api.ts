@@ -174,12 +174,29 @@ export interface MinerIncentiveEntry {
   commit_repo?: string | null;
 }
 
+export interface ChampionReward {
+  uid: number | null;
+  hotkey: string | null;
+  coldkey?: string | null;
+  incentive: number;
+  emission_per_block_rao: number;
+  emission_per_block_alpha: number;
+  daily_alpha: number;
+  daily_tao_equivalent: number | null;
+  daily_usd: number | null;
+  alpha_price_tao: number | null;
+  commit_repo?: string | null;
+  blocks_per_day: number;
+  note: string;
+}
+
 export interface IncentiveOverview {
   subnet: number;
   metagraph_block: number | null;
   incentivized_count: number;
   top_incentive: number;
   miners: MinerIncentiveEntry[];
+  champion: ChampionReward | null;
   note: string;
 }
 
