@@ -179,14 +179,16 @@ export interface ChampionReward {
   hotkey: string | null;
   coldkey?: string | null;
   incentive: number;
-  emission_per_block_rao: number;
-  emission_per_block_alpha: number;
+  emission_per_epoch_alpha: number;
   daily_alpha: number;
   daily_tao_equivalent: number | null;
   daily_usd: number | null;
   alpha_price_tao: number | null;
   commit_repo?: string | null;
-  blocks_per_day: number;
+  epochs_per_day: number;
+  calculation_source: string;
+  daily_reward_rao?: number | null;
+  emission_raw?: number | null;
   note: string;
 }
 

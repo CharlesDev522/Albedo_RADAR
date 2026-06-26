@@ -24,17 +24,19 @@ class ChampionReward(BaseModel):
     hotkey: str | None = None
     coldkey: str | None = None
     incentive: float = 0.0
-    emission_per_block_rao: float = 0.0
-    emission_per_block_alpha: float = 0.0
+    emission_per_epoch_alpha: float = 0.0
     daily_alpha: float = 0.0
     daily_tao_equivalent: float | None = None
     daily_usd: float | None = None
     alpha_price_tao: float | None = None
     commit_repo: str | None = None
-    blocks_per_day: int = 7200
+    epochs_per_day: int = 20
+    calculation_source: str = "metagraph"
+    daily_reward_rao: float | None = None
+    emission_raw: float | None = None
     note: str = (
-        "Champion = highest metagraph incentive miner. "
-        "Daily α ≈ emission_per_block × blocks_per_day (metagraph emission is RAO/block)."
+        "Daily α from TaoStats daily_reward when available, else metagraph emission × 20 epochs/day. "
+        "Bittensor SDK emission is α granted per tempo (~360 blocks), not RAO per block."
     )
 
 

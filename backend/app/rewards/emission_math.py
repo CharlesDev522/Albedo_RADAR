@@ -1,4 +1,4 @@
-"""Convert metagraph emission (RAO per block) to daily miner rewards."""
+"""Convert metagraph emission to daily miner rewards (TaoStats-compatible)."""
 
 from __future__ import annotations
 
@@ -9,16 +9,36 @@ TEMPO_BLOCKS = 360
 EPOCHS_PER_DAY = BLOCKS_PER_DAY // TEMPO_BLOCKS  # 20
 
 
-def emission_per_block_tao(emission_rao_per_block: float) -> float:
-    """Metagraph `emission` is denominated in RAO (10⁻⁹ TAO/α) per block."""
-    return emission_rao_per_block / RAO_PER_TAO
+def rao_to_alpha(rao: float) -> float:
+    return rao / RAO_PER_TAO
 
 
-def daily_alpha_from_emission_per_block(emission_rao_per_block: float) -> float:
-    """Estimate daily α emissions for a neuron from per-block metagraph emission."""
-    if emission_rao_per_block <= 0:
+def normalize_emission_per_epoch(emission: float) -> float:
+    """Normalize metagraph emission to α per epoch (tempo).
+
+    - Bittensor SDK `metagraph.E` / `neuron.emission`: float α per epoch (~29.5)
+    - TaoStats API `emission`: string int, RAO per epoch (~29_500_000_000)
+    """
+    if emission <= 0:
         return 0.0
-    return emission_per_block_tao(emission_rao_per_block) * BLOCKS_PER_DAY
+    if emission >= 1_000_000:
+        return rao_to_alpha(emission)
+    return emission
+
+
+def daily_alpha_from_emission_per_epoch(emission: float) -> float:
+    """TaoStats: daily α ≈ epoch emission × 20 epochs/day."""
+    per_epoch = normalize_emission_per_epoch(emission)
+    if per_epoch <= 0:
+        return 0.0
+    return per_epoch * EPOCHS_PER_DAY
+
+
+def daily_alpha_from_daily_reward_rao(daily_reward_rao: float) -> float:
+    """TaoStats `daily_reward` field — total α per day in RAO."""
+    if daily_reward_rao <= 0:
+        return 0.0
+    return rao_to_alpha(daily_reward_rao)
 
 
 def daily_tao_equivalent(daily_alpha: float, alpha_price_tao: float | None) -> float | None:

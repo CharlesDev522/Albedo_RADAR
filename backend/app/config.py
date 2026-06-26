@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     coingecko_tao_price_url: str = "https://api.coingecko.com/api/v3/simple/price"
     taomarketcap_api_key: str | None = None
     taomarketcap_price_url: str | None = None
+    taostats_api_key: str | None = None
+    taostats_api_url: str = "https://api.taostats.io"
     market_price_cache_seconds: int = 60
     market_subnet_cache_seconds: int = 30
     market_http_timeout_seconds: float = 10.0
