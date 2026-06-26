@@ -1,9 +1,13 @@
-"""Tests for merged repo activity sorting."""
+"""Tests for merged repo activity sorting and hub-first merge."""
 
 from datetime import datetime, timezone
 
+from app.db.models import HippiusRepoTrack, MinerCommitment, MinerSlotStatus
 from app.schemas.repo_activity import RepoTrackEntry
-from app.services.repo_activity_service import _sort_tracks_latest_first
+from app.services.repo_activity_service import (
+    _sort_tracks_latest_first,
+    build_merged_repo_tracks,
+)
 
 
 def _entry(**kwargs) -> RepoTrackEntry:
@@ -58,3 +62,88 @@ def test_sort_puts_definite_remote_time_before_uncertain():
     ]
     sorted_entries = _sort_tracks_latest_first(entries)
     assert [e.id for e in sorted_entries] == [2, 1]
+
+
+def test_hub_first_merge_shows_slot_without_commitment():
+    now = datetime.now(timezone.utc)
+    slot = MinerSlotStatus(
+        id=1,
+        subnet=97,
+        uid=12,
+        hotkey="slot_hotkey",
+        coldkey="cold",
+        commitment_type="v7",
+        detail="miner/albedo-qwen3.6-35b-alpha",
+        last_updated=now,
+    )
+    merged = build_merged_repo_tracks(slots=[slot], commits=[], tracks=[])
+    assert len(merged) == 1
+    assert merged[0].uid == 12
+    assert merged[0].track_source == "slot"
+    assert merged[0].chain_digest is None
+    assert merged[0].pending_hub_poll is True
+
+
+def test_hub_first_merge_overlays_commit_on_slot():
+    now = datetime.now(timezone.utc)
+    slot = MinerSlotStatus(
+        id=1,
+        subnet=97,
+        uid=3,
+        hotkey="hk",
+        coldkey="ck",
+        commitment_type="v7",
+        detail="miner/albedo-qwen3.6-35b-beta",
+        last_updated=now,
+    )
+    commit = MinerCommitment(
+        id=10,
+        subnet=97,
+        uid=3,
+        hotkey="hk",
+        coldkey="ck",
+        commit_block=100,
+        reveal_string="x",
+        repo="miner/albedo-qwen3.6-35b-beta",
+        digest="sha256:abc",
+        model_uri="hippius://miner/albedo-qwen3.6-35b-beta",
+        payload_hash="ph",
+        first_seen=now,
+        last_updated=now,
+    )
+    track = HippiusRepoTrack(
+        id=5,
+        subnet=97,
+        repo="miner/albedo-qwen3.6-35b-beta",
+        hotkey="hk",
+        uid=3,
+        hub_digest="sha256:abc",
+        hub_revision="main",
+        first_tracked_at=now,
+        last_updated=now,
+    )
+    merged = build_merged_repo_tracks(slots=[slot], commits=[commit], tracks=[track])
+    assert len(merged) == 1
+    assert merged[0].track_source == "commitment"
+    assert merged[0].chain_digest == "sha256:abc"
+    assert merged[0].digest_in_sync is True
+
+
+def test_hub_first_merge_includes_hub_watch_without_uid():
+    now = datetime.now(timezone.utc)
+    track = HippiusRepoTrack(
+        id=9,
+        subnet=97,
+        repo="org/albedo-qwen3.6-35b-discovered",
+        hotkey="hub:org/albedo-qwen3.6-35b-discovered",
+        uid=None,
+        hub_digest="sha256:zzz",
+        hub_revision="main",
+        model_family="qwen3.6-35b",
+        first_tracked_at=now,
+        last_updated=now,
+    )
+    merged = build_merged_repo_tracks(slots=[], commits=[], tracks=[track])
+    assert len(merged) == 1
+    assert merged[0].track_source == "hub_watch"
+    assert merged[0].uid is None

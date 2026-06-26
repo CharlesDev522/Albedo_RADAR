@@ -94,9 +94,11 @@ function trackSourceLabel(source: string | null | undefined): string | null {
     case "hub_watch":
       return "hub watch";
     case "slot":
-      return "slot only";
+      return "slot · hub pending";
+    case "hub_poll":
+      return "hub polled";
     case "commitment":
-      return null;
+      return "on-chain";
     default:
       return source ?? null;
   }
@@ -108,6 +110,10 @@ function trackSourceColor(source: string | null | undefined): string {
       return "text-violet-300 border-violet-500/30 bg-violet-500/10";
     case "slot":
       return "text-amber-300 border-amber-500/30 bg-amber-500/10";
+    case "commitment":
+      return "text-lime-300 border-lime-500/30 bg-lime-500/10";
+    case "hub_poll":
+      return "text-sky-300 border-sky-500/30 bg-sky-500/10";
     default:
       return "text-zinc-400 border-zinc-600 bg-zinc-800/30";
   }
@@ -155,7 +161,7 @@ export default function RepoActivityPanel() {
       await refresh();
       if ((result.miners_checked as number) === 0) {
         setSyncError(
-          "sync ran but found 0 published miners in DB — collector may not be writing commits yet"
+          "sync ran but found 0 qwen repos to poll — check slot scan and HF discovery"
         );
       }
     } catch (e) {
@@ -208,9 +214,9 @@ export default function RepoActivityPanel() {
         <div>
           <h2 className="text-[12px] font-semibold text-zinc-100">Model repo activity</h2>
           <p className="text-[10px] text-zinc-500 mt-0.5 max-w-2xl">
-            Tracks every published miner plus Qwen3.6-35B / Qwen3-4B repos on Hippius and Hugging
-            Face — including hub-only watches with no on-chain commit. Sorted by latest remote
-            update.
+            Hub-first tracking: every Qwen3.6-35B / Qwen3-4B repo from chain slots and Hugging
+            Face discovery, polled on Hippius/HF in near real-time. On-chain commits are optional
+            — used only for uid linkage and digest sync when present.
           </p>
         </div>
         <button
@@ -237,8 +243,9 @@ export default function RepoActivityPanel() {
 
       {overview && overview.tracked_miners === 0 && !loading && (
         <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[10px] text-amber-300">
-          No published commits in the database yet. Check Overview tab and ensure the collector is
-          running (<code className="mono">docker compose logs collector --tail 30</code>).
+          No Qwen repos found yet from slot scan or hub discovery. Ensure the collector is running
+          (<code className="mono">docker compose logs collector --tail 30</code>) and click sync
+          registries.
         </div>
       )}
 
@@ -292,18 +299,19 @@ export default function RepoActivityPanel() {
       </div>
 
       {overview && overview.tracked_miners > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-10 gap-2">
-          <Kpi label="miners" value={String(overview.tracked_miners)} />
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-12 gap-2">
+          <Kpi label="repos tracked" value={String(overview.tracked_miners)} />
+          <Kpi label="slot only" value={String(overview.slot_only_count ?? 0)} accent="text-amber-300" />
+          <Kpi label="on-chain" value={String(overview.chain_committed_count ?? 0)} accent="text-lime-300" />
+          <Kpi label="hub watches" value={String(overview.hub_watch_count ?? 0)} accent="text-violet-300" />
           <Kpi label="unique repos" value={String(overview.unique_repos)} small />
           <Kpi label="hippius" value={String(overview.hippius_count)} accent="text-sky-400" />
           <Kpi label="hugging face" value={String(overview.huggingface_count)} accent="text-orange-400" />
           <Kpi label="Qwen3.6-35B" value={String(overview.qwen36_35b_repos)} accent="text-sky-300" />
           <Kpi label="in sync" value={String(overview.in_sync_count)} accent="text-lime-400" />
           <Kpi label="mismatch" value={String(overview.mismatch_count)} warn={overview.mismatch_count > 0} />
-          <Kpi label="hub watches" value={String(overview.hub_watch_count ?? 0)} accent="text-violet-300" />
           <Kpi label="pending poll" value={String(overview.pending_hub_poll)} />
           <Kpi label="hub 24h" value={String(overview.hub_updates_24h)} accent="text-sky-300" />
-          <Kpi label="chain 24h" value={String(overview.on_chain_events_24h)} accent="text-lime-300" />
         </div>
       )}
 
@@ -324,7 +332,7 @@ export default function RepoActivityPanel() {
                     ? "no events match search"
                     : tracks.length > 0
                       ? "no events yet — click sync registries to poll Hippius/HF"
-                      : "no published miners to track"}
+                      : "no qwen repos from slots or hub discovery yet"}
               </p>
             ) : (
               filteredFeed.map((e) => (
@@ -407,7 +415,7 @@ export default function RepoActivityPanel() {
                         ? "loading…"
                         : searchActive
                           ? "no repos match search"
-                          : "no published miners — check Overview tab"}
+                          : "no qwen repos from slots or hub discovery yet"}
                     </td>
                   </tr>
                 ) : (
@@ -466,7 +474,7 @@ export default function RepoActivityPanel() {
                                 {trackSourceLabel(t.track_source)}
                               </span>
                             ) : (
-                              <span className="text-[9px] text-zinc-600">on-chain</span>
+                              <span className="text-[9px] text-zinc-600">—</span>
                             )}
                           </td>
                           <td className="text-[10px] text-zinc-500">

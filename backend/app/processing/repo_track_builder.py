@@ -11,11 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chain_reader.albedo_model_family import infer_albedo_model_family
 from app.config import Settings, get_settings
+from app.chain_reader.albedo_model_family import infer_albedo_model_family, repo_from_slot_detail
 from app.db.models import (
     CommitmentHistory,
     HippiusRepoRevision,
     HippiusRepoTrack,
     MinerCommitment,
+    MinerSlotStatus,
     RepoActivityEvent,
 )
 from app.integrations.model_registry import (
@@ -422,6 +424,15 @@ class RepoTrackBuilder:
             await session.execute(select(MinerCommitment).where(MinerCommitment.subnet == netuid))
         ).scalars().all()
         active_hotkeys = {c.hotkey for c in commits}
+
+        slots = (
+            await session.execute(select(MinerSlotStatus).where(MinerSlotStatus.subnet == netuid))
+        ).scalars().all()
+        for slot in slots:
+            repo = repo_from_slot_detail(slot.detail, slot.commitment_type)
+            if repo and infer_albedo_model_family(repo):
+                active_hotkeys.add(slot.hotkey)
+
         result = await session.execute(
             select(HippiusRepoTrack).where(HippiusRepoTrack.subnet == netuid)
         )

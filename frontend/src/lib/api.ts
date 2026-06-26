@@ -212,6 +212,8 @@ export interface RepoActivityOverview {
   huggingface_count: number;
   pending_hub_poll: number;
   hub_watch_count?: number;
+  slot_only_count?: number;
+  chain_committed_count?: number;
 }
 
 export interface RepoTrackEntry {

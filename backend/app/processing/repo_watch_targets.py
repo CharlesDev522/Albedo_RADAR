@@ -112,6 +112,7 @@ async def discover_watch_targets(
         )
     ).scalars().all()
     commit_hotkeys = {c.hotkey for c in commits}
+    commit_by_hotkey = {c.hotkey: c for c in commits}
     for commit in commits:
         _add(
             commit.repo,
@@ -129,14 +130,14 @@ async def discover_watch_targets(
         repo = repo_from_slot_detail(slot.detail, slot.commitment_type)
         if not repo:
             continue
-        if slot.hotkey and slot.hotkey in commit_hotkeys:
-            continue
         _add(
             repo,
             hotkey=slot.hotkey,
             uid=slot.uid,
             coldkey=slot.coldkey,
-            chain_digest=None,
+            chain_digest=commit_by_hotkey[slot.hotkey].digest
+            if slot.hotkey in commit_by_hotkey
+            else None,
             source=SOURCE_SLOT,
         )
 

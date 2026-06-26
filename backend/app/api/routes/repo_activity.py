@@ -76,6 +76,10 @@ async def repo_activity_overview(
         huggingface_count=sum(1 for t in merged if t.repo_host == "huggingface"),
         pending_hub_poll=sum(1 for t in merged if t.pending_hub_poll),
         hub_watch_count=sum(1 for t in merged if t.track_source == "hub_watch"),
+        slot_only_count=sum(1 for t in merged if t.track_source == "slot"),
+        chain_committed_count=sum(
+            1 for t in merged if t.track_source == "commitment" or t.chain_digest
+        ),
     )
 
 

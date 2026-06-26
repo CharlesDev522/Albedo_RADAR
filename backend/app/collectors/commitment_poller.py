@@ -107,6 +107,12 @@ class CommitmentPoller:
             stats["unchanged"],
             pruned,
         )
+        if stats["updated"] > 0:
+            try:
+                await self._repo_track_poll(netuid)
+                self._last_repo_track[netuid] = time.monotonic()
+            except Exception:
+                logger.exception("Repo track poll after slot update failed netuid=%d", netuid)
         return stats
 
     async def teardown(self) -> None:

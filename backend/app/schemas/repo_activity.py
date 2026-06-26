@@ -71,6 +71,8 @@ class RepoActivityOverview(BaseModel):
     huggingface_count: int = 0
     pending_hub_poll: int = 0
     hub_watch_count: int = 0
+    slot_only_count: int = 0
+    chain_committed_count: int = 0
 
 
 class RepoRevisionResponse(BaseModel):
