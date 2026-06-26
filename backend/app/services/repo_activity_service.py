@@ -10,7 +10,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chain_reader.albedo_model_family import infer_albedo_model_family
 from app.db.models import HippiusRepoTrack, MinerCommitment
 from app.integrations.model_registry import infer_repo_host
+from app.processing.repo_watch_targets import is_hub_watch_hotkey
 from app.schemas.repo_activity import RepoTrackEntry
+
+
+def _activity_timestamp(entry: RepoTrackEntry) -> datetime:
+    return (
+        entry.last_hub_change_at
+        or entry.hub_updated_at
+        or entry.last_checked_at
+        or entry.last_updated
+        or entry.first_tracked_at
+    )
+
+
+def _sort_tracks_latest_first(entries: list[RepoTrackEntry]) -> list[RepoTrackEntry]:
+    epoch = datetime.min.replace(tzinfo=timezone.utc)
+    return sorted(entries, key=lambda e: _activity_timestamp(e) or epoch, reverse=True)
+
+
+def _track_source_from_entry(entry: RepoTrackEntry) -> str:
+    if entry.track_source:
+        return entry.track_source
+    if is_hub_watch_hotkey(entry.hotkey):
+        return "hub_watch"
+    return "commitment"
 
 
 def _commitment_to_entry(commit: MinerCommitment) -> RepoTrackEntry:
@@ -38,6 +62,17 @@ def _commitment_to_entry(commit: MinerCommitment) -> RepoTrackEntry:
         first_tracked_at=commit.first_seen or now,
         last_updated=commit.last_updated or now,
         pending_hub_poll=True,
+        track_source="commitment",
+    )
+
+
+def _track_to_entry(track: HippiusRepoTrack) -> RepoTrackEntry:
+    source = "hub_watch" if is_hub_watch_hotkey(track.hotkey) else "known_track"
+    return RepoTrackEntry.model_validate(track).model_copy(
+        update={
+            "pending_hub_poll": track.hub_digest is None,
+            "track_source": source,
+        },
     )
 
 
@@ -48,7 +83,7 @@ async def merged_repo_tracks(
     family: str | None = None,
     in_sync: bool | None = None,
 ) -> list[RepoTrackEntry]:
-    """Always include every published miner; overlay collector track rows when present."""
+    """Include on-chain miners, hub watches, and overlay collector track rows."""
     commits = (
         await session.execute(
             select(MinerCommitment)
@@ -61,13 +96,21 @@ async def merged_repo_tracks(
         await session.execute(select(HippiusRepoTrack).where(HippiusRepoTrack.subnet == subnet))
     ).scalars().all()
     by_hotkey = {t.hotkey: t for t in tracks if t.hotkey}
+    by_repo = {t.repo: t for t in tracks}
 
     merged: list[RepoTrackEntry] = []
+    seen_repos: set[str] = set()
+
     for commit in commits:
         track = by_hotkey.get(commit.hotkey)
         if track:
-            entry = RepoTrackEntry.model_validate(track).model_copy(
-                update={"pending_hub_poll": track.hub_digest is None},
+            entry = _track_to_entry(track).model_copy(
+                update={
+                    "track_source": "commitment",
+                    "uid": commit.uid,
+                    "coldkey": commit.coldkey,
+                    "chain_digest": commit.digest,
+                },
             )
         else:
             entry = _commitment_to_entry(commit)
@@ -76,4 +119,28 @@ async def merged_repo_tracks(
         if in_sync is not None and entry.digest_in_sync != in_sync:
             continue
         merged.append(entry)
-    return merged
+        seen_repos.add(entry.repo)
+
+    for track in tracks:
+        if is_hub_watch_hotkey(track.hotkey) and track.repo not in seen_repos:
+            entry = _track_to_entry(track)
+            if family and entry.model_family != family:
+                continue
+            if in_sync is not None and entry.digest_in_sync != in_sync:
+                continue
+            merged.append(entry)
+            seen_repos.add(track.repo)
+        elif track.hotkey and not is_hub_watch_hotkey(track.hotkey):
+            if track.repo in seen_repos:
+                continue
+            if any(c.hotkey == track.hotkey for c in commits):
+                continue
+            entry = _track_to_entry(track)
+            if family and entry.model_family != family:
+                continue
+            if in_sync is not None and entry.digest_in_sync != in_sync:
+                continue
+            merged.append(entry)
+            seen_repos.add(track.repo)
+
+    return _sort_tracks_latest_first(merged)

@@ -211,6 +211,7 @@ export interface RepoActivityOverview {
   hippius_count: number;
   huggingface_count: number;
   pending_hub_poll: number;
+  hub_watch_count?: number;
 }
 
 export interface RepoTrackEntry {
@@ -235,6 +236,7 @@ export interface RepoTrackEntry {
   first_tracked_at: string;
   last_updated: string;
   pending_hub_poll?: boolean;
+  track_source?: string | null;
 }
 
 export interface RepoActivityEvent {

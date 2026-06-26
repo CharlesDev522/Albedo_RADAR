@@ -93,12 +93,19 @@ class ModelRegistryClient:
         chain_digest: str | None,
         *,
         client: httpx.AsyncClient | None = None,
+        preferred_host: RepoHost | None = None,
     ) -> RemoteRepoSnapshot | None:
+        if preferred_host:
+            snapshot = await self._fetch_host(repo, chain_digest, preferred_host, client)
+            if snapshot is not None:
+                return snapshot
         primary = infer_repo_host(chain_digest)
         snapshot = await self._fetch_host(repo, chain_digest, primary, client)
         if snapshot is not None:
             return snapshot
         alternate: RepoHost = "huggingface" if primary == "hippius" else "hippius"
+        if alternate == preferred_host:
+            return None
         return await self._fetch_host(repo, chain_digest, alternate, client)
 
     async def _fetch_host(

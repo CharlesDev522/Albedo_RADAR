@@ -27,12 +27,20 @@ from app.integrations.model_registry import (
     normalize_digest,
     remote_digests_match,
 )
+from app.processing.repo_watch_targets import (
+    HUB_WATCH_PREFIX,
+    RepoWatchTarget,
+    discover_watch_targets,
+    is_hub_watch_hotkey,
+)
 
 logger = logging.getLogger(__name__)
 
+HF_DISCOVERY_QUERIES = ("albedo-qwen3.6-35b", "albedo-qwen3-4b")
+
 
 class RepoTrackBuilder:
-    """Poll Hippius + Hugging Face for every published miner repo on the subnet."""
+    """Poll Hippius + Hugging Face for every watched Albedo model repo."""
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -46,86 +54,95 @@ class RepoTrackBuilder:
             "on_chain_events": 0,
             "mismatches": 0,
             "errors": 0,
+            "hub_watches": 0,
         }
         await self._ingest_on_chain_history(session, netuid, stats)
-        commits = await self._all_published_commits(session, netuid)
-        stats["unique_repos"] = len({c.repo for c in commits})
-        if not commits:
+
+        hub_repos = await self._discover_hub_search_repos()
+        targets = await discover_watch_targets(session, netuid, extra_repos=hub_repos)
+        stats["unique_repos"] = len({t.repo for t in targets})
+        stats["hub_watches"] = sum(1 for t in targets if is_hub_watch_hotkey(t.hotkey))
+        if not targets:
             await session.flush()
             return stats
 
-        snapshot_cache: dict[tuple[str, str], RemoteRepoSnapshot | None] = {}
+        snapshot_cache: dict[tuple[str, str | None, str | None], RemoteRepoSnapshot | None] = {}
 
         async with httpx.AsyncClient(timeout=self.settings.market_http_timeout_seconds) as http:
-            for commit in commits:
+            for target in targets:
                 stats["miners_checked"] += 1
-                cache_key = (commit.repo, commit.digest or "")
+                cache_key = (target.repo, target.chain_digest, target.preferred_host)
                 try:
                     if cache_key not in snapshot_cache:
                         snapshot_cache[cache_key] = await self.registry.fetch_snapshot(
-                            commit.repo, commit.digest, client=http
+                            target.repo,
+                            target.chain_digest,
+                            client=http,
+                            preferred_host=target.preferred_host,
                         )
                     snapshot = snapshot_cache[cache_key]
                     if snapshot is None:
-                        await self._upsert_pending_track(session, netuid, commit)
+                        await self._upsert_pending_track(session, netuid, target)
                         continue
-                    await self._apply_snapshot(session, netuid, commit, snapshot, stats)
+                    await self._apply_snapshot(session, netuid, target, snapshot, stats)
                 except httpx.HTTPStatusError as exc:
                     stats["errors"] += 1
                     logger.warning(
-                        "registry fetch failed repo=%s uid=%s status=%s",
-                        commit.repo,
-                        commit.uid,
+                        "registry fetch failed repo=%s hotkey=%s status=%s",
+                        target.repo,
+                        target.hotkey,
                         exc.response.status_code,
                     )
-                    await self._upsert_pending_track(session, netuid, commit)
+                    await self._upsert_pending_track(session, netuid, target)
                 except Exception:
                     stats["errors"] += 1
                     logger.exception(
-                        "repo track failed repo=%s uid=%s hotkey=%s",
-                        commit.repo,
-                        commit.uid,
-                        commit.hotkey,
+                        "repo track failed repo=%s hotkey=%s",
+                        target.repo,
+                        target.hotkey,
                     )
-                    await self._upsert_pending_track(session, netuid, commit)
+                    await self._upsert_pending_track(session, netuid, target)
 
         await session.flush()
         return stats
 
-    async def _all_published_commits(
-        self, session: AsyncSession, netuid: int
-    ) -> list[MinerCommitment]:
-        result = await session.execute(
-            select(MinerCommitment)
-            .where(MinerCommitment.subnet == netuid)
-            .order_by(MinerCommitment.uid.asc().nullslast(), MinerCommitment.hotkey.asc())
-        )
-        return list(result.scalars().all())
+    async def _discover_hub_search_repos(self) -> list[str]:
+        repos: list[str] = []
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.market_http_timeout_seconds) as http:
+                for query in HF_DISCOVERY_QUERIES:
+                    found = await self.registry.huggingface.search_models(
+                        query, limit=100, client=http
+                    )
+                    repos.extend(found)
+        except Exception:
+            logger.exception("hub search discovery failed")
+        return list(dict.fromkeys(repos))
 
     async def _upsert_pending_track(
-        self, session: AsyncSession, netuid: int, commit: MinerCommitment
+        self, session: AsyncSession, netuid: int, target: RepoWatchTarget
     ) -> None:
-        family = infer_albedo_model_family(commit.repo)
-        host = infer_repo_host(commit.digest)
-        track = await self._get_track(session, netuid, commit.hotkey)
+        family = target.model_family or infer_albedo_model_family(target.repo)
+        host = target.preferred_host or infer_repo_host(target.chain_digest)
+        track = await self._get_track(session, netuid, target.hotkey)
         now = datetime.now(timezone.utc)
         if track is None:
             track = HippiusRepoTrack(
                 subnet=netuid,
-                repo=commit.repo,
+                repo=target.repo,
                 repo_host=host,
-                uid=commit.uid,
-                hotkey=commit.hotkey,
-                coldkey=commit.coldkey,
+                uid=target.uid,
+                hotkey=target.hotkey,
+                coldkey=target.coldkey,
                 model_family=family,
             )
             session.add(track)
-        track.repo = commit.repo
+        track.repo = target.repo
         track.repo_host = host
-        track.uid = commit.uid
-        track.coldkey = commit.coldkey
+        track.uid = target.uid
+        track.coldkey = target.coldkey
         track.model_family = family
-        track.chain_digest = normalize_digest(commit.digest)
+        track.chain_digest = normalize_digest(target.chain_digest)
         track.last_checked_at = now
         track.last_updated = now
 
@@ -133,16 +150,20 @@ class RepoTrackBuilder:
         self,
         session: AsyncSession,
         netuid: int,
-        commit: MinerCommitment,
+        target: RepoWatchTarget,
         snapshot: RemoteRepoSnapshot,
         stats: dict[str, int],
     ) -> None:
-        family = infer_albedo_model_family(commit.repo)
-        chain_digest = normalize_digest(commit.digest)
+        family = target.model_family or infer_albedo_model_family(target.repo)
+        chain_digest = normalize_digest(target.chain_digest)
         hub_digest = normalize_digest(snapshot.remote_digest)
-        in_sync = remote_digests_match(commit.digest, snapshot.remote_digest)
+        in_sync = (
+            remote_digests_match(target.chain_digest, snapshot.remote_digest)
+            if chain_digest
+            else None
+        )
 
-        track = await self._get_track(session, netuid, commit.hotkey)
+        track = await self._get_track(session, netuid, target.hotkey)
         previous_digest = track.hub_digest if track else None
         hub_changed = bool(previous_digest and previous_digest != hub_digest)
         is_new_track = track is None
@@ -151,21 +172,21 @@ class RepoTrackBuilder:
         if track is None:
             track = HippiusRepoTrack(
                 subnet=netuid,
-                repo=commit.repo,
+                repo=target.repo,
                 repo_host=snapshot.host,
-                uid=commit.uid,
-                hotkey=commit.hotkey,
-                coldkey=commit.coldkey,
+                uid=target.uid,
+                hotkey=target.hotkey,
+                coldkey=target.coldkey,
                 model_family=family,
                 hub_revision=snapshot.revision,
             )
             session.add(track)
 
-        track.repo = commit.repo
+        track.repo = target.repo
         track.repo_host = snapshot.host
-        track.uid = commit.uid
-        track.hotkey = commit.hotkey
-        track.coldkey = commit.coldkey
+        track.uid = target.uid
+        track.hotkey = target.hotkey
+        track.coldkey = target.coldkey
         track.model_family = family
         track.chain_digest = chain_digest
         track.hub_revision = snapshot.revision
@@ -178,7 +199,7 @@ class RepoTrackBuilder:
         track.last_updated = now
 
         if hub_changed or (is_new_track and hub_digest):
-            prev_files = await self._files_for_digest(session, netuid, commit.repo, previous_digest)
+            prev_files = await self._files_for_digest(session, netuid, target.repo, previous_digest)
             changed_files = diff_remote_files(prev_files, snapshot.files)
             track.hub_digest = hub_digest
             track.last_hub_change_at = snapshot.created_at or now
@@ -187,10 +208,10 @@ class RepoTrackBuilder:
                     session,
                     netuid,
                     event_type="hub_manifest_update",
-                    repo=commit.repo,
-                    uid=commit.uid,
-                    hotkey=commit.hotkey,
-                    coldkey=commit.coldkey,
+                    repo=target.repo,
+                    uid=target.uid,
+                    hotkey=target.hotkey if not is_hub_watch_hotkey(target.hotkey) else None,
+                    coldkey=target.coldkey,
                     model_family=family,
                     chain_digest=chain_digest,
                     hub_digest=hub_digest,
@@ -198,29 +219,32 @@ class RepoTrackBuilder:
                     revision=snapshot.revision,
                     commit_message=snapshot.commit_message,
                     changed_files=changed_files,
-                    source_key=f"hub:{snapshot.host}:{commit.repo}:{hub_digest}",
+                    source_key=f"hub:{snapshot.host}:{target.repo}:{hub_digest}",
                     meta={
                         "host": snapshot.host,
                         "file_count": snapshot.file_count,
                         "total_bytes": snapshot.total_bytes,
+                        "track_source": target.track_source,
                     },
                 )
                 if emitted:
                     stats["hub_updates"] += 1
-            await self._record_revision(session, netuid, commit.repo, snapshot, changed_files)
+            await self._record_revision(session, netuid, target.repo, snapshot, changed_files)
         elif track.hub_digest is None and hub_digest:
             track.hub_digest = hub_digest
+            if snapshot.created_at:
+                track.last_hub_change_at = snapshot.created_at
 
-        if chain_digest and hub_digest and not in_sync:
-            mismatch_key = f"mismatch:{commit.hotkey}:{chain_digest}:{hub_digest}"
+        if chain_digest and hub_digest and in_sync is False:
+            mismatch_key = f"mismatch:{target.hotkey}:{chain_digest}:{hub_digest}"
             if await self._emit_event(
                 session,
                 netuid,
                 event_type="digest_mismatch",
-                repo=commit.repo,
-                uid=commit.uid,
-                hotkey=commit.hotkey,
-                coldkey=commit.coldkey,
+                repo=target.repo,
+                uid=target.uid,
+                hotkey=target.hotkey if not is_hub_watch_hotkey(target.hotkey) else None,
+                coldkey=target.coldkey,
                 model_family=family,
                 chain_digest=chain_digest,
                 hub_digest=hub_digest,
@@ -229,6 +253,7 @@ class RepoTrackBuilder:
                 meta={
                     "host": snapshot.host,
                     "note": "on-chain digest differs from remote registry",
+                    "track_source": target.track_source,
                 },
             ):
                 stats["mismatches"] += 1
@@ -393,13 +418,17 @@ class RepoTrackBuilder:
         return True
 
     async def prune_stale_tracks(self, session: AsyncSession, netuid: int) -> int:
-        commits = await self._all_published_commits(session, netuid)
+        commits = (
+            await session.execute(select(MinerCommitment).where(MinerCommitment.subnet == netuid))
+        ).scalars().all()
         active_hotkeys = {c.hotkey for c in commits}
         result = await session.execute(
             select(HippiusRepoTrack).where(HippiusRepoTrack.subnet == netuid)
         )
         removed = 0
         for row in result.scalars().all():
+            if is_hub_watch_hotkey(row.hotkey):
+                continue
             if row.hotkey not in active_hotkeys:
                 await session.delete(row)
                 removed += 1

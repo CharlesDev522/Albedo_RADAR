@@ -55,6 +55,29 @@ class HuggingFaceRegistryClient:
         data = resp.json()
         return _parse_revision(repo, revision, data)
 
+    async def search_models(
+        self,
+        query: str,
+        *,
+        limit: int = 100,
+        client: httpx.AsyncClient | None = None,
+    ) -> list[str]:
+        """Return model ids from Hugging Face Hub search."""
+        url = f"{self.base_url}/models"
+        params = {"search": query, "limit": str(limit)}
+        resp = await self._request("GET", url, client=client, params=params)
+        data = resp.json()
+        if not isinstance(data, list):
+            return []
+        repos: list[str] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            model_id = item.get("modelId") or item.get("id")
+            if isinstance(model_id, str) and "/" in model_id:
+                repos.append(model_id)
+        return repos
+
     async def fetch_model(
         self,
         repo: str,
@@ -73,12 +96,13 @@ class HuggingFaceRegistryClient:
         method: str,
         url: str,
         client: httpx.AsyncClient | None = None,
+        params: dict[str, str] | None = None,
     ) -> httpx.Response:
         timeout = self.settings.market_http_timeout_seconds
         headers = {"User-Agent": "MinerWatch/1.0"}
 
         async def _do(c: httpx.AsyncClient) -> httpx.Response:
-            resp = await c.request(method, url, headers=headers)
+            resp = await c.request(method, url, headers=headers, params=params)
             resp.raise_for_status()
             return resp
 

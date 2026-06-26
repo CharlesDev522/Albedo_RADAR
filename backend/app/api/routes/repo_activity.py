@@ -75,6 +75,7 @@ async def repo_activity_overview(
         hippius_count=sum(1 for t in merged if t.repo_host == "hippius"),
         huggingface_count=sum(1 for t in merged if t.repo_host == "huggingface"),
         pending_hub_poll=sum(1 for t in merged if t.pending_hub_poll),
+        hub_watch_count=sum(1 for t in merged if t.track_source == "hub_watch"),
     )
 
 

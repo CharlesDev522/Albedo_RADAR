@@ -77,6 +77,30 @@ function hostBadge(host: string): string {
     : "text-sky-300 border-sky-500/30 bg-sky-500/10";
 }
 
+function trackSourceLabel(source: string | null | undefined): string | null {
+  switch (source) {
+    case "hub_watch":
+      return "hub watch";
+    case "slot":
+      return "slot only";
+    case "commitment":
+      return null;
+    default:
+      return source ?? null;
+  }
+}
+
+function trackSourceColor(source: string | null | undefined): string {
+  switch (source) {
+    case "hub_watch":
+      return "text-violet-300 border-violet-500/30 bg-violet-500/10";
+    case "slot":
+      return "text-amber-300 border-amber-500/30 bg-amber-500/10";
+    default:
+      return "text-zinc-400 border-zinc-600 bg-zinc-800/30";
+  }
+}
+
 export default function RepoActivityPanel() {
   const { subnet } = useSubnet();
   const [overview, setOverview] = useState<RepoActivityOverview | null>(null);
@@ -152,9 +176,9 @@ export default function RepoActivityPanel() {
         <div>
           <h2 className="text-[12px] font-semibold text-zinc-100">Model repo activity</h2>
           <p className="text-[10px] text-zinc-500 mt-0.5 max-w-2xl">
-            Every published miner on SN{subnet} — Hippius (<span className="text-sky-400">sha256:</span>{" "}
-            digests) and Hugging Face (<span className="text-orange-400">revision:</span> digests).
-            Shows on-chain repos immediately; hub poll fills sync status.
+            Tracks every published miner plus Qwen3.6-35B / Qwen3-4B repos on Hippius and Hugging
+            Face — including hub-only watches with no on-chain commit. Sorted by latest remote
+            update.
           </p>
         </div>
         <button
@@ -219,6 +243,7 @@ export default function RepoActivityPanel() {
           <Kpi label="Qwen3.6-35B" value={String(overview.qwen36_35b_repos)} accent="text-sky-300" />
           <Kpi label="in sync" value={String(overview.in_sync_count)} accent="text-lime-400" />
           <Kpi label="mismatch" value={String(overview.mismatch_count)} warn={overview.mismatch_count > 0} />
+          <Kpi label="hub watches" value={String(overview.hub_watch_count ?? 0)} accent="text-violet-300" />
           <Kpi label="pending poll" value={String(overview.pending_hub_poll)} />
           <Kpi label="hub 24h" value={String(overview.hub_updates_24h)} accent="text-sky-300" />
           <Kpi label="chain 24h" value={String(overview.on_chain_events_24h)} accent="text-lime-300" />
@@ -285,9 +310,9 @@ export default function RepoActivityPanel() {
         <section className="panel xl:col-span-7">
           <div className="panel-head flex-wrap gap-2">
             <div>
-              <h3 className="text-[11px] font-semibold text-zinc-100">All published miner repos</h3>
+              <h3 className="text-[11px] font-semibold text-zinc-100">Tracked repos</h3>
               <p className="text-[10px] text-zinc-500">
-                {tracks.length} miners
+                {tracks.length} entries · latest remote update first
                 {overview ? ` · ${overview.unique_repos} unique repos` : ""}
               </p>
             </div>
@@ -302,6 +327,7 @@ export default function RepoActivityPanel() {
                   <th>era</th>
                   <th>sync</th>
                   <th>files</th>
+                  <th>source</th>
                   <th>remote updated</th>
                   <th>chain</th>
                   <th>remote</th>
@@ -310,7 +336,7 @@ export default function RepoActivityPanel() {
               <tbody>
                 {tracks.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="text-center text-zinc-500 py-8 text-[10px]">
+                    <td colSpan={10} className="text-center text-zinc-500 py-8 text-[10px]">
                       {loading ? "loading…" : "no published miners — check Overview tab"}
                     </td>
                   </tr>
@@ -362,7 +388,20 @@ export default function RepoActivityPanel() {
                           <td className="mono text-[10px] text-zinc-500 tabular-nums">
                             {t.file_count ?? "—"}
                           </td>
-                          <td className="text-[10px] text-zinc-500">{fmtTime(t.hub_updated_at)}</td>
+                          <td>
+                            {trackSourceLabel(t.track_source) ? (
+                              <span
+                                className={`inline-flex px-1 py-px rounded border text-[8px] ${trackSourceColor(t.track_source)}`}
+                              >
+                                {trackSourceLabel(t.track_source)}
+                              </span>
+                            ) : (
+                              <span className="text-[9px] text-zinc-600">on-chain</span>
+                            )}
+                          </td>
+                          <td className="text-[10px] text-zinc-500">
+                            {fmtTime(t.hub_updated_at ?? t.last_hub_change_at)}
+                          </td>
                           <td className="mono text-[9px] text-zinc-600">
                             {t.chain_digest ? `${shortHash(t.chain_digest)}…` : "—"}
                           </td>
@@ -372,7 +411,7 @@ export default function RepoActivityPanel() {
                         </tr>
                         {expanded && (t.hub_commit_message || t.coldkey) && (
                           <tr className="bg-zinc-900/40">
-                            <td colSpan={9} className="text-[10px] text-zinc-500 py-2">
+                            <td colSpan={10} className="text-[10px] text-zinc-500 py-2">
                               {t.hub_commit_message && (
                                 <>
                                   <span className="text-zinc-400">remote:</span> {t.hub_commit_message}{" "}

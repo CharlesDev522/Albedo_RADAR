@@ -30,6 +30,7 @@ class RepoTrackEntry(BaseModel):
     first_tracked_at: datetime
     last_updated: datetime
     pending_hub_poll: bool = False
+    track_source: str | None = None
 
 
 class RepoActivityEventResponse(BaseModel):
@@ -69,6 +70,7 @@ class RepoActivityOverview(BaseModel):
     hippius_count: int = 0
     huggingface_count: int = 0
     pending_hub_poll: int = 0
+    hub_watch_count: int = 0
 
 
 class RepoRevisionResponse(BaseModel):
