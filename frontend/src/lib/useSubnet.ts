@@ -7,6 +7,7 @@ import { DEFAULT_SUBNET, type DashboardView } from "@/lib/subnets";
 function parseView(raw: string | null): DashboardView {
   if (raw === "clusters") return "clusters";
   if (raw === "activity") return "activity";
+  if (raw === "duels") return "duels";
   return "dashboard";
 }
 

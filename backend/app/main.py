@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
 from app.api.routes import (
+    albedo_analysis,
     coldkeys,
     commitments,
     encrypted_commitments,
@@ -74,6 +75,7 @@ app.include_router(events.router, prefix=api_prefix)
 app.include_router(incentives.router, prefix=api_prefix)
 app.include_router(market.router, prefix=api_prefix)
 app.include_router(repo_activity.router, prefix=api_prefix)
+app.include_router(albedo_analysis.router, prefix=api_prefix)
 
 
 @app.get("/health", response_model=HealthResponse)

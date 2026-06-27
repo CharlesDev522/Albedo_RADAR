@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     market_subnet_cache_seconds: int = 30
     market_http_timeout_seconds: float = 10.0
 
+    # Albedo subnet dashboard (public Hippius JSON mirror)
+    albedo_dashboard_url: str = "https://us-east-1.hippius.com/albedo"
+
     # Hippius registry repo tracking
     hippius_registry_url: str = "https://registry.hippius.com"
     huggingface_api_url: str = "https://huggingface.co/api"

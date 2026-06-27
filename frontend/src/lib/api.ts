@@ -280,6 +280,143 @@ export interface RepoActivityEvent {
   meta: Record<string, unknown>;
 }
 
+export interface AlbedoReignMember {
+  king_version: number;
+  model_uri: string;
+  model_name: string;
+  namespace: string;
+  hotkey: string;
+  uid: number;
+  weight_bps: number;
+  score_challenger?: number | null;
+  score_king?: number | null;
+  eval_run_id?: string | null;
+}
+
+export interface AlbedoCurrentEval {
+  eval_run_id: string;
+  state: string;
+  model_uri: string;
+  model_name: string;
+  namespace: string;
+  hotkey: string;
+  uid: number;
+  sample_count?: number | null;
+  generated_sample_count?: number | null;
+  started_at?: string | null;
+}
+
+export interface AlbedoDuelSummary {
+  eval_run_id: string;
+  finished_at: string;
+  challenger_won: boolean;
+  coronated: boolean;
+  king_version?: number | null;
+  score_challenger: number;
+  score_king: number;
+  win_margin: number;
+  model_uri: string;
+  model_name: string;
+  namespace: string;
+  hotkey: string;
+  uid: number;
+  king_model_uri?: string | null;
+  king_model_name?: string | null;
+  king_namespace?: string | null;
+  king_uid?: number | null;
+  king_hotkey?: string | null;
+  king_version_defended?: number | null;
+  valid_turns?: number | null;
+  total_turns?: number | null;
+}
+
+export interface AlbedoKingCoronation {
+  king_version: number;
+  model_uri: string;
+  model_name: string;
+  namespace: string;
+  hotkey: string;
+  uid: number;
+  finished_at: string;
+  eval_run_id: string;
+  score_challenger: number;
+  score_king: number;
+  win_margin: number;
+  defeated_king_version?: number | null;
+  defeated_model_uri?: string | null;
+  defeated_model_name?: string | null;
+  defeated_namespace?: string | null;
+}
+
+export interface AlbedoWinRateRow {
+  key: string;
+  label: string;
+  duels: number;
+  wins: number;
+  losses: number;
+  win_pct: number;
+  avg_margin?: number | null;
+  coronations: number;
+}
+
+export interface AlbedoJudgeAggregate {
+  judge: string;
+  avg_challenger_score: number;
+  duels: number;
+}
+
+export interface AlbedoMetricAggregate {
+  metric: string;
+  avg_challenger_score: number;
+  duels: number;
+}
+
+export interface AlbedoMarginBucket {
+  label: string;
+  count: number;
+}
+
+export interface AlbedoTimelinePoint {
+  date: string;
+  duels: number;
+  challenger_wins: number;
+  king_wins: number;
+  coronations: number;
+  challenger_win_pct: number;
+}
+
+export interface AlbedoAnalysisOverview {
+  subnet: number;
+  source: string;
+  source_url: string;
+  updated_at?: string | null;
+  judge_models: string[];
+  total_duels: number;
+  challenger_wins: number;
+  king_wins: number;
+  coronations: number;
+  challenger_win_pct: number;
+  king_win_pct: number;
+  avg_win_margin?: number | null;
+  avg_challenger_score?: number | null;
+  avg_king_score?: number | null;
+  reign: AlbedoReignMember[];
+  current_king?: AlbedoReignMember | null;
+  current_eval?: AlbedoCurrentEval | null;
+  queue_length: number;
+  king_history: AlbedoKingCoronation[];
+  recent_duels: AlbedoDuelSummary[];
+  challenger_by_namespace: AlbedoWinRateRow[];
+  challenger_by_hotkey: AlbedoWinRateRow[];
+  king_defense_by_model: AlbedoWinRateRow[];
+  judge_aggregates: AlbedoJudgeAggregate[];
+  metric_aggregates: AlbedoMetricAggregate[];
+  margin_histogram: AlbedoMarginBucket[];
+  timeline: AlbedoTimelinePoint[];
+  pipeline: { stage: string; status?: string | null; detail?: string | null }[];
+  note: string;
+}
+
 async function fetchApi<T>(path: string): Promise<T> {
   const res = await fetch(`${apiBase()}${path}`, { cache: "no-store" });
   if (!res.ok) {
@@ -354,6 +491,8 @@ export const api = {
     }
     return res.json() as Promise<Record<string, unknown>>;
   },
+  getAlbedoAnalysis: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<AlbedoAnalysisOverview>(`/albedo/analysis?subnet=${subnet}`),
 };
 
 export function hippiusModelUrl(repo: string, branch = "main"): string {

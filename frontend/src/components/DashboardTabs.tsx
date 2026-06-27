@@ -5,6 +5,7 @@ import { useSubnet } from "@/lib/useSubnet";
 
 const TAB_ACTIVE: Record<string, string> = {
   dashboard: "border-amber-500/50 bg-amber-500/15 text-amber-200",
+  duels: "border-emerald-500/50 bg-emerald-500/15 text-emerald-200",
   activity: "border-sky-500/50 bg-sky-500/15 text-sky-200",
   clusters: "border-violet-500/50 bg-violet-500/15 text-violet-200",
 };

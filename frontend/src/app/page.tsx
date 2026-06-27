@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import AlbedoDuelPanel from "@/components/AlbedoDuelPanel";
 import LiveDashboard from "@/components/LiveDashboard";
 import ChampionRewardPanel from "@/components/ChampionRewardPanel";
 import MinerGroupsPanel from "@/components/MinerGroupsPanel";
@@ -28,6 +29,7 @@ async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
 function parseView(raw: string | undefined): DashboardView {
   if (raw === "clusters") return "clusters";
   if (raw === "activity") return "activity";
+  if (raw === "duels") return "duels";
   return "dashboard";
 }
 
@@ -65,6 +67,10 @@ export default async function Page({
         ) : view === "activity" ? (
           <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading repo activity…</div>}>
             <RepoActivityPanel />
+          </Suspense>
+        ) : view === "duels" ? (
+          <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading duel analysis…</div>}>
+            <AlbedoDuelPanel />
           </Suspense>
         ) : (
           <>

@@ -2,7 +2,7 @@
 
 export const DEFAULT_SUBNET = 97;
 
-export type DashboardView = "dashboard" | "clusters" | "activity";
+export type DashboardView = "dashboard" | "clusters" | "activity" | "duels";
 
 export interface SubnetFeatures {
   incentiveColumn: boolean;
@@ -38,6 +38,7 @@ export function getSubnetProfile(_netuid: number = DEFAULT_SUBNET): SubnetProfil
 
 export const DASHBOARD_TABS: { view: DashboardView; label: string; hint: string }[] = [
   { view: "dashboard", label: "Overview", hint: "Slots, commits, and live feed" },
+  { view: "duels", label: "Duels", hint: "King-of-the-hill results, win rates, and coronation history" },
   { view: "activity", label: "Repo activity", hint: "Hippius hub changes and miner model updates" },
   { view: "clusters", label: "Clusters", hint: "Coldkey and model-owner groups" },
 ];
