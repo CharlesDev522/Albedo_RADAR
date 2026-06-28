@@ -221,12 +221,26 @@ class AlbedoCrownEvent(BaseModel):
     slot_until: str | None = None
     active_hours: float | None = None
     slot_hours: float | None = None
+    weight_bps: int = 0
+    estimated_alpha: float | None = None
+    estimated_tao: float | None = None
     repo: str | None = None
     coldkey: str | None = None
     hotkey: str
     uid: int
     model_name: str
     is_current_king: bool = False
+
+
+class AlbedoRewardBasis(BaseModel):
+    daily_subnet_alpha: float = 0.0
+    alpha_price_tao: float | None = None
+    tao_price_usd: float | None = None
+    daily_subnet_tao: float | None = None
+    daily_subnet_usd: float | None = None
+    calculation_source: str = "unavailable"
+    default_weight_bps: int = 2000
+    note: str = ""
 
 
 class AlbedoCrownLeaderboardRow(BaseModel):
@@ -246,6 +260,9 @@ class AlbedoCrownLeaderboardRow(BaseModel):
     duel_count: int = 0
     challenger_wins: int = 0
     challenger_win_pct: float | None = None
+    total_estimated_alpha: float | None = None
+    total_estimated_tao: float | None = None
+    ongoing_daily_alpha: float | None = None
     crown_events: list[AlbedoCrownEvent] = Field(default_factory=list)
 
 
@@ -257,16 +274,23 @@ class AlbedoRepoColdkeyLink(BaseModel):
     coronations: int = 0
     total_slot_hours: float = 0.0
     total_active_hours: float = 0.0
+    total_estimated_alpha: float | None = None
+    total_estimated_tao: float | None = None
+    ongoing_daily_alpha: float | None = None
     in_reign: bool = False
     last_crowned_at: str | None = None
 
 
 class AlbedoRepoCrownAnalysis(BaseModel):
+    reward_basis: AlbedoRewardBasis = Field(default_factory=AlbedoRewardBasis)
     crowns_by_repo: list[AlbedoCrownLeaderboardRow] = Field(default_factory=list)
+    crowns_by_coldkey: list[AlbedoCrownLeaderboardRow] = Field(default_factory=list)
     repo_coldkey_links: list[AlbedoRepoColdkeyLink] = Field(default_factory=list)
     multi_owner_repos: list[str] = Field(default_factory=list)
     total_repos_crowned: int = 0
     total_unique_coldkeys: int = 0
+    grand_total_estimated_alpha: float | None = None
+    grand_total_estimated_tao: float | None = None
 
 
 class AlbedoAnalysisOverview(BaseModel):

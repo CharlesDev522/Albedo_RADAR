@@ -9,6 +9,12 @@ from typing import Any
 
 from app.config import Settings, get_settings
 from app.integrations.albedo_dashboard import fetch_dashboard, fetch_state
+from app.rewards.crown_reward_math import (
+    DEFAULT_KING_WEIGHT_BPS,
+    estimate_crown_alpha,
+    fetch_crown_reward_basis,
+    ongoing_daily_alpha,
+)
 from app.schemas.albedo_analysis import (
     AlbedoAnalysisOverview,
     AlbedoCrownEvent,
@@ -28,6 +34,7 @@ from app.schemas.albedo_analysis import (
     AlbedoReignSlotHolder,
     AlbedoRepoColdkeyLink,
     AlbedoRepoCrownAnalysis,
+    AlbedoRewardBasis,
     AlbedoTimelinePoint,
     AlbedoWinRateRow,
 )
@@ -613,11 +620,18 @@ def _build_king_tenures(
     return tenures
 
 
+def _alpha_to_tao(alpha: float, alpha_price_tao: float | None) -> float | None:
+    if alpha <= 0 or alpha_price_tao is None or alpha_price_tao <= 0:
+        return None
+    return alpha * alpha_price_tao
+
+
 def _build_repo_crown_analysis(
     king_history: list[AlbedoKingCoronation],
     reign_members: list[AlbedoReignMember],
     updated_at: str | None,
     repo_duel_stats: dict[str, dict[str, Any]] | None = None,
+    reward_basis: AlbedoRewardBasis | None = None,
 ) -> tuple[AlbedoRepoCrownAnalysis, list[AlbedoCrownLeaderboardRow]]:
     """Aggregate crown reward time by repo with repo↔coldkey relations."""
     sorted_coronations = sorted(king_history, key=lambda c: c.king_version)
@@ -646,6 +660,10 @@ def _build_repo_crown_analysis(
     now = updated_at or datetime.now(timezone.utc).isoformat()
     current_king_version = reign_members[0].king_version if reign_members else None
     duel_stats = repo_duel_stats or {}
+    basis = reward_basis or AlbedoRewardBasis()
+    daily_subnet_alpha = basis.daily_subnet_alpha
+    alpha_price = basis.alpha_price_tao
+    default_weight = basis.default_weight_bps or DEFAULT_KING_WEIGHT_BPS
 
     events: list[AlbedoCrownEvent] = []
     for cor in sorted_coronations:
@@ -657,6 +675,17 @@ def _build_repo_crown_analysis(
             slot_until = None
         active_end = active_until or (now if cor.king_version == current_king_version else dethroned_at.get(cor.king_version) or now)
         slot_end = slot_until or (now if cor.king_version in reign_versions else slot_exit_at.get(cor.king_version) or now)
+        slot_hours = _hours_between(
+            cor.finished_at,
+            slot_end if slot_until else now if cor.king_version in reign_versions else slot_end,
+        )
+        weight_bps = reign_weight.get(cor.king_version, default_weight)
+        est_alpha = estimate_crown_alpha(
+            slot_hours,
+            weight_bps=weight_bps,
+            daily_subnet_alpha=daily_subnet_alpha,
+        )
+        est_tao = _alpha_to_tao(est_alpha, alpha_price)
         events.append(
             AlbedoCrownEvent(
                 king_version=cor.king_version,
@@ -664,10 +693,10 @@ def _build_repo_crown_analysis(
                 active_until=active_until,
                 slot_until=slot_until,
                 active_hours=_hours_between(cor.finished_at, active_end if active_until else now),
-                slot_hours=_hours_between(
-                    cor.finished_at,
-                    slot_end if slot_until else now if cor.king_version in reign_versions else slot_end,
-                ),
+                slot_hours=slot_hours,
+                weight_bps=weight_bps,
+                estimated_alpha=round(est_alpha, 4) if est_alpha > 0 else None,
+                estimated_tao=round(est_tao, 6) if est_tao is not None else None,
                 repo=cor.repo,
                 coldkey=cor.coldkey,
                 hotkey=cor.hotkey,
@@ -691,6 +720,7 @@ def _build_repo_crown_analysis(
                 "uids": set(),
                 "repos": set(),
                 "events": [],
+                "estimated_alpha": 0.0,
             }
         )
         for event in events:
@@ -702,6 +732,7 @@ def _build_repo_crown_analysis(
             g["coronations"] += 1
             g["active_hours"] += event.active_hours or 0.0
             g["slot_hours"] += event.slot_hours or 0.0
+            g["estimated_alpha"] += event.estimated_alpha or 0.0
             if event.king_version in reign_weight:
                 g["weight_pct"] = max(g["weight_pct"], reign_weight[event.king_version] / 100.0)
             if event.coldkey:
@@ -726,6 +757,26 @@ def _build_repo_crown_analysis(
                 owner_count = len(repos)
                 reign_slots = 0
 
+            total_alpha = data["estimated_alpha"]
+            total_tao = _alpha_to_tao(total_alpha, alpha_price)
+            ongoing = None
+            if group_type == "repo" and reign_slots > 0:
+                slot_weight = reign_weight.get(
+                    next((e.king_version for e in data["events"] if e.is_current_king), 0),
+                    default_weight,
+                )
+                ongoing = ongoing_daily_alpha(weight_bps=slot_weight, daily_subnet_alpha=daily_subnet_alpha)
+            elif group_type == "coldkey":
+                reign_events = [e for e in data["events"] if e.king_version in reign_versions]
+                if reign_events:
+                    ongoing = sum(
+                        ongoing_daily_alpha(
+                            weight_bps=reign_weight.get(e.king_version, default_weight),
+                            daily_subnet_alpha=daily_subnet_alpha,
+                        )
+                        for e in reign_events
+                    )
+
             rows.append(
                 AlbedoCrownLeaderboardRow(
                     key=key,
@@ -746,6 +797,9 @@ def _build_repo_crown_analysis(
                     challenger_win_pct=(
                         round(challenger_wins / duel_count * 100, 1) if duel_count and group_type == "repo" else None
                     ),
+                    total_estimated_alpha=round(total_alpha, 4) if total_alpha > 0 else None,
+                    total_estimated_tao=round(total_tao, 6) if total_tao is not None else None,
+                    ongoing_daily_alpha=round(ongoing, 4) if ongoing and ongoing > 0 else None,
                     crown_events=sorted(data["events"], key=lambda e: e.king_version, reverse=True),
                 )
             )
@@ -760,9 +814,12 @@ def _build_repo_crown_analysis(
             "coronations": 0,
             "active_hours": 0.0,
             "slot_hours": 0.0,
+            "estimated_alpha": 0.0,
             "hotkeys": set(),
             "uids": set(),
             "last_crowned_at": None,
+            "in_reign": False,
+            "reign_weight_bps": 0,
         }
     )
     for event in events:
@@ -772,8 +829,12 @@ def _build_repo_crown_analysis(
         link["coronations"] += 1
         link["active_hours"] += event.active_hours or 0.0
         link["slot_hours"] += event.slot_hours or 0.0
+        link["estimated_alpha"] += event.estimated_alpha or 0.0
         link["hotkeys"].add(event.hotkey)
         link["uids"].add(event.uid)
+        if event.king_version in reign_versions:
+            link["in_reign"] = True
+            link["reign_weight_bps"] = reign_weight.get(event.king_version, default_weight)
         prev = link["last_crowned_at"]
         if prev is None or event.crowned_at > prev:
             link["last_crowned_at"] = event.crowned_at
@@ -782,6 +843,14 @@ def _build_repo_crown_analysis(
     for (repo, coldkey), stats in link_stats.items():
         hotkeys = sorted(stats["hotkeys"])
         uids = sorted(stats["uids"])
+        total_alpha = stats["estimated_alpha"]
+        total_tao = _alpha_to_tao(total_alpha, alpha_price)
+        link_ongoing = None
+        if stats["in_reign"]:
+            link_ongoing = ongoing_daily_alpha(
+                weight_bps=stats["reign_weight_bps"] or default_weight,
+                daily_subnet_alpha=daily_subnet_alpha,
+            )
         repo_coldkey_links.append(
             AlbedoRepoColdkeyLink(
                 repo=repo,
@@ -791,6 +860,9 @@ def _build_repo_crown_analysis(
                 coronations=stats["coronations"],
                 total_slot_hours=round(stats["slot_hours"], 1),
                 total_active_hours=round(stats["active_hours"], 1),
+                total_estimated_alpha=round(total_alpha, 4) if total_alpha > 0 else None,
+                total_estimated_tao=round(total_tao, 6) if total_tao is not None else None,
+                ongoing_daily_alpha=round(link_ongoing, 4) if link_ongoing and link_ongoing > 0 else None,
                 in_reign=(repo, coldkey) in reign_by_link,
                 last_crowned_at=stats["last_crowned_at"],
             )
@@ -803,13 +875,19 @@ def _build_repo_crown_analysis(
         row.key for row in crowns_by_repo if row.multi_owner
     )
     unique_coldkeys = {link.coldkey for link in repo_coldkey_links}
+    grand_alpha = sum(row.total_estimated_alpha or 0.0 for row in crowns_by_repo)
+    grand_tao = _alpha_to_tao(grand_alpha, alpha_price)
 
     analysis = AlbedoRepoCrownAnalysis(
+        reward_basis=basis,
         crowns_by_repo=crowns_by_repo,
+        crowns_by_coldkey=crowns_by_coldkey,
         repo_coldkey_links=repo_coldkey_links,
         multi_owner_repos=multi_owner_repos,
         total_repos_crowned=len(crowns_by_repo),
         total_unique_coldkeys=len(unique_coldkeys),
+        grand_total_estimated_alpha=round(grand_alpha, 4) if grand_alpha > 0 else None,
+        grand_total_estimated_tao=round(grand_tao, 6) if grand_tao is not None else None,
     )
     return analysis, crowns_by_coldkey
 
@@ -821,6 +899,7 @@ def build_analysis_overview(
     subnet: int = 97,
     source_url: str,
     miner_lookup: MinerLookup | None = None,
+    reward_basis: AlbedoRewardBasis | None = None,
 ) -> AlbedoAnalysisOverview:
     eval_runs: list[dict[str, Any]] = list(dashboard.get("eval_runs") or [])
     reign_members = [
@@ -952,7 +1031,7 @@ def build_analysis_overview(
     reign_slot_holders = _build_reign_slot_holders(reign_members, miner_lookup)
     king_tenures = _build_king_tenures(eval_runs, reign_members, king_history, updated_at, miner_lookup)
     repo_crown_analysis, crowns_by_coldkey = _build_repo_crown_analysis(
-        king_history, reign_members, updated_at, repo_duel_stats=repo_stats
+        king_history, reign_members, updated_at, repo_duel_stats=repo_stats, reward_basis=reward_basis
     )
     crowns_by_repo = repo_crown_analysis.crowns_by_repo
 
@@ -1052,10 +1131,15 @@ async def get_albedo_analysis_overview(
         state_payload = await fetch_state(settings=settings)
     except Exception:
         state_payload = None
+    try:
+        reward_basis = await fetch_crown_reward_basis(subnet, settings=settings)
+    except Exception:
+        reward_basis = AlbedoRewardBasis()
     return build_analysis_overview(
         dashboard,
         state=state_payload,
         subnet=subnet,
         source_url=source_url,
         miner_lookup=miner_lookup,
+        reward_basis=reward_basis,
     )

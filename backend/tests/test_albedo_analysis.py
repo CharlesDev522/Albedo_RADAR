@@ -220,3 +220,74 @@ def test_repo_crown_analysis_multi_owner_and_links():
     reign_link = next(link for link in analysis.repo_coldkey_links if link.coldkey == "ck_owner2")
     assert reign_link.in_reign is True
     assert reign_link.coronations == 1
+
+
+def test_repo_crown_reward_estimates_with_basis():
+    from app.schemas.albedo_analysis import AlbedoRewardBasis
+    from app.services.albedo_miner_lookup import MinerIdentity, MinerLookup
+
+    lookup = MinerLookup(
+        by_hotkey={
+            "hk_a": MinerIdentity(coldkey="ck1", repo="org/model-a", uid=1),
+        },
+        by_uid={1: MinerIdentity(coldkey="ck1", repo="org/model-a", uid=1)},
+    )
+    basis = AlbedoRewardBasis(
+        daily_subnet_alpha=240.0,
+        alpha_price_tao=0.05,
+        calculation_source="test",
+        default_weight_bps=2000,
+    )
+    dashboard = {
+        "updated_at": "2026-06-27T14:00:00+00:00",
+        "chain": {"judge_models": []},
+        "reign": {
+            "members": [
+                {
+                    "king_version": 1,
+                    "model_uri": "org/model-a@sha256:1",
+                    "hotkey": "hk_a",
+                    "uid": 1,
+                    "weight_bps": 2000,
+                },
+            ]
+        },
+        "current_eval": None,
+        "queue": [],
+        "eval_runs": [
+            {
+                "eval_run_id": "c1",
+                "challenger_won": True,
+                "coronated": True,
+                "king_version": 1,
+                "score_challenger": 0.6,
+                "score_king": 0.4,
+                "win_margin": 0.2,
+                "finished_at": "2026-06-27T10:00:00+00:00",
+                "model_uri": "org/model-a@sha256:1",
+                "hotkey": "hk_a",
+                "uid": 1,
+                "score_breakdown": {"by_judge": {}, "by_metric": {}},
+                "king": {"king_version": 0, "model_uri": "org/other@sha256:0", "uid": 99, "hotkey": "hk_old"},
+            },
+        ],
+    }
+
+    overview = build_analysis_overview(
+        dashboard,
+        subnet=97,
+        source_url="https://example.com/dashboard.json",
+        miner_lookup=lookup,
+        reward_basis=basis,
+    )
+
+    analysis = overview.repo_crown_analysis
+    assert analysis.reward_basis.daily_subnet_alpha == 240.0
+    repo_row = analysis.crowns_by_repo[0]
+    assert repo_row.total_estimated_alpha is not None
+    assert repo_row.total_estimated_alpha > 0
+    assert repo_row.total_estimated_tao is not None
+    assert repo_row.ongoing_daily_alpha == 48.0  # 20% of 240
+    coldkey_row = analysis.crowns_by_coldkey[0]
+    assert coldkey_row.total_estimated_alpha == repo_row.total_estimated_alpha
+    assert analysis.grand_total_estimated_alpha == repo_row.total_estimated_alpha

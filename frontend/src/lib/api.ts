@@ -526,12 +526,26 @@ export interface AlbedoCrownEvent {
   slot_until?: string | null;
   active_hours?: number | null;
   slot_hours?: number | null;
+  weight_bps?: number;
+  estimated_alpha?: number | null;
+  estimated_tao?: number | null;
   repo?: string | null;
   coldkey?: string | null;
   hotkey: string;
   uid: number;
   model_name: string;
   is_current_king: boolean;
+}
+
+export interface AlbedoRewardBasis {
+  daily_subnet_alpha: number;
+  alpha_price_tao?: number | null;
+  tao_price_usd?: number | null;
+  daily_subnet_tao?: number | null;
+  daily_subnet_usd?: number | null;
+  calculation_source: string;
+  default_weight_bps: number;
+  note: string;
 }
 
 export interface AlbedoCrownLeaderboardRow {
@@ -551,6 +565,9 @@ export interface AlbedoCrownLeaderboardRow {
   duel_count: number;
   challenger_wins: number;
   challenger_win_pct?: number | null;
+  total_estimated_alpha?: number | null;
+  total_estimated_tao?: number | null;
+  ongoing_daily_alpha?: number | null;
   crown_events: AlbedoCrownEvent[];
 }
 
@@ -562,16 +579,23 @@ export interface AlbedoRepoColdkeyLink {
   coronations: number;
   total_slot_hours: number;
   total_active_hours: number;
+  total_estimated_alpha?: number | null;
+  total_estimated_tao?: number | null;
+  ongoing_daily_alpha?: number | null;
   in_reign: boolean;
   last_crowned_at?: string | null;
 }
 
 export interface AlbedoRepoCrownAnalysis {
+  reward_basis: AlbedoRewardBasis;
   crowns_by_repo: AlbedoCrownLeaderboardRow[];
+  crowns_by_coldkey: AlbedoCrownLeaderboardRow[];
   repo_coldkey_links: AlbedoRepoColdkeyLink[];
   multi_owner_repos: string[];
   total_repos_crowned: number;
   total_unique_coldkeys: number;
+  grand_total_estimated_alpha?: number | null;
+  grand_total_estimated_tao?: number | null;
 }
 
 export interface AlbedoAnalysisOverview {

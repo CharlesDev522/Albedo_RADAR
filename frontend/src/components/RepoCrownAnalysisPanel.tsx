@@ -16,9 +16,33 @@ type SortKey =
   | "weight"
   | "win_pct"
   | "owners"
+  | "total_alpha"
+  | "total_tao"
+  | "ongoing_daily"
   | "name";
 
-type LinkSortKey = "coronations" | "slot_hours" | "active_hours" | "repo" | "coldkey";
+type LinkSortKey =
+  | "coronations"
+  | "slot_hours"
+  | "active_hours"
+  | "total_alpha"
+  | "total_tao"
+  | "repo"
+  | "coldkey";
+
+function fmtAlpha(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n) || n <= 0) return "—";
+  if (n >= 100) return `${n.toFixed(1)} α`;
+  if (n >= 1) return `${n.toFixed(2)} α`;
+  return `${n.toFixed(4)} α`;
+}
+
+function fmtTao(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n) || n <= 0) return "—";
+  if (n >= 10) return `${n.toFixed(2)} τ`;
+  if (n >= 0.01) return `${n.toFixed(4)} τ`;
+  return `${n.toFixed(6)} τ`;
+}
 
 function fmtPct(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
@@ -64,6 +88,15 @@ function sortRepos(rows: AlbedoCrownLeaderboardRow[], sortBy: SortKey, desc: boo
       case "owners":
         cmp = a.owner_count - b.owner_count;
         break;
+      case "total_alpha":
+        cmp = (a.total_estimated_alpha ?? -1) - (b.total_estimated_alpha ?? -1);
+        break;
+      case "total_tao":
+        cmp = (a.total_estimated_tao ?? -1) - (b.total_estimated_tao ?? -1);
+        break;
+      case "ongoing_daily":
+        cmp = (a.ongoing_daily_alpha ?? -1) - (b.ongoing_daily_alpha ?? -1);
+        break;
       case "name":
         cmp = a.label.localeCompare(b.label);
         break;
@@ -86,6 +119,12 @@ function sortLinks(rows: AlbedoRepoColdkeyLink[], sortBy: LinkSortKey, desc: boo
       case "active_hours":
         cmp = a.total_active_hours - b.total_active_hours;
         break;
+      case "total_alpha":
+        cmp = (a.total_estimated_alpha ?? -1) - (b.total_estimated_alpha ?? -1);
+        break;
+      case "total_tao":
+        cmp = (a.total_estimated_tao ?? -1) - (b.total_estimated_tao ?? -1);
+        break;
       case "repo":
         cmp = a.repo.localeCompare(b.repo);
         break;
@@ -105,20 +144,25 @@ export default function RepoCrownAnalysisPanel({
   analysis: AlbedoRepoCrownAnalysis;
   compact?: boolean;
 }) {
-  const [sortBy, setSortBy] = useState<SortKey>("coronations");
+  const [sortBy, setSortBy] = useState<SortKey>("total_alpha");
   const [sortDesc, setSortDesc] = useState(true);
-  const [linkSortBy, setLinkSortBy] = useState<LinkSortKey>("coronations");
+  const [linkSortBy, setLinkSortBy] = useState<LinkSortKey>("total_alpha");
   const [linkSortDesc, setLinkSortDesc] = useState(true);
   const [search, setSearch] = useState("");
   const [multiOwnerOnly, setMultiOwnerOnly] = useState(false);
   const [inReignOnly, setInReignOnly] = useState(false);
   const [minCrowns, setMinCrowns] = useState(1);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [view, setView] = useState<"repos" | "links">("repos");
+  const [view, setView] = useState<"repos" | "coldkeys" | "links">("repos");
+
+  const activeRows = useMemo(() => {
+    if (view === "coldkeys") return analysis.crowns_by_coldkey ?? [];
+    return analysis.crowns_by_repo ?? [];
+  }, [view, analysis.crowns_by_coldkey, analysis.crowns_by_repo]);
 
   const filteredRepos = useMemo(() => {
     const q = search.trim().toLowerCase();
-    let rows = analysis.crowns_by_repo ?? [];
+    let rows = activeRows;
     if (multiOwnerOnly) rows = rows.filter((r) => r.multi_owner);
     if (minCrowns > 1) rows = rows.filter((r) => r.coronations >= minCrowns);
     if (inReignOnly) rows = rows.filter((r) => r.reign_slots > 0 || r.current_weight_pct > 0);
@@ -131,7 +175,7 @@ export default function RepoCrownAnalysisPanel({
       );
     }
     return sortRepos(rows, sortBy, sortDesc);
-  }, [analysis.crowns_by_repo, search, multiOwnerOnly, minCrowns, inReignOnly, sortBy, sortDesc]);
+  }, [activeRows, search, multiOwnerOnly, minCrowns, inReignOnly, sortBy, sortDesc]);
 
   const filteredLinks = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -159,6 +203,14 @@ export default function RepoCrownAnalysisPanel({
     });
   }
 
+  const basis = analysis.reward_basis ?? {
+    daily_subnet_alpha: 0,
+    calculation_source: "unavailable",
+    default_weight_bps: 2000,
+    note: "",
+  };
+  const hasRewards = (analysis.grand_total_estimated_alpha ?? 0) > 0;
+
   if (!analysis.crowns_by_repo?.length) {
     return (
       <section className="panel px-3 py-2">
@@ -172,19 +224,35 @@ export default function RepoCrownAnalysisPanel({
     <section className="panel px-3 py-2 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="text-[11px] font-semibold text-zinc-200">Crown analysis by repo</h3>
+          <h3 className="text-[11px] font-semibold text-zinc-200">Crown rewards by repo / coldkey</h3>
           <p className="text-[9px] text-zinc-600 mt-0.5">
-            {analysis.total_repos_crowned} repos crowned · {analysis.total_unique_coldkeys} coldkeys ·{" "}
-            {analysis.multi_owner_repos.length} multi-owner repos
+            {analysis.total_repos_crowned} repos · {analysis.total_unique_coldkeys} coldkeys ·{" "}
+            {analysis.multi_owner_repos.length} multi-owner
+            {hasRewards && (
+              <>
+                {" "}
+                · total <span className="text-violet-300 mono">{fmtAlpha(analysis.grand_total_estimated_alpha)}</span>
+                {analysis.grand_total_estimated_tao != null && (
+                  <span className="text-amber-300 mono"> ({fmtTao(analysis.grand_total_estimated_tao)})</span>
+                )}
+              </>
+            )}
           </p>
         </div>
-        <div className="flex gap-1 text-[9px]">
+        <div className="flex flex-wrap gap-1 text-[9px]">
           <button
             type="button"
             onClick={() => setView("repos")}
             className={`px-2 py-1 rounded border ${view === "repos" ? "border-amber-500/50 bg-amber-500/15 text-amber-100" : "border-zinc-700 text-zinc-500"}`}
           >
             By repo
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("coldkeys")}
+            className={`px-2 py-1 rounded border ${view === "coldkeys" ? "border-violet-500/50 bg-violet-500/15 text-violet-100" : "border-zinc-700 text-zinc-500"}`}
+          >
+            By coldkey
           </button>
           <button
             type="button"
@@ -195,6 +263,17 @@ export default function RepoCrownAnalysisPanel({
           </button>
         </div>
       </div>
+
+      {basis && (
+        <div className="rounded border border-zinc-800 bg-zinc-950/50 px-2 py-1.5 text-[9px] text-zinc-500">
+          <span className="text-zinc-400">Reward basis ({basis.calculation_source}): </span>
+          subnet <span className="mono text-violet-300">{fmtAlpha(basis.daily_subnet_alpha)}</span>/day
+          {basis.daily_subnet_tao != null && (
+            <span className="mono text-amber-300"> · {fmtTao(basis.daily_subnet_tao)}/day</span>
+          )}
+          <span className="text-zinc-600"> · {basis.note}</span>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 text-[9px]">
         <input
@@ -238,17 +317,20 @@ export default function RepoCrownAnalysisPanel({
         </label>
       </div>
 
-      {view === "repos" && (
+      {(view === "repos" || view === "coldkeys") && (
         <>
           <div className="flex flex-wrap gap-1 text-[9px]">
             {(
               [
+                ["total_alpha", "Total α"],
+                ["total_tao", "Total τ"],
+                ["ongoing_daily", "Daily α"],
                 ["coronations", "Crowns"],
                 ["slot_hours", "Slot hrs"],
                 ["active_hours", "Active hrs"],
                 ["weight", "Weight"],
                 ["win_pct", "Win %"],
-                ["owners", "Owners"],
+                ["owners", view === "coldkeys" ? "Repos" : "Owners"],
                 ["name", "Name"],
               ] as const
             ).map(([key, label]) => (
@@ -279,20 +361,22 @@ export default function RepoCrownAnalysisPanel({
               <thead>
                 <tr className="text-zinc-500 border-b border-zinc-800">
                   <th className="text-left py-1 pr-2 w-6" />
-                  <th className="text-left py-1 pr-2">Repo</th>
+                  <th className="text-left py-1 pr-2">{view === "coldkeys" ? "Coldkey" : "Repo"}</th>
+                  <th className="text-right py-1 px-1">Total α</th>
+                  <th className="text-right py-1 px-1">Total τ</th>
+                  <th className="text-right py-1 px-1">Daily α</th>
                   <th className="text-right py-1 px-1">👑</th>
-                  <th className="text-right py-1 px-1">Owners</th>
-                  <th className="text-right py-1 px-1">Active</th>
                   <th className="text-right py-1 px-1">Slot</th>
                   <th className="text-right py-1 px-1">Weight</th>
-                  <th className="text-right py-1 px-1">Duels</th>
-                  <th className="text-right py-1 pl-1">Win %</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredRepos.slice(0, displayLimit).map((row) => {
                   const isOpen = expanded.has(row.key);
-                  const linksForRepo = (analysis.repo_coldkey_links ?? []).filter((l) => l.repo === row.key);
+                  const linksForRepo =
+                    view === "repos"
+                      ? (analysis.repo_coldkey_links ?? []).filter((l) => l.repo === row.key)
+                      : (analysis.repo_coldkey_links ?? []).filter((l) => l.coldkey === row.key);
                   return (
                     <Fragment key={row.key}>
                       <tr
@@ -302,61 +386,58 @@ export default function RepoCrownAnalysisPanel({
                         <td className="py-1.5 pr-1 text-zinc-600">{isOpen ? "▼" : "▶"}</td>
                         <td className="py-1.5 pr-2">
                           <p className="text-zinc-200 truncate max-w-[200px]" title={row.label}>
-                            {shortRepo(row.label, 34)}
+                            {view === "coldkeys" ? shortAddr(row.label, 10) : shortRepo(row.label, 34)}
                           </p>
-                          {row.multi_owner && (
+                          {view === "repos" && row.multi_owner && (
                             <span className="inline-block mt-0.5 text-[8px] px-1 rounded border border-sky-500/40 text-sky-300 bg-sky-500/10">
                               {row.owner_count} coldkeys
                             </span>
                           )}
-                          {row.crown_events[0] && (
-                            <p className="text-[9px] text-zinc-600 mt-0.5">
-                              last v{row.crown_events[0].king_version} · {fmtTime(row.crown_events[0].crowned_at)}
-                            </p>
+                          {view === "coldkeys" && row.owner_count > 1 && (
+                            <span className="inline-block mt-0.5 text-[8px] px-1 rounded border border-violet-500/40 text-violet-300 bg-violet-500/10">
+                              {row.owner_count} repos
+                            </span>
                           )}
                         </td>
-                        <td className="text-right py-1.5 px-1 mono text-amber-300">{row.coronations}</td>
-                        <td className={`text-right py-1.5 px-1 mono ${row.multi_owner ? "text-sky-300" : "text-zinc-400"}`}>
-                          {row.owner_count || "—"}
-                        </td>
-                        <td className="text-right py-1.5 px-1 mono text-zinc-400">{fmtHours(row.total_active_hours)}</td>
-                        <td className="text-right py-1.5 px-1 mono text-emerald-300">{fmtHours(row.total_slot_hours)}</td>
+                        <td className="text-right py-1.5 px-1 mono text-violet-300">{fmtAlpha(row.total_estimated_alpha)}</td>
+                        <td className="text-right py-1.5 px-1 mono text-amber-300">{fmtTao(row.total_estimated_tao)}</td>
+                        <td className="text-right py-1.5 px-1 mono text-emerald-300">{fmtAlpha(row.ongoing_daily_alpha)}</td>
+                        <td className="text-right py-1.5 px-1 mono text-zinc-400">{row.coronations}</td>
+                        <td className="text-right py-1.5 px-1 mono text-zinc-500">{fmtHours(row.total_slot_hours)}</td>
                         <td className="text-right py-1.5 px-1 mono text-zinc-500">
                           {row.current_weight_pct > 0 ? fmtPct(row.current_weight_pct) : "—"}
                         </td>
-                        <td className="text-right py-1.5 px-1 mono text-zinc-500">{row.duel_count || "—"}</td>
-                        <td className="text-right py-1.5 pl-1 mono text-zinc-400">{fmtPct(row.challenger_win_pct)}</td>
                       </tr>
                       {isOpen && (
                         <tr className="border-b border-zinc-800/30 bg-zinc-900/40">
-                          <td colSpan={9} className="py-2 px-3">
+                          <td colSpan={8} className="py-2 px-3">
                             <div className="grid sm:grid-cols-2 gap-3 text-[9px]">
                               <div>
-                                <p className="text-zinc-500 mb-1">Coldkeys ({linksForRepo.length})</p>
+                                <p className="text-zinc-500 mb-1">
+                                  {view === "repos" ? `Coldkeys (${linksForRepo.length})` : `Repos (${linksForRepo.length})`}
+                                </p>
                                 <ul className="space-y-1">
                                   {linksForRepo.map((link) => (
-                                    <li key={link.coldkey} className="flex justify-between gap-2">
-                                      <span className="text-zinc-300" title={link.coldkey}>
-                                        {shortAddr(link.coldkey, 8)}
-                                        {link.in_reign && (
-                                          <span className="ml-1 text-amber-400">reign</span>
-                                        )}
+                                    <li key={`${link.repo}:${link.coldkey}`} className="flex justify-between gap-2">
+                                      <span className="text-zinc-300" title={view === "repos" ? link.coldkey : link.repo}>
+                                        {view === "repos" ? shortAddr(link.coldkey, 8) : shortRepo(link.repo, 22)}
+                                        {link.in_reign && <span className="ml-1 text-amber-400">reign</span>}
                                       </span>
                                       <span className="mono text-zinc-500">
-                                        {link.coronations}👑 · {fmtHours(link.total_slot_hours)}
+                                        {fmtAlpha(link.total_estimated_alpha)}
+                                        {link.ongoing_daily_alpha ? ` · ${fmtAlpha(link.ongoing_daily_alpha)}/d` : ""}
                                       </span>
                                     </li>
                                   ))}
                                 </ul>
                               </div>
                               <div>
-                                <p className="text-zinc-500 mb-1">Hotkeys / UIDs</p>
-                                <p className="text-zinc-400 mono">
-                                  uids: {row.uids.join(", ") || "—"}
-                                </p>
-                                <p className="text-zinc-500 mono mt-1 truncate" title={row.hotkeys.join(", ")}>
-                                  {row.hotkeys.map((hk) => shortAddr(hk, 6)).join(" · ") || "—"}
-                                </p>
+                                <p className="text-zinc-500 mb-1">Crown history</p>
+                                {(row.crown_events ?? []).slice(0, 4).map((ev) => (
+                                  <p key={ev.king_version} className="mono text-zinc-500">
+                                    v{ev.king_version} · {fmtAlpha(ev.estimated_alpha)} · {fmtHours(ev.slot_hours ?? 0)}
+                                  </p>
+                                ))}
                               </div>
                             </div>
                           </td>
@@ -370,7 +451,7 @@ export default function RepoCrownAnalysisPanel({
           </div>
           {filteredRepos.length > displayLimit && (
             <p className="text-[9px] text-zinc-600">
-              Showing {displayLimit} of {filteredRepos.length} repos — refine filters to narrow
+              Showing {displayLimit} of {filteredRepos.length} {view === "coldkeys" ? "coldkeys" : "repos"}
             </p>
           )}
         </>
@@ -381,6 +462,8 @@ export default function RepoCrownAnalysisPanel({
           <div className="flex flex-wrap gap-1 text-[9px]">
             {(
               [
+                ["total_alpha", "Total α"],
+                ["total_tao", "Total τ"],
                 ["coronations", "Crowns"],
                 ["slot_hours", "Slot hrs"],
                 ["active_hours", "Active hrs"],
@@ -416,8 +499,9 @@ export default function RepoCrownAnalysisPanel({
                 <tr className="text-zinc-500 border-b border-zinc-800">
                   <th className="text-left py-1 pr-2">Repo</th>
                   <th className="text-left py-1 pr-2">Coldkey</th>
+                  <th className="text-right py-1 px-1">Total α</th>
+                  <th className="text-right py-1 px-1">Daily α</th>
                   <th className="text-right py-1 px-1">👑</th>
-                  <th className="text-right py-1 px-1">Active</th>
                   <th className="text-right py-1 px-1">Slot</th>
                   <th className="text-left py-1 pl-2">Last crowned</th>
                 </tr>
@@ -432,9 +516,10 @@ export default function RepoCrownAnalysisPanel({
                       {shortAddr(link.coldkey, 8)}
                       {link.in_reign && <span className="ml-1 text-[8px] text-amber-400">reign</span>}
                     </td>
-                    <td className="text-right py-1 px-1 mono text-amber-300">{link.coronations}</td>
-                    <td className="text-right py-1 px-1 mono text-zinc-400">{fmtHours(link.total_active_hours)}</td>
-                    <td className="text-right py-1 px-1 mono text-emerald-300">{fmtHours(link.total_slot_hours)}</td>
+                    <td className="text-right py-1 px-1 mono text-violet-300">{fmtAlpha(link.total_estimated_alpha)}</td>
+                    <td className="text-right py-1 px-1 mono text-emerald-300">{fmtAlpha(link.ongoing_daily_alpha)}</td>
+                    <td className="text-right py-1 px-1 mono text-zinc-400">{link.coronations}</td>
+                    <td className="text-right py-1 px-1 mono text-zinc-500">{fmtHours(link.total_slot_hours)}</td>
                     <td className="py-1 pl-2 text-zinc-500">{fmtTime(link.last_crowned_at)}</td>
                   </tr>
                 ))}
