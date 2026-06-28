@@ -9,7 +9,9 @@ from app.config import get_settings
 from app.db.models import MinerCommitment
 from app.db.session import get_db
 from app.schemas.albedo_analysis import AlbedoAnalysisOverview
+from app.schemas.albedo_live import AlbedoLiveDuel
 from app.services.albedo_analysis_service import get_albedo_analysis_overview
+from app.services.albedo_live_duel_service import get_live_duel
 from app.services.albedo_miner_lookup import build_miner_lookup
 
 router = APIRouter(prefix="/albedo", tags=["albedo"])
@@ -43,4 +45,23 @@ async def albedo_analysis_overview(
         raise HTTPException(
             status_code=502,
             detail=f"Failed to fetch Albedo dashboard: {exc}",
+        ) from exc
+
+
+@router.get("/live-duel", response_model=AlbedoLiveDuel)
+async def albedo_live_duel(
+    subnet: int = Query(default=97, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> AlbedoLiveDuel:
+    """Lightweight snapshot of the active duel / pipeline (poll-friendly)."""
+    if subnet != 97:
+        raise HTTPException(status_code=400, detail="Albedo live duel is only available for SN97")
+    settings = get_settings()
+    try:
+        lookup = await _load_miner_lookup(db, subnet)
+        return await get_live_duel(subnet, settings=settings, miner_lookup=lookup)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to fetch Albedo live duel: {exc}",
         ) from exc

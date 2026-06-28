@@ -465,13 +465,6 @@ export default function AlbedoDuelPanel() {
           )}
         </div>
 
-        {data.current_eval && (
-          <div className="mt-2.5 rounded border border-sky-500/25 bg-sky-500/5 px-2.5 py-1.5 text-[10px] text-zinc-400">
-            <span className="text-sky-300 font-medium">Live eval</span> {data.current_eval.state} ·{" "}
-            {shortRepo(`${data.current_eval.namespace}/${data.current_eval.model_name}`, 28)} · uid{" "}
-            {data.current_eval.uid}
-          </div>
-        )}
       </section>
 
       {section === "overview" && (

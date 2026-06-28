@@ -280,6 +280,39 @@ export interface RepoActivityEvent {
   meta: Record<string, unknown>;
 }
 
+export interface AlbedoLiveDuelParticipant {
+  uid?: number | null;
+  hotkey?: string | null;
+  repo?: string | null;
+  model_name?: string | null;
+  namespace?: string | null;
+  model_uri?: string | null;
+  king_version?: number | null;
+}
+
+export interface AlbedoLiveDuel {
+  subnet: number;
+  is_active: boolean;
+  status: string;
+  phase_label: string;
+  eval_run_id?: string | null;
+  submission_id?: string | null;
+  pipeline_stage?: string | null;
+  pipeline_detail?: string | null;
+  challenger?: AlbedoLiveDuelParticipant | null;
+  king?: AlbedoLiveDuelParticipant | null;
+  progress_pct?: number | null;
+  sample_count?: number | null;
+  generated_sample_count?: number | null;
+  started_at?: string | null;
+  elapsed_seconds?: number | null;
+  eval_queue_depth: number;
+  pipeline_counts: Record<string, { running: number; queued: number }>;
+  dashboard_url: string;
+  updated_at?: string | null;
+  note: string;
+}
+
 export interface AlbedoReignMember {
   king_version: number;
   model_uri: string;
@@ -626,6 +659,8 @@ export const api = {
   },
   getAlbedoAnalysis: (subnet = DEFAULT_SUBNET) =>
     fetchApi<AlbedoAnalysisOverview>(`/albedo/analysis?subnet=${subnet}`),
+  getAlbedoLiveDuel: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<AlbedoLiveDuel>(`/albedo/live-duel?subnet=${subnet}`),
 };
 
 export function hippiusModelUrl(repo: string, branch = "main"): string {

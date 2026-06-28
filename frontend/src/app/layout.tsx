@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { IBM_Plex_Mono, Inter } from "next/font/google";
 import HeaderBar from "@/components/HeaderBar";
+import LiveDuelBanner from "@/components/LiveDuelBanner";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans text-[12px] leading-relaxed">
         <Suspense fallback={null}>
           <HeaderBar />
+          <LiveDuelBanner />
         </Suspense>
         <main className="max-w-[1400px] mx-auto px-3 py-3">{children}</main>
       </body>
