@@ -10,11 +10,13 @@ from app.db.models import HippiusRepoRevision, HippiusRepoTrack, RepoActivityEve
 from app.db.session import get_db
 from app.processing.repo_track_builder import RepoTrackBuilder
 from app.schemas.repo_activity import (
+    PriorityMinerStatus,
     RepoActivityEventResponse,
     RepoActivityOverview,
     RepoRevisionResponse,
     RepoTrackEntry,
 )
+from app.services.priority_miner_service import build_priority_miner_status
 from app.services.repo_activity_service import merged_repo_tracks
 
 router = APIRouter(prefix="/repo-activity", tags=["repo-activity"])
@@ -76,6 +78,7 @@ async def repo_activity_overview(
         huggingface_count=sum(1 for t in merged if t.repo_host == "huggingface"),
         pending_hub_poll=sum(1 for t in merged if t.pending_hub_poll),
         hub_watch_count=sum(1 for t in merged if t.track_source == "hub_watch"),
+        priority_miner_count=sum(1 for t in merged if t.track_source == "priority_miner"),
         slot_only_count=sum(1 for t in merged if t.track_source == "slot"),
         chain_committed_count=sum(
             1 for t in merged if t.track_source == "commitment" or t.chain_digest
@@ -126,3 +129,12 @@ async def repo_revision_history(
     )
     rows = (await db.execute(q)).scalars().all()
     return [RepoRevisionResponse.model_validate(r) for r in rows]
+
+
+@router.get("/priority-miners", response_model=list[PriorityMinerStatus])
+async def priority_miner_status(
+    subnet: int = Query(default=97, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> list[PriorityMinerStatus]:
+    """Top miner namespaces with dual Hippius + Hugging Face repo tracking."""
+    return await build_priority_miner_status(db, subnet)

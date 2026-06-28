@@ -91,6 +91,43 @@ class HuggingFaceRegistryClient:
             return None
         return _parse_revision(repo, sha, data)
 
+    async def list_author_models(
+        self,
+        author: str,
+        *,
+        limit: int = 100,
+        client: httpx.AsyncClient | None = None,
+    ) -> list[str]:
+        url = f"{self.base_url}/models"
+        params = {"author": author, "limit": str(limit)}
+        resp = await self._request("GET", url, client=client, params=params)
+        data = resp.json()
+        if not isinstance(data, list):
+            return []
+        repos: list[str] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            model_id = item.get("modelId") or item.get("id")
+            if isinstance(model_id, str) and "/" in model_id:
+                repos.append(model_id)
+        return repos
+
+    async def list_commits(
+        self,
+        repo: str,
+        revision: str | None = None,
+        *,
+        limit: int = 5,
+        client: httpx.AsyncClient | None = None,
+    ) -> list[dict[str, Any]]:
+        rev = revision or "main"
+        url = f"{self.base_url}/models/{repo}/commits/{rev}"
+        params = {"limit": str(limit)}
+        resp = await self._request("GET", url, client=client, params=params)
+        data = resp.json()
+        return data if isinstance(data, list) else []
+
     async def _request(
         self,
         method: str,

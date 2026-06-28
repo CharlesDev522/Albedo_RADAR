@@ -234,8 +234,37 @@ export interface RepoActivityOverview {
   huggingface_count: number;
   pending_hub_poll: number;
   hub_watch_count?: number;
+  priority_miner_count?: number;
   slot_only_count?: number;
   chain_committed_count?: number;
+}
+
+export interface PriorityMinerRepoStatus {
+  repo: string;
+  model_family?: string | null;
+  hippius_tracked: boolean;
+  hippius_digest?: string | null;
+  hippius_updated_at?: string | null;
+  hippius_commit_message?: string | null;
+  hippius_pending: boolean;
+  huggingface_tracked: boolean;
+  huggingface_digest?: string | null;
+  huggingface_updated_at?: string | null;
+  huggingface_commit_message?: string | null;
+  huggingface_pending: boolean;
+  huggingface_exists: boolean;
+  last_event_type?: string | null;
+  last_event_at?: string | null;
+}
+
+export interface PriorityMinerStatus {
+  namespace: string;
+  discovered_repos: number;
+  hippius_tracked_count: number;
+  huggingface_tracked_count: number;
+  updates_24h: number;
+  last_activity_at?: string | null;
+  repos: PriorityMinerRepoStatus[];
 }
 
 export interface RepoTrackEntry {
@@ -718,6 +747,8 @@ export const api = {
     if (opts?.limit) params.set("limit", String(opts.limit));
     return fetchApi<RepoActivityEvent[]>(`/repo-activity/feed?${params}`);
   },
+  getPriorityMiners: (subnet = DEFAULT_SUBNET) =>
+    fetchApi<PriorityMinerStatus[]>(`/repo-activity/priority-miners?subnet=${subnet}`),
   syncRepoActivity: async (subnet = DEFAULT_SUBNET) => {
     const res = await fetch(`${apiBase()}/repo-activity/sync?subnet=${subnet}`, {
       method: "POST",

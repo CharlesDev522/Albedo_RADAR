@@ -94,10 +94,11 @@ class ModelRegistryClient:
         *,
         client: httpx.AsyncClient | None = None,
         preferred_host: RepoHost | None = None,
+        host_only: bool = False,
     ) -> RemoteRepoSnapshot | None:
         if preferred_host:
             snapshot = await self._fetch_host(repo, chain_digest, preferred_host, client)
-            if snapshot is not None:
+            if snapshot is not None or host_only:
                 return snapshot
         primary = infer_repo_host(chain_digest)
         snapshot = await self._fetch_host(repo, chain_digest, primary, client)
@@ -137,12 +138,22 @@ class ModelRegistryClient:
             hf = await self.huggingface.fetch_revision(repo, rev, client=client)
             if hf is None:
                 return None
+            commit_message = hf.commit_message
+            try:
+                commits = await self.huggingface.list_commits(repo, rev, limit=1, client=client)
+                if commits:
+                    latest = commits[0]
+                    title = latest.get("title")
+                    if isinstance(title, str) and title.strip():
+                        commit_message = title.strip()
+            except httpx.HTTPStatusError:
+                pass
             return RemoteRepoSnapshot(
                 repo=repo,
                 host="huggingface",
                 revision=hf.revision,
                 remote_digest=hf.commit_sha,
-                commit_message=hf.commit_message,
+                commit_message=commit_message,
                 created_at=hf.created_at,
                 files=tuple(
                     RemoteRepoFile(name=f.name, digest=f.digest, size=f.size) for f in hf.files

@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import PriorityMinersPanel from "@/components/PriorityMinersPanel";
 import {
   api,
   hfModelUrl,
@@ -9,6 +10,7 @@ import {
   shortAddr,
   shortHash,
   shortRepo,
+  type PriorityMinerStatus,
   type RepoActivityEvent,
   type RepoActivityOverview,
   type RepoTrackEntry,
@@ -97,6 +99,8 @@ function trackSourceLabel(source: string | null | undefined): string | null {
       return "slot · hub pending";
     case "hub_poll":
       return "hub polled";
+    case "priority_miner":
+      return "priority watch";
     case "commitment":
       return "on-chain";
     default:
@@ -114,6 +118,8 @@ function trackSourceColor(source: string | null | undefined): string {
       return "text-lime-300 border-lime-500/30 bg-lime-500/10";
     case "hub_poll":
       return "text-sky-300 border-sky-500/30 bg-sky-500/10";
+    case "priority_miner":
+      return "text-fuchsia-300 border-fuchsia-500/30 bg-fuchsia-500/10";
     default:
       return "text-zinc-400 border-zinc-600 bg-zinc-800/30";
   }
@@ -122,6 +128,7 @@ function trackSourceColor(source: string | null | undefined): string {
 export default function RepoActivityPanel() {
   const { subnet } = useSubnet();
   const [overview, setOverview] = useState<RepoActivityOverview | null>(null);
+  const [priorityMiners, setPriorityMiners] = useState<PriorityMinerStatus[]>([]);
   const [tracks, setTracks] = useState<RepoTrackEntry[]>([]);
   const [feed, setFeed] = useState<RepoActivityEvent[]>([]);
   const [family, setFamily] = useState<FamilyFilter>("all");
@@ -137,14 +144,16 @@ export default function RepoActivityPanel() {
 
   const refresh = useCallback(async () => {
     try {
-      const [ov, tr, fd] = await Promise.all([
+      const [ov, tr, fd, pm] = await Promise.all([
         api.getRepoActivityOverview(subnet),
         api.getRepoTracks(subnet, familyParam),
         api.getRepoActivityFeed(subnet, { family: familyParam, limit: 60 }),
+        api.getPriorityMiners(subnet),
       ]);
       setOverview(ov);
       setTracks(tr);
       setFeed(fd);
+      setPriorityMiners(pm);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load repo activity");
@@ -299,8 +308,9 @@ export default function RepoActivityPanel() {
       </div>
 
       {overview && overview.tracked_miners > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-12 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-13 gap-2">
           <Kpi label="repos tracked" value={String(overview.tracked_miners)} />
+          <Kpi label="priority" value={String(overview.priority_miner_count ?? 0)} accent="text-fuchsia-300" />
           <Kpi label="slot only" value={String(overview.slot_only_count ?? 0)} accent="text-amber-300" />
           <Kpi label="on-chain" value={String(overview.chain_committed_count ?? 0)} accent="text-lime-300" />
           <Kpi label="hub watches" value={String(overview.hub_watch_count ?? 0)} accent="text-violet-300" />
@@ -314,6 +324,8 @@ export default function RepoActivityPanel() {
           <Kpi label="hub 24h" value={String(overview.hub_updates_24h)} accent="text-sky-300" />
         </div>
       )}
+
+      <PriorityMinersPanel miners={priorityMiners} loading={loading} />
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
         <section className="panel xl:col-span-5">

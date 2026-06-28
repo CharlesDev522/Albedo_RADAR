@@ -71,6 +71,7 @@ class RepoActivityOverview(BaseModel):
     huggingface_count: int = 0
     pending_hub_poll: int = 0
     hub_watch_count: int = 0
+    priority_miner_count: int = 0
     slot_only_count: int = 0
     chain_committed_count: int = 0
 
@@ -88,3 +89,31 @@ class RepoRevisionResponse(BaseModel):
     total_bytes: int
     changed_files: list[dict[str, Any]] = Field(default_factory=list)
     detected_at: datetime
+
+
+class PriorityMinerRepoStatus(BaseModel):
+    repo: str
+    model_family: str | None = None
+    hippius_tracked: bool = False
+    hippius_digest: str | None = None
+    hippius_updated_at: datetime | None = None
+    hippius_commit_message: str | None = None
+    hippius_pending: bool = True
+    huggingface_tracked: bool = False
+    huggingface_digest: str | None = None
+    huggingface_updated_at: datetime | None = None
+    huggingface_commit_message: str | None = None
+    huggingface_pending: bool = True
+    huggingface_exists: bool = False
+    last_event_type: str | None = None
+    last_event_at: datetime | None = None
+
+
+class PriorityMinerStatus(BaseModel):
+    namespace: str
+    discovered_repos: int = 0
+    hippius_tracked_count: int = 0
+    huggingface_tracked_count: int = 0
+    updates_24h: int = 0
+    last_activity_at: datetime | None = None
+    repos: list[PriorityMinerRepoStatus] = Field(default_factory=list)

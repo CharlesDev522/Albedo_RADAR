@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chain_reader.albedo_model_family import infer_albedo_model_family, repo_from_slot_detail
 from app.db.models import HippiusRepoTrack, MinerCommitment, MinerSlotStatus
 from app.integrations.model_registry import infer_repo_host, remote_digests_match
-from app.processing.repo_watch_targets import is_hub_watch_hotkey
+from app.processing.repo_watch_targets import is_hub_watch_hotkey, parse_hub_watch_hotkey
 from app.schemas.repo_activity import RepoTrackEntry
 
 
@@ -105,8 +105,17 @@ def _commitment_to_entry(commit: MinerCommitment) -> RepoTrackEntry:
     )
 
 
+def _hub_track_source(hotkey: str | None) -> str:
+    _repo, host = parse_hub_watch_hotkey(hotkey)
+    if host:
+        return "priority_miner"
+    return "hub_watch"
+
+
 def _track_to_entry(track: HippiusRepoTrack, *, track_source: str | None = None) -> RepoTrackEntry:
-    source = track_source or ("hub_watch" if is_hub_watch_hotkey(track.hotkey) else "hub_poll")
+    source = track_source or (
+        _hub_track_source(track.hotkey) if is_hub_watch_hotkey(track.hotkey) else "hub_poll"
+    )
     return RepoTrackEntry(
         id=track.id,
         subnet=track.subnet,
@@ -174,6 +183,7 @@ def build_merged_repo_tracks(
     merged: list[RepoTrackEntry] = []
     seen_hotkeys: set[str] = set()
     seen_repos: set[str] = set()
+    seen_hub_hosts: set[str] = set()
 
     def emit(entry: RepoTrackEntry) -> None:
         if _passes_filters(entry, family=family, in_sync=in_sync):
@@ -232,9 +242,11 @@ def build_merged_repo_tracks(
 
     for track in tracks:
         if is_hub_watch_hotkey(track.hotkey):
-            if track.repo in seen_repos:
+            host_key = f"{track.repo}:{track.repo_host or 'hippius'}"
+            if host_key in seen_hub_hosts:
                 continue
-            emit(_track_to_entry(track, track_source="hub_watch"))
+            emit(_track_to_entry(track, track_source=_hub_track_source(track.hotkey)))
+            seen_hub_hosts.add(host_key)
             seen_repos.add(track.repo)
             continue
 

@@ -29,11 +29,13 @@ from app.integrations.model_registry import (
     normalize_digest,
     remote_digests_match,
 )
+from app.processing.priority_miner_discovery import discover_priority_miner_repos
 from app.processing.repo_watch_targets import (
     HUB_WATCH_PREFIX,
     RepoWatchTarget,
     discover_watch_targets,
     is_hub_watch_hotkey,
+    parse_hub_watch_hotkey,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,7 +63,10 @@ class RepoTrackBuilder:
         await self._ingest_on_chain_history(session, netuid, stats)
 
         hub_repos = await self._discover_hub_search_repos()
-        targets = await discover_watch_targets(session, netuid, extra_repos=hub_repos)
+        priority_repos = await self._discover_priority_miner_repos()
+        targets = await discover_watch_targets(
+            session, netuid, extra_repos=hub_repos, priority_repos=priority_repos
+        )
         stats["unique_repos"] = len({t.repo for t in targets})
         stats["hub_watches"] = sum(1 for t in targets if is_hub_watch_hotkey(t.hotkey))
         if not targets:
@@ -81,6 +86,7 @@ class RepoTrackBuilder:
                             target.chain_digest,
                             client=http,
                             preferred_host=target.preferred_host,
+                            host_only=target.preferred_host is not None,
                         )
                     snapshot = snapshot_cache[cache_key]
                     if snapshot is None:
@@ -120,6 +126,14 @@ class RepoTrackBuilder:
         except Exception:
             logger.exception("hub search discovery failed")
         return list(dict.fromkeys(repos))
+
+    async def _discover_priority_miner_repos(self) -> list[str]:
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.market_http_timeout_seconds) as http:
+                return await discover_priority_miner_repos(settings=self.settings, client=http)
+        except Exception:
+            logger.exception("priority miner discovery failed")
+            return []
 
     async def _upsert_pending_track(
         self, session: AsyncSession, netuid: int, target: RepoWatchTarget

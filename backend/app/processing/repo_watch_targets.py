@@ -22,6 +22,7 @@ from app.db.models import (
     MinerSlotStatus,
 )
 from app.integrations.model_registry import RepoHost, infer_repo_host
+from app.processing.priority_miner_discovery import discover_priority_miner_repos, priority_hosts
 
 HUB_WATCH_PREFIX = "hub:"
 
@@ -30,6 +31,7 @@ SOURCE_SLOT = "slot"
 SOURCE_HISTORY = "history"
 SOURCE_HUB_SEARCH = "hub_search"
 SOURCE_KNOWN_TRACK = "known_track"
+SOURCE_PRIORITY_MINER = "priority_miner"
 
 
 @dataclass(frozen=True)
@@ -44,7 +46,9 @@ class RepoWatchTarget:
     preferred_host: RepoHost | None = None
 
 
-def hub_watch_hotkey(repo: str) -> str:
+def hub_watch_hotkey(repo: str, host: RepoHost | None = None) -> str:
+    if host:
+        return f"{HUB_WATCH_PREFIX}{host}:{repo}"
     return f"{HUB_WATCH_PREFIX}{repo}"
 
 
@@ -52,10 +56,20 @@ def is_hub_watch_hotkey(hotkey: str | None) -> bool:
     return bool(hotkey and hotkey.startswith(HUB_WATCH_PREFIX))
 
 
-def repo_from_hub_watch_hotkey(hotkey: str | None) -> str | None:
+def parse_hub_watch_hotkey(hotkey: str | None) -> tuple[str | None, RepoHost | None]:
     if not is_hub_watch_hotkey(hotkey):
-        return None
-    return hotkey[len(HUB_WATCH_PREFIX) :]
+        return None, None
+    rest = hotkey[len(HUB_WATCH_PREFIX) :]
+    if rest.startswith("hippius:"):
+        return rest[len("hippius:") :], "hippius"
+    if rest.startswith("huggingface:"):
+        return rest[len("huggingface:") :], "huggingface"
+    return rest, None
+
+
+def repo_from_hub_watch_hotkey(hotkey: str | None) -> str | None:
+    repo, _host = parse_hub_watch_hotkey(hotkey)
+    return repo
 
 
 def _target_rank(source: str) -> int:
@@ -63,6 +77,7 @@ def _target_rank(source: str) -> int:
         SOURCE_COMMITMENT: 0,
         SOURCE_SLOT: 1,
         SOURCE_HISTORY: 2,
+        SOURCE_PRIORITY_MINER: 2,
         SOURCE_KNOWN_TRACK: 3,
         SOURCE_HUB_SEARCH: 4,
     }.get(source, 9)
@@ -73,6 +88,7 @@ async def discover_watch_targets(
     netuid: int,
     *,
     extra_repos: list[str] | None = None,
+    priority_repos: list[str] | None = None,
 ) -> list[RepoWatchTarget]:
     """Merge on-chain, slot, history, DB, and hub-search repo targets."""
     by_key: dict[str, RepoWatchTarget] = {}
@@ -91,7 +107,7 @@ async def discover_watch_targets(
         if family not in (FAMILY_QWEN36_35B, FAMILY_QWEN3_4B):
             return
         hk = hotkey or hub_watch_hotkey(repo)
-        key = hk if not is_hub_watch_hotkey(hk) else repo
+        key = hk
         candidate = RepoWatchTarget(
             repo=repo,
             hotkey=hk,
@@ -204,5 +220,17 @@ async def discover_watch_targets(
             source=SOURCE_HUB_SEARCH,
             preferred_host="huggingface",
         )
+
+    for repo in priority_repos or []:
+        for host in priority_hosts():
+            _add(
+                repo,
+                hotkey=hub_watch_hotkey(repo, host),
+                uid=None,
+                coldkey=None,
+                chain_digest=None,
+                source=SOURCE_PRIORITY_MINER,
+                preferred_host=host,
+            )
 
     return list(by_key.values())
