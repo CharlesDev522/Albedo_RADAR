@@ -543,7 +543,35 @@ export interface AlbedoCrownLeaderboardRow {
   total_slot_hours: number;
   current_weight_pct: number;
   reign_slots: number;
+  owner_count: number;
+  multi_owner: boolean;
+  coldkeys: string[];
+  hotkeys: string[];
+  uids: number[];
+  duel_count: number;
+  challenger_wins: number;
+  challenger_win_pct?: number | null;
   crown_events: AlbedoCrownEvent[];
+}
+
+export interface AlbedoRepoColdkeyLink {
+  repo: string;
+  coldkey: string;
+  hotkey?: string | null;
+  uid?: number | null;
+  coronations: number;
+  total_slot_hours: number;
+  total_active_hours: number;
+  in_reign: boolean;
+  last_crowned_at?: string | null;
+}
+
+export interface AlbedoRepoCrownAnalysis {
+  crowns_by_repo: AlbedoCrownLeaderboardRow[];
+  repo_coldkey_links: AlbedoRepoColdkeyLink[];
+  multi_owner_repos: string[];
+  total_repos_crowned: number;
+  total_unique_coldkeys: number;
 }
 
 export interface AlbedoAnalysisOverview {
@@ -568,6 +596,7 @@ export interface AlbedoAnalysisOverview {
   king_history: AlbedoKingCoronation[];
   king_tenures: AlbedoKingTenure[];
   reign_slot_holders: AlbedoReignSlotHolder[];
+  repo_crown_analysis: AlbedoRepoCrownAnalysis;
   crowns_by_repo: AlbedoCrownLeaderboardRow[];
   crowns_by_coldkey: AlbedoCrownLeaderboardRow[];
   recent_duels: AlbedoDuelSummary[];

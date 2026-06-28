@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import RepoCrownAnalysisPanel from "@/components/RepoCrownAnalysisPanel";
 import {
   api,
   hippiusModelUrl,
   shortAddr,
   shortRepo,
   type AlbedoAnalysisOverview,
-  type AlbedoCrownLeaderboardRow,
   type AlbedoDuelJudgeVote,
   type AlbedoDuelSummary,
   type AlbedoJudgeDetail,
@@ -264,66 +264,6 @@ function WinRateTable({ rows, showCoronations = false }: { rows: AlbedoWinRateRo
   );
 }
 
-function CrownLeaderboard({
-  title,
-  hint,
-  rows,
-  showColdkey = false,
-}: {
-  title: string;
-  hint: string;
-  rows: AlbedoCrownLeaderboardRow[];
-  showColdkey?: boolean;
-}) {
-  if (!rows.length) {
-    return (
-      <section className="panel px-3 py-2">
-        <h3 className="text-[11px] font-semibold text-zinc-200">{title}</h3>
-        <p className="text-[10px] text-zinc-500 mt-2">No crown data yet.</p>
-      </section>
-    );
-  }
-  return (
-    <section className="panel px-3 py-2">
-      <h3 className="text-[11px] font-semibold text-zinc-200">{title}</h3>
-      <p className="text-[9px] text-zinc-600 mt-0.5 mb-2">{hint}</p>
-      <table className="w-full text-[10px]">
-        <thead>
-          <tr className="text-zinc-500 border-b border-zinc-800">
-            <th className="text-left py-1 pr-2">{showColdkey ? "Coldkey" : "Repo"}</th>
-            <th className="text-right py-1 px-1">👑</th>
-            <th className="text-right py-1 px-1">Active</th>
-            <th className="text-right py-1 px-1">Slot reward</th>
-            <th className="text-right py-1 pl-1">Weight</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.slice(0, 12).map((row) => (
-            <tr key={row.key} className="border-b border-zinc-800/50 align-top">
-              <td className="py-1.5 pr-2">
-                <p className="text-zinc-200 truncate max-w-[200px]" title={row.label}>
-                  {showColdkey ? shortAddr(row.label, 6) : shortRepo(row.label, 34)}
-                </p>
-                {row.crown_events[0] && (
-                  <p className="text-[9px] text-zinc-600 mt-0.5">
-                    last v{row.crown_events[0].king_version} · {fmtTime(row.crown_events[0].crowned_at)}
-                  </p>
-                )}
-              </td>
-              <td className="text-right py-1.5 px-1 mono text-amber-300">{row.coronations}</td>
-              <td className="text-right py-1.5 px-1 mono text-zinc-400">{fmtHours(row.total_active_hours)}</td>
-              <td className="text-right py-1.5 px-1 mono text-emerald-300">{fmtHours(row.total_slot_hours)}</td>
-              <td className="text-right py-1.5 pl-1 mono text-zinc-500">
-                {row.current_weight_pct > 0 ? fmtPct(row.current_weight_pct) : "—"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
-  );
-}
-
 function JudgeScoreCell({ vote }: { vote: AlbedoDuelJudgeVote | undefined }) {
   if (!vote) return <td className="py-1.5 px-1 text-center text-zinc-700">—</td>;
   const agree = vote.agrees_with_verdict;
@@ -485,19 +425,7 @@ export default function AlbedoDuelPanel() {
             ))}
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-3">
-            <CrownLeaderboard
-              title="Most crowns by repo"
-              hint="Coronations and reward hours (active king + slot tenure) merged from on-chain commits"
-              rows={data.crowns_by_repo ?? []}
-            />
-            <CrownLeaderboard
-              title="Most crowns by coldkey"
-              hint="Same reward time rollup grouped by owner coldkey"
-              rows={data.crowns_by_coldkey ?? []}
-              showColdkey
-            />
-          </div>
+          <RepoCrownAnalysisPanel analysis={data.repo_crown_analysis} compact />
 
           <div className="grid lg:grid-cols-2 gap-3">
             <section className="panel px-3 py-2">
@@ -622,19 +550,7 @@ export default function AlbedoDuelPanel() {
             </table>
           </section>
 
-          <div className="grid lg:grid-cols-2 gap-3">
-            <CrownLeaderboard
-              title="Crown leaders by repo"
-              hint="Full history — slot reward hours ≈ time earning weight"
-              rows={data.crowns_by_repo ?? []}
-            />
-            <CrownLeaderboard
-              title="Crown leaders by coldkey"
-              hint="Owner-level crown count and cumulative reward time"
-              rows={data.crowns_by_coldkey ?? []}
-              showColdkey
-            />
-          </div>
+          <RepoCrownAnalysisPanel analysis={data.repo_crown_analysis} />
 
           <section className="panel px-3 py-2">
             <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Coronation history (repo / coldkey)</h3>

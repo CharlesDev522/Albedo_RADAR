@@ -112,3 +112,111 @@ def test_build_analysis_overview_counts_and_history():
     assert current.defense_pct == 100.0
     assert len(overview.reign_slot_holders) == 2
     assert overview.recent_duels[0].judge_scores
+
+
+def test_repo_crown_analysis_multi_owner_and_links():
+    from app.services.albedo_miner_lookup import MinerIdentity, MinerLookup
+
+    lookup = MinerLookup(
+        by_hotkey={
+            "hk_a": MinerIdentity(coldkey="ck_owner1", repo="org/model-a", uid=1),
+            "hk_b": MinerIdentity(coldkey="ck_owner2", repo="org/model-a", uid=2),
+        },
+        by_uid={
+            1: MinerIdentity(coldkey="ck_owner1", repo="org/model-a", uid=1),
+            2: MinerIdentity(coldkey="ck_owner2", repo="org/model-a", uid=2),
+        },
+    )
+
+    dashboard = {
+        "updated_at": "2026-06-27T14:00:00+00:00",
+        "chain": {"judge_models": []},
+        "reign": {
+            "members": [
+                {
+                    "king_version": 2,
+                    "model_uri": "org/model-a@sha256:2",
+                    "hotkey": "hk_b",
+                    "uid": 2,
+                    "weight_bps": 2000,
+                },
+            ]
+        },
+        "current_eval": None,
+        "queue": [],
+        "eval_runs": [
+            {
+                "eval_run_id": "c1",
+                "challenger_won": True,
+                "coronated": True,
+                "king_version": 1,
+                "score_challenger": 0.6,
+                "score_king": 0.4,
+                "win_margin": 0.2,
+                "finished_at": "2026-06-26T10:00:00+00:00",
+                "model_uri": "org/model-a@sha256:1",
+                "hotkey": "hk_a",
+                "uid": 1,
+                "score_breakdown": {"by_judge": {}, "by_metric": {}},
+                "king": {"king_version": 0, "model_uri": "org/other@sha256:0", "uid": 99, "hotkey": "hk_old"},
+            },
+            {
+                "eval_run_id": "c2",
+                "challenger_won": True,
+                "coronated": True,
+                "king_version": 2,
+                "score_challenger": 0.55,
+                "score_king": 0.45,
+                "win_margin": 0.1,
+                "finished_at": "2026-06-27T12:00:00+00:00",
+                "model_uri": "org/model-a@sha256:2",
+                "hotkey": "hk_b",
+                "uid": 2,
+                "score_breakdown": {"by_judge": {}, "by_metric": {}},
+                "king": {"king_version": 1, "model_uri": "org/model-a@sha256:1", "uid": 1, "hotkey": "hk_a"},
+            },
+            {
+                "eval_run_id": "d1",
+                "challenger_won": False,
+                "coronated": False,
+                "king_version": None,
+                "score_challenger": 0.4,
+                "score_king": 0.6,
+                "win_margin": -0.2,
+                "finished_at": "2026-06-27T13:00:00+00:00",
+                "model_uri": "org/model-a@sha256:3",
+                "hotkey": "hk_a",
+                "uid": 1,
+                "score_breakdown": {"by_judge": {}, "by_metric": {}},
+                "king": {"king_version": 2, "model_uri": "org/model-a@sha256:2", "uid": 2, "hotkey": "hk_b"},
+            },
+        ],
+    }
+
+    overview = build_analysis_overview(
+        dashboard,
+        subnet=97,
+        source_url="https://example.com/dashboard.json",
+        miner_lookup=lookup,
+    )
+
+    analysis = overview.repo_crown_analysis
+    assert analysis.total_repos_crowned == 1
+    assert analysis.total_unique_coldkeys == 2
+    assert "org/model-a" in analysis.multi_owner_repos
+
+    repo_row = analysis.crowns_by_repo[0]
+    assert repo_row.key == "org/model-a"
+    assert repo_row.coronations == 2
+    assert repo_row.multi_owner is True
+    assert repo_row.owner_count == 2
+    assert len(repo_row.coldkeys) == 2
+    assert repo_row.duel_count == 3
+    assert repo_row.challenger_wins == 2
+
+    assert len(analysis.repo_coldkey_links) == 2
+    link_coldkeys = {link.coldkey for link in analysis.repo_coldkey_links}
+    assert link_coldkeys == {"ck_owner1", "ck_owner2"}
+    reign_link = next(link for link in analysis.repo_coldkey_links if link.coldkey == "ck_owner2")
+    assert reign_link.in_reign is True
+    assert reign_link.coronations == 1

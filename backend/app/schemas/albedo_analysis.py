@@ -238,7 +238,35 @@ class AlbedoCrownLeaderboardRow(BaseModel):
     total_slot_hours: float
     current_weight_pct: float
     reign_slots: int
+    owner_count: int = 0
+    multi_owner: bool = False
+    coldkeys: list[str] = Field(default_factory=list)
+    hotkeys: list[str] = Field(default_factory=list)
+    uids: list[int] = Field(default_factory=list)
+    duel_count: int = 0
+    challenger_wins: int = 0
+    challenger_win_pct: float | None = None
     crown_events: list[AlbedoCrownEvent] = Field(default_factory=list)
+
+
+class AlbedoRepoColdkeyLink(BaseModel):
+    repo: str
+    coldkey: str
+    hotkey: str | None = None
+    uid: int | None = None
+    coronations: int = 0
+    total_slot_hours: float = 0.0
+    total_active_hours: float = 0.0
+    in_reign: bool = False
+    last_crowned_at: str | None = None
+
+
+class AlbedoRepoCrownAnalysis(BaseModel):
+    crowns_by_repo: list[AlbedoCrownLeaderboardRow] = Field(default_factory=list)
+    repo_coldkey_links: list[AlbedoRepoColdkeyLink] = Field(default_factory=list)
+    multi_owner_repos: list[str] = Field(default_factory=list)
+    total_repos_crowned: int = 0
+    total_unique_coldkeys: int = 0
 
 
 class AlbedoAnalysisOverview(BaseModel):
@@ -263,6 +291,7 @@ class AlbedoAnalysisOverview(BaseModel):
     king_history: list[AlbedoKingCoronation] = Field(default_factory=list)
     king_tenures: list[AlbedoKingTenure] = Field(default_factory=list)
     reign_slot_holders: list[AlbedoReignSlotHolder] = Field(default_factory=list)
+    repo_crown_analysis: AlbedoRepoCrownAnalysis = Field(default_factory=AlbedoRepoCrownAnalysis)
     crowns_by_repo: list[AlbedoCrownLeaderboardRow] = Field(default_factory=list)
     crowns_by_coldkey: list[AlbedoCrownLeaderboardRow] = Field(default_factory=list)
     recent_duels: list[AlbedoDuelSummary] = Field(default_factory=list)
