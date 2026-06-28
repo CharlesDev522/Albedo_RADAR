@@ -328,6 +328,7 @@ export interface AlbedoDuelSummary {
   king_version_defended?: number | null;
   valid_turns?: number | null;
   total_turns?: number | null;
+  judge_scores?: Record<string, number>;
 }
 
 export interface AlbedoKingCoronation {
@@ -361,8 +362,35 @@ export interface AlbedoWinRateRow {
 
 export interface AlbedoJudgeAggregate {
   judge: string;
+  short_name: string;
   avg_challenger_score: number;
   duels: number;
+}
+
+export interface AlbedoJudgeDetail {
+  judge: string;
+  short_name: string;
+  duels: number;
+  avg_challenger_score: number;
+  avg_king_score: number;
+  pick_challenger_pct: number;
+  pick_king_pct: number;
+  agree_verdict_pct: number;
+  overturn_duels: number;
+  avg_score_when_challenger_wins?: number | null;
+  avg_score_when_king_wins?: number | null;
+  unanimous_challenger_duels: number;
+  unanimous_king_duels: number;
+  split_duels: number;
+}
+
+export interface AlbedoJudgeConsensus {
+  pattern: string;
+  label: string;
+  duels: number;
+  pct: number;
+  challenger_wins: number;
+  king_wins: number;
 }
 
 export interface AlbedoMetricAggregate {
@@ -385,6 +413,48 @@ export interface AlbedoTimelinePoint {
   challenger_win_pct: number;
 }
 
+export interface AlbedoPipelineStage {
+  stage: string;
+  status?: string | null;
+  detail?: string | null;
+}
+
+export interface AlbedoReignSlotHolder {
+  key: string;
+  label: string;
+  hotkey: string;
+  uid: number;
+  slots_held: number;
+  weight_bps: number;
+  weight_pct: number;
+  king_versions: number[];
+}
+
+export interface AlbedoKingTenure {
+  king_version: number;
+  model_uri: string;
+  model_name: string;
+  namespace: string;
+  hotkey: string;
+  uid: number;
+  reign_rank?: number | null;
+  weight_bps: number;
+  weight_pct: number;
+  reign_slots: number;
+  is_current_king: boolean;
+  in_reign_chain: boolean;
+  coronation_at?: string | null;
+  active_until?: string | null;
+  slot_until?: string | null;
+  active_tenure_hours?: number | null;
+  slot_tenure_hours?: number | null;
+  defenses: number;
+  attacks_faced: number;
+  defense_pct?: number | null;
+  coronation_margin?: number | null;
+  defeated_king_version?: number | null;
+}
+
 export interface AlbedoAnalysisOverview {
   subnet: number;
   source: string;
@@ -405,15 +475,19 @@ export interface AlbedoAnalysisOverview {
   current_eval?: AlbedoCurrentEval | null;
   queue_length: number;
   king_history: AlbedoKingCoronation[];
+  king_tenures: AlbedoKingTenure[];
+  reign_slot_holders: AlbedoReignSlotHolder[];
   recent_duels: AlbedoDuelSummary[];
   challenger_by_namespace: AlbedoWinRateRow[];
   challenger_by_hotkey: AlbedoWinRateRow[];
   king_defense_by_model: AlbedoWinRateRow[];
   judge_aggregates: AlbedoJudgeAggregate[];
+  judge_details: AlbedoJudgeDetail[];
+  judge_consensus: AlbedoJudgeConsensus[];
   metric_aggregates: AlbedoMetricAggregate[];
   margin_histogram: AlbedoMarginBucket[];
   timeline: AlbedoTimelinePoint[];
-  pipeline: { stage: string; status?: string | null; detail?: string | null }[];
+  pipeline: AlbedoPipelineStage[];
   note: string;
 }
 

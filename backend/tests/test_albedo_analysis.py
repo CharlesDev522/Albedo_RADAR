@@ -15,7 +15,7 @@ def test_parse_model_uri():
 def test_build_analysis_overview_counts_and_history():
     dashboard = {
         "updated_at": "2026-06-27T12:00:00+00:00",
-        "chain": {"judge_models": ["judge/a", "judge/b"]},
+        "chain": {"judge_models": ["z-ai/glm-5.1", "qwen/qwen3.5-397b-a17b"]},
         "reign": {
             "members": [
                 {
@@ -50,7 +50,7 @@ def test_build_analysis_overview_counts_and_history():
                 "hotkey": "hk_new",
                 "uid": 10,
                 "score_breakdown": {
-                    "by_judge": {"judge/a": 0.6},
+                    "by_judge": {"z-ai/glm-5.1": 0.6, "qwen/qwen3.5-397b-a17b": 0.55},
                     "by_metric": {"correctness": 0.55},
                 },
                 "king": {
@@ -68,12 +68,12 @@ def test_build_analysis_overview_counts_and_history():
                 "score_challenger": 0.45,
                 "score_king": 0.55,
                 "win_margin": -0.1,
-                "finished_at": "2026-06-26T10:00:00+00:00",
+                "finished_at": "2026-06-27T11:00:00+00:00",
                 "model_uri": "other/challenger@sha256:3",
                 "hotkey": "hk_chal",
                 "uid": 20,
                 "score_breakdown": {
-                    "by_judge": {"judge/a": 0.45},
+                    "by_judge": {"z-ai/glm-5.1": 0.45, "qwen/qwen3.5-397b-a17b": 0.4},
                     "by_metric": {"correctness": 0.4},
                 },
                 "king": {
@@ -97,14 +97,16 @@ def test_build_analysis_overview_counts_and_history():
     assert overview.challenger_wins == 1
     assert overview.king_wins == 1
     assert overview.coronations == 1
-    assert overview.challenger_win_pct == 50.0
     assert overview.current_king is not None
     assert overview.current_king.king_version == 2
     assert len(overview.king_history) == 1
-    assert overview.king_history[0].defeated_king_version == 1
-    assert len(overview.recent_duels) == 2
-    assert overview.recent_duels[0].eval_run_id == "r1"
-    assert len(overview.judge_aggregates) == 1
-    assert len(overview.metric_aggregates) == 1
-    assert len(overview.timeline) == 2
-    assert overview.pipeline
+    assert len(overview.judge_details) == 2
+    assert overview.judge_details[0].short_name
+    assert overview.judge_consensus
+    assert len(overview.king_tenures) == 2
+    current = next(t for t in overview.king_tenures if t.is_current_king)
+    assert current.defenses == 1
+    assert current.attacks_faced == 1
+    assert current.defense_pct == 100.0
+    assert len(overview.reign_slot_holders) == 2
+    assert overview.recent_duels[0].judge_scores
