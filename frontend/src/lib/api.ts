@@ -1,13 +1,16 @@
-/** Server-side (SSR): Docker internal URL. Browser: same-origin proxy via next.config rewrites. */
+/** Server-side (SSR): Docker internal URL. Browser: same-origin proxy via Next route handler. */
 function apiBase(): string {
   if (typeof window !== "undefined") {
     return "/api/v1";
+  }
+  if (process.env.INTERNAL_API_PROXY) {
+    return process.env.INTERNAL_API_PROXY.replace(/\/$/, "");
   }
   return (
     process.env.API_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
     "http://localhost:8000/api/v1"
-  );
+  ).replace(/\/$/, "");
 }
 
 const DEFAULT_SUBNET = 97;
@@ -584,18 +587,33 @@ export interface AlbedoAnalysisOverview {
 }
 
 async function fetchApi<T>(path: string): Promise<T> {
-  const res = await fetch(`${apiBase()}${path}`, { cache: "no-store" });
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
+  const url = `${apiBase()}${path}`;
+  const maxAttempts = typeof window === "undefined" ? 3 : 1;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const body = await res.json();
-      if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
-    } catch {
-      /* ignore */
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try {
+          const body = await res.json();
+          if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+        } catch {
+          /* ignore */
+        }
+        throw new Error(detail);
+      }
+      return res.json();
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, attempt * 500));
+      }
     }
-    throw new Error(detail);
   }
-  return res.json();
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 export const api = {

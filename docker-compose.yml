@@ -54,12 +54,12 @@ services:
           "CMD",
           "python",
           "-c",
-          "import socket; s=socket.create_connection(('127.0.0.1',8000),2); s.close()",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
         ]
       interval: 5s
       timeout: 5s
       retries: 15
-      start_period: 60s
+      start_period: 90s
     restart: unless-stopped
 
   collector:
@@ -90,14 +90,16 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Server-side fetch from inside Docker network (Next.js proxy + SSR)
+      # Next.js route proxy targets the api service on the Docker network
       API_URL: http://api:8000/api/v1
+      # SSR inside the frontend container uses the local Next proxy (same path as the browser)
+      INTERNAL_API_PROXY: http://127.0.0.1:3000/api/v1
       # Browser direct API (optional; default path uses /api/v1 proxy)
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
       NEXT_PUBLIC_LIVE_URL: http://localhost:8000/api/v1/live/stream
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

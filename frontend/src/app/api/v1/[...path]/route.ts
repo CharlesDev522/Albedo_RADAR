@@ -61,7 +61,7 @@ async function proxyRequest(req: NextRequest, pathSegments: string[]) {
   const message = lastError instanceof Error ? lastError.message : String(lastError);
   return NextResponse.json(
     {
-      detail: `Cannot reach API at ${target}: ${message}. Run: docker compose ps api && docker compose logs api --tail 40`,
+      detail: `Cannot reach API at ${target}: ${message}. Check: docker compose ps api && docker compose logs api --tail 40 && curl -sf http://localhost:8000/health`,
     },
     { status: 502 },
   );
