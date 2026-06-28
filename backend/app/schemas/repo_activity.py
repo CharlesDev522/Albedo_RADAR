@@ -94,6 +94,8 @@ class RepoRevisionResponse(BaseModel):
 class PriorityMinerRepoStatus(BaseModel):
     repo: str
     model_family: str | None = None
+    hippius_url: str | None = None
+    huggingface_url: str | None = None
     hippius_tracked: bool = False
     hippius_digest: str | None = None
     hippius_updated_at: datetime | None = None
@@ -105,12 +107,23 @@ class PriorityMinerRepoStatus(BaseModel):
     huggingface_commit_message: str | None = None
     huggingface_pending: bool = True
     huggingface_exists: bool = False
+    duel_count: int = 0
+    challenger_wins: int = 0
+    challenger_win_pct: float | None = None
+    coronations: int = 0
+    is_top_repo: bool = False
     last_event_type: str | None = None
     last_event_at: datetime | None = None
 
 
 class PriorityMinerStatus(BaseModel):
     namespace: str
+    watch_source: str = "pinned"
+    challenger_rank: int | None = None
+    duel_count: int = 0
+    challenger_wins: int = 0
+    challenger_win_pct: float | None = None
+    coronations: int = 0
     discovered_repos: int = 0
     hippius_tracked_count: int = 0
     huggingface_tracked_count: int = 0

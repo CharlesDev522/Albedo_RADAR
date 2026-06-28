@@ -242,6 +242,8 @@ export interface RepoActivityOverview {
 export interface PriorityMinerRepoStatus {
   repo: string;
   model_family?: string | null;
+  hippius_url?: string | null;
+  huggingface_url?: string | null;
   hippius_tracked: boolean;
   hippius_digest?: string | null;
   hippius_updated_at?: string | null;
@@ -253,12 +255,23 @@ export interface PriorityMinerRepoStatus {
   huggingface_commit_message?: string | null;
   huggingface_pending: boolean;
   huggingface_exists: boolean;
+  duel_count: number;
+  challenger_wins: number;
+  challenger_win_pct?: number | null;
+  coronations: number;
+  is_top_repo: boolean;
   last_event_type?: string | null;
   last_event_at?: string | null;
 }
 
 export interface PriorityMinerStatus {
   namespace: string;
+  watch_source: string;
+  challenger_rank?: number | null;
+  duel_count: number;
+  challenger_wins: number;
+  challenger_win_pct?: number | null;
+  coronations: number;
   discovered_repos: number;
   hippius_tracked_count: number;
   huggingface_tracked_count: number;

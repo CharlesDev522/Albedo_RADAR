@@ -47,6 +47,7 @@ class Settings(BaseSettings):
         "divinequest",
         "devinequest",
     ]
+    priority_challenger_top_n: int = 10
 
     # Database
     database_url: str = "postgresql+asyncpg://minerwatch:minerwatch@localhost:5432/minerwatch"

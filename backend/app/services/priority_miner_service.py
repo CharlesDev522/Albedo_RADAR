@@ -9,8 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.db.models import HippiusRepoTrack, RepoActivityEvent
-from app.processing.priority_miner_discovery import discover_priority_miner_repos
-from app.schemas.repo_activity import PriorityMinerRepoStatus, PriorityMinerStatus
+from app.integrations.albedo_dashboard import fetch_dashboard
+from app.processing.priority_miner_discovery import (
+    compute_challenger_stats,
+    discover_priority_miner_repos,
+    hippius_browse_url,
+    huggingface_browse_url,
+    resolve_watch_namespaces,
+)
 
 
 def _namespace_from_repo(repo: str) -> str | None:
@@ -25,12 +31,20 @@ async def build_priority_miner_status(
     *,
     settings: Settings | None = None,
 ) -> list[PriorityMinerStatus]:
+    from app.schemas.repo_activity import PriorityMinerRepoStatus, PriorityMinerStatus
+
     settings = settings or get_settings()
-    namespaces = [ns.strip().lower() for ns in (settings.priority_miner_namespaces or []) if ns.strip()]
-    if not namespaces:
+    try:
+        dashboard = await fetch_dashboard(settings=settings)
+    except Exception:
+        dashboard = {}
+
+    watch_list = resolve_watch_namespaces(settings, dashboard)
+    if not watch_list:
         return []
 
-    discovered = await discover_priority_miner_repos(settings=settings)
+    ns_stats, repo_stats = compute_challenger_stats(dashboard)
+    discovered = await discover_priority_miner_repos(settings=settings, dashboard=dashboard)
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
 
     tracks = (
@@ -44,68 +58,101 @@ async def build_priority_miner_status(
         )
     ).scalars().all()
 
-    by_ns: dict[str, PriorityMinerStatus] = {
-        ns: PriorityMinerStatus(namespace=ns, discovered_repos=0, repos=[])
-        for ns in namespaces
-    }
-
-    discovered_by_ns: dict[str, set[str]] = {ns: set() for ns in namespaces}
+    discovered_by_ns: dict[str, set[str]] = {}
     for repo in discovered:
         ns = _namespace_from_repo(repo)
-        if ns in discovered_by_ns:
-            discovered_by_ns[ns].add(repo)
+        if ns:
+            discovered_by_ns.setdefault(ns, set()).add(repo)
 
     repo_hosts: dict[str, dict[str, HippiusRepoTrack]] = {}
     for track in tracks:
         ns = _namespace_from_repo(track.repo)
-        if ns not in by_ns:
+        if not ns:
             continue
         repo_hosts.setdefault(track.repo, {})[track.repo_host or "hippius"] = track
 
-    for ns in namespaces:
-        by_ns[ns].discovered_repos = len(discovered_by_ns.get(ns, set()))
-
-    all_repos = sorted({repo for ns in namespaces for repo in discovered_by_ns.get(ns, set())})
-    for repo in all_repos:
-        ns = _namespace_from_repo(repo)
-        if ns not in by_ns:
-            continue
-        hosts = repo_hosts.get(repo, {})
-        hippius = hosts.get("hippius")
-        hf = hosts.get("huggingface")
-        recent = [
-            e
-            for e in events
-            if e.repo == repo
-            and (e.event_type in ("hub_manifest_update", "on_chain_commit", "digest_mismatch"))
-        ]
-        last_event = recent[0] if recent else None
-        by_ns[ns].repos.append(
-            PriorityMinerRepoStatus(
-                repo=repo,
-                model_family=hippius.model_family if hippius else (hf.model_family if hf else None),
-                hippius_tracked=hippius is not None,
-                hippius_digest=hippius.hub_digest if hippius else None,
-                hippius_updated_at=hippius.hub_updated_at or hippius.last_hub_change_at if hippius else None,
-                hippius_commit_message=hippius.hub_commit_message if hippius else None,
-                hippius_pending=hippius is None or hippius.hub_digest is None,
-                huggingface_tracked=hf is not None,
-                huggingface_digest=hf.hub_digest if hf else None,
-                huggingface_updated_at=hf.hub_updated_at or hf.last_hub_change_at if hf else None,
-                huggingface_commit_message=hf.hub_commit_message if hf else None,
-                huggingface_pending=hf is None or hf.hub_digest is None,
-                huggingface_exists=hf is not None and hf.hub_digest is not None,
-                last_event_type=last_event.event_type if last_event else None,
-                last_event_at=last_event.detected_at if last_event else None,
+    results: list[PriorityMinerStatus] = []
+    for watch in watch_list:
+        ns = watch.namespace
+        ns_challenger = watch.stats or ns_stats.get(ns)
+        repos_for_ns = sorted(discovered_by_ns.get(ns, set()))
+        top_repo_key = None
+        if repos_for_ns and repo_stats:
+            ranked_repos = sorted(
+                ((r, repo_stats[r]) for r in repos_for_ns if r in repo_stats),
+                key=lambda item: (-item[1].duels, -item[1].wins, -item[1].coronations, item[0]),
             )
-        )
-        if last_event and (
-            by_ns[ns].last_activity_at is None or last_event.detected_at > by_ns[ns].last_activity_at
-        ):
-            by_ns[ns].last_activity_at = last_event.detected_at
+            if ranked_repos:
+                top_repo_key = ranked_repos[0][0]
 
-    for ns, status in by_ns.items():
-        status.hippius_tracked_count = sum(1 for r in status.repos if r.hippius_tracked and not r.hippius_pending)
+        repo_rows: list[PriorityMinerRepoStatus] = []
+        for repo in repos_for_ns:
+            hosts = repo_hosts.get(repo, {})
+            hippius = hosts.get("hippius")
+            hf = hosts.get("huggingface")
+            recent = [
+                e
+                for e in events
+                if e.repo == repo
+                and e.event_type in ("hub_manifest_update", "on_chain_commit", "digest_mismatch")
+            ]
+            last_event = recent[0] if recent else None
+            rstats = repo_stats.get(repo)
+            repo_rows.append(
+                PriorityMinerRepoStatus(
+                    repo=repo,
+                    model_family=hippius.model_family if hippius else (hf.model_family if hf else None),
+                    hippius_url=hippius_browse_url(repo),
+                    huggingface_url=huggingface_browse_url(repo),
+                    hippius_tracked=hippius is not None,
+                    hippius_digest=hippius.hub_digest if hippius else None,
+                    hippius_updated_at=hippius.hub_updated_at or hippius.last_hub_change_at if hippius else None,
+                    hippius_commit_message=hippius.hub_commit_message if hippius else None,
+                    hippius_pending=hippius is None or hippius.hub_digest is None,
+                    huggingface_tracked=hf is not None,
+                    huggingface_digest=hf.hub_digest if hf else None,
+                    huggingface_updated_at=hf.hub_updated_at or hf.last_hub_change_at if hf else None,
+                    huggingface_commit_message=hf.hub_commit_message if hf else None,
+                    huggingface_pending=hf is None or hf.hub_digest is None,
+                    huggingface_exists=hf is not None and hf.hub_digest is not None,
+                    duel_count=rstats.duels if rstats else 0,
+                    challenger_wins=rstats.wins if rstats else 0,
+                    challenger_win_pct=rstats.win_pct if rstats else None,
+                    coronations=rstats.coronations if rstats else 0,
+                    is_top_repo=repo == top_repo_key,
+                    last_event_type=last_event.event_type if last_event else None,
+                    last_event_at=last_event.detected_at if last_event else None,
+                )
+            )
+
+        repo_rows.sort(
+            key=lambda r: (
+                0 if r.is_top_repo else 1,
+                -(r.duel_count or 0),
+                -(r.last_event_at.timestamp() if r.last_event_at else 0),
+            ),
+        )
+
+        last_activity = max(
+            (r.last_event_at for r in repo_rows if r.last_event_at),
+            default=None,
+        )
+
+        status = PriorityMinerStatus(
+            namespace=ns,
+            watch_source=watch.source,
+            challenger_rank=watch.rank,
+            duel_count=ns_challenger.duels if ns_challenger else 0,
+            challenger_wins=ns_challenger.wins if ns_challenger else 0,
+            challenger_win_pct=ns_challenger.win_pct if ns_challenger else None,
+            coronations=ns_challenger.coronations if ns_challenger else 0,
+            discovered_repos=len(repos_for_ns),
+            repos=repo_rows,
+            last_activity_at=last_activity,
+        )
+        status.hippius_tracked_count = sum(
+            1 for r in status.repos if r.hippius_tracked and not r.hippius_pending
+        )
         status.huggingface_tracked_count = sum(
             1 for r in status.repos if r.huggingface_tracked and r.huggingface_exists
         )
@@ -114,12 +161,14 @@ async def build_priority_miner_status(
             for e in events
             if _namespace_from_repo(e.repo) == ns and e.event_type == "hub_manifest_update"
         )
-        status.repos.sort(
-            key=lambda r: (
-                r.last_event_at or datetime.min.replace(tzinfo=timezone.utc),
-                r.hippius_updated_at or r.huggingface_updated_at or datetime.min.replace(tzinfo=timezone.utc),
-            ),
-            reverse=True,
-        )
+        results.append(status)
 
-    return [by_ns[ns] for ns in namespaces if by_ns[ns].repos or by_ns[ns].discovered_repos > 0]
+    results.sort(
+        key=lambda s: (
+            0 if s.watch_source == "pinned" else 1,
+            s.challenger_rank if s.challenger_rank is not None else 999,
+            -(s.duel_count or 0),
+            s.namespace,
+        )
+    )
+    return results

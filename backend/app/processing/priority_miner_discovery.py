@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -23,6 +25,25 @@ logger = logging.getLogger(__name__)
 _URI_RE = re.compile(r"^([^@]+)@")
 
 
+@dataclass(frozen=True)
+class ChallengerStats:
+    duels: int = 0
+    wins: int = 0
+    coronations: int = 0
+
+    @property
+    def win_pct(self) -> float:
+        return round(self.wins / self.duels * 100, 1) if self.duels else 0.0
+
+
+@dataclass(frozen=True)
+class WatchNamespace:
+    namespace: str
+    source: str  # pinned | top_challenger
+    rank: int | None = None
+    stats: ChallengerStats | None = None
+
+
 def _repo_from_model_uri(uri: str | None) -> str | None:
     if not uri:
         return None
@@ -35,11 +56,81 @@ def _repo_from_model_uri(uri: str | None) -> str | None:
     return repo if "/" in repo else None
 
 
-def _namespace_matches(repo: str, namespaces: set[str]) -> bool:
+def _namespace_from_repo(repo: str) -> str | None:
     if "/" not in repo:
-        return False
-    ns = repo.split("/", 1)[0].lower()
-    return ns in namespaces
+        return None
+    return repo.split("/", 1)[0].lower()
+
+
+def _namespace_matches(repo: str, namespaces: set[str]) -> bool:
+    ns = _namespace_from_repo(repo)
+    return bool(ns and ns in namespaces)
+
+
+def compute_challenger_stats(
+    dashboard: dict[str, Any],
+) -> tuple[dict[str, ChallengerStats], dict[str, ChallengerStats]]:
+    """Aggregate challenger duels by namespace and repo from eval_runs."""
+    ns_stats: dict[str, ChallengerStats] = defaultdict(ChallengerStats)
+    repo_stats: dict[str, ChallengerStats] = defaultdict(ChallengerStats)
+
+    for run in dashboard.get("eval_runs") or []:
+        if not isinstance(run, dict):
+            continue
+        repo = _repo_from_model_uri(run.get("model_uri"))
+        if not repo:
+            continue
+        family = infer_albedo_model_family(repo)
+        if family not in (FAMILY_QWEN36_35B, FAMILY_QWEN3_4B):
+            continue
+        ns = _namespace_from_repo(repo)
+        if not ns:
+            continue
+        won = bool(run.get("challenger_won"))
+        coronated = bool(run.get("coronated"))
+        for bucket, key in ((ns_stats, ns), (repo_stats, repo)):
+            current = bucket[key]
+            bucket[key] = ChallengerStats(
+                duels=current.duels + 1,
+                wins=current.wins + (1 if won else 0),
+                coronations=current.coronations + (1 if coronated else 0),
+            )
+    return dict(ns_stats), dict(repo_stats)
+
+
+def resolve_watch_namespaces(
+    settings: Settings,
+    dashboard: dict[str, Any] | None = None,
+) -> list[WatchNamespace]:
+    """Pinned namespaces plus top challengers from duel analysis."""
+    pinned = [ns.strip().lower() for ns in (settings.priority_miner_namespaces or []) if ns.strip()]
+    pinned_set = set(pinned)
+    result: list[WatchNamespace] = [
+        WatchNamespace(namespace=ns, source="pinned", rank=None) for ns in pinned
+    ]
+
+    if not dashboard:
+        return result
+
+    ns_stats, _repo_stats = compute_challenger_stats(dashboard)
+    ranked = sorted(
+        ns_stats.items(),
+        key=lambda item: (-item[1].duels, -item[1].wins, -item[1].coronations, item[0]),
+    )
+    top_n = max(settings.priority_challenger_top_n, 0)
+    rank = 1
+    for ns, stats in ranked:
+        if ns in pinned_set:
+            continue
+        if stats.duels < 2:
+            continue
+        if rank > top_n:
+            break
+        result.append(
+            WatchNamespace(namespace=ns, source="top_challenger", rank=rank, stats=stats)
+        )
+        rank += 1
+    return result
 
 
 def _repos_from_dashboard(dashboard: dict[str, Any], namespaces: set[str]) -> set[str]:
@@ -47,10 +138,9 @@ def _repos_from_dashboard(dashboard: dict[str, Any], namespaces: set[str]) -> se
     for run in dashboard.get("eval_runs") or []:
         if not isinstance(run, dict):
             continue
-        for key in ("model_uri",):
-            repo = _repo_from_model_uri(run.get(key))
-            if repo and _namespace_matches(repo, namespaces):
-                repos.add(repo)
+        repo = _repo_from_model_uri(run.get("model_uri"))
+        if repo and _namespace_matches(repo, namespaces):
+            repos.add(repo)
         king = run.get("king") or {}
         if isinstance(king, dict):
             repo = _repo_from_model_uri(king.get("model_uri"))
@@ -71,25 +161,37 @@ def _repos_from_dashboard(dashboard: dict[str, Any], namespaces: set[str]) -> se
     return repos
 
 
+def hippius_browse_url(repo: str, revision: str = "main") -> str:
+    return f"https://hub.hippius.com/models/{repo}/{revision}"
+
+
+def huggingface_browse_url(repo: str, revision: str = "main") -> str:
+    return f"https://huggingface.co/{repo}/tree/{revision}"
+
+
 async def discover_priority_miner_repos(
     *,
     settings: Settings | None = None,
     client: httpx.AsyncClient | None = None,
+    dashboard: dict[str, Any] | None = None,
 ) -> list[str]:
-    """Collect Albedo repos for configured priority miner namespaces."""
+    """Collect Albedo repos for pinned + top-challenger namespaces."""
     settings = settings or get_settings()
-    raw_namespaces = settings.priority_miner_namespaces or []
-    namespaces = {ns.strip().lower() for ns in raw_namespaces if ns.strip()}
+    dashboard_payload = dashboard
+    if dashboard_payload is None:
+        try:
+            dashboard_payload = await fetch_dashboard(settings=settings)
+        except Exception:
+            dashboard_payload = {}
+
+    watch = resolve_watch_namespaces(settings, dashboard_payload)
+    namespaces = {w.namespace for w in watch}
     if not namespaces:
         return []
 
     repos: set[str] = set()
-
-    try:
-        dashboard = await fetch_dashboard(settings=settings)
-        repos |= _repos_from_dashboard(dashboard, namespaces)
-    except Exception:
-        logger.warning("priority miner dashboard discovery failed", exc_info=True)
+    if dashboard_payload:
+        repos |= _repos_from_dashboard(dashboard_payload, namespaces)
 
     hf = HuggingFaceRegistryClient(settings)
     for ns in sorted(namespaces):
