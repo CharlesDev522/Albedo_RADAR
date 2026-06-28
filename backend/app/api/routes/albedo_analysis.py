@@ -1,24 +1,44 @@
 """Albedo duel and king-of-the-hill analysis from Hippius dashboard JSON."""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chain_reader.subnet_commit_rules import model_versions_sql_tuple
 from app.config import get_settings
+from app.db.models import MinerCommitment
+from app.db.session import get_db
 from app.schemas.albedo_analysis import AlbedoAnalysisOverview
 from app.services.albedo_analysis_service import get_albedo_analysis_overview
+from app.services.albedo_miner_lookup import build_miner_lookup
 
 router = APIRouter(prefix="/albedo", tags=["albedo"])
+
+
+async def _load_miner_lookup(db: AsyncSession, subnet: int):
+    rows = (
+        await db.execute(
+            select(MinerCommitment).where(
+                MinerCommitment.subnet == subnet,
+                MinerCommitment.version.in_(model_versions_sql_tuple(subnet)),
+            )
+        )
+    ).scalars().all()
+    return build_miner_lookup(list(rows))
 
 
 @router.get("/analysis", response_model=AlbedoAnalysisOverview)
 async def albedo_analysis_overview(
     subnet: int = Query(default=97, ge=0),
+    db: AsyncSession = Depends(get_db),
 ) -> AlbedoAnalysisOverview:
-    """Cross-dimensional duel analytics: win rates, king history, judges, timeline."""
+    """Cross-dimensional duel analytics: judges, repo/coldkey crowns, king history."""
     if subnet != 97:
         raise HTTPException(status_code=400, detail="Albedo duel analysis is only available for SN97")
     settings = get_settings()
     try:
-        return await get_albedo_analysis_overview(subnet, settings=settings)
+        lookup = await _load_miner_lookup(db, subnet)
+        return await get_albedo_analysis_overview(subnet, settings=settings, miner_lookup=lookup)
     except Exception as exc:
         raise HTTPException(
             status_code=502,

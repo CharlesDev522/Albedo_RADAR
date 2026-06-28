@@ -7,6 +7,8 @@ import {
   shortAddr,
   shortRepo,
   type AlbedoAnalysisOverview,
+  type AlbedoCrownLeaderboardRow,
+  type AlbedoDuelJudgeVote,
   type AlbedoDuelSummary,
   type AlbedoJudgeDetail,
   type AlbedoKingTenure,
@@ -125,11 +127,10 @@ function JudgeCard({ judge }: { judge: AlbedoJudgeDetail }) {
         <Stat label="Avg king" value={fmtScore(judge.avg_king_score)} />
         <Stat label="Picks challenger" value={fmtPct(judge.pick_challenger_pct)} />
         <Stat label="Agrees w/ verdict" value={fmtPct(judge.agree_verdict_pct)} />
-        <Stat
-          label="When challenger wins"
-          value={fmtScore(judge.avg_score_when_challenger_wins)}
-        />
-        <Stat label="When king wins" value={fmtScore(judge.avg_score_when_king_wins)} />
+        <Stat label="Split-panel align" value={fmtPct(judge.split_majority_align_pct)} />
+        <Stat label="Solo dissent wins" value={fmtPct(judge.solo_dissent_win_pct)} />
+        <Stat label="Extreme calls" value={fmtPct(judge.extreme_call_pct)} />
+        <Stat label="Score σ" value={judge.score_std != null ? judge.score_std.toFixed(3) : "—"} />
       </div>
 
       <div className="flex flex-wrap gap-1.5 mt-3 text-[9px]">
@@ -263,52 +264,113 @@ function WinRateTable({ rows, showCoronations = false }: { rows: AlbedoWinRateRo
   );
 }
 
-function JudgeVotes({ scores }: { scores?: Record<string, number> }) {
-  if (!scores || !Object.keys(scores).length) return <span className="text-zinc-600">—</span>;
+function CrownLeaderboard({
+  title,
+  hint,
+  rows,
+  showColdkey = false,
+}: {
+  title: string;
+  hint: string;
+  rows: AlbedoCrownLeaderboardRow[];
+  showColdkey?: boolean;
+}) {
+  if (!rows.length) {
+    return (
+      <section className="panel px-3 py-2">
+        <h3 className="text-[11px] font-semibold text-zinc-200">{title}</h3>
+        <p className="text-[10px] text-zinc-500 mt-2">No crown data yet.</p>
+      </section>
+    );
+  }
   return (
-    <div className="flex flex-wrap gap-0.5">
-      {Object.entries(scores).map(([judge, score]) => {
-        const short = judge.split("/").pop() ?? judge;
-        const pick = score > 0.5;
-        return (
-          <span
-            key={judge}
-            title={`${judge}: ${fmtScore(score)}`}
-            className={`rounded px-1 py-0.5 text-[8px] mono border ${
-              pick
-                ? "border-emerald-500/30 text-emerald-300 bg-emerald-500/10"
-                : "border-rose-500/30 text-rose-300 bg-rose-500/10"
-            }`}
-          >
-            {short.slice(0, 6)} {(score * 100).toFixed(0)}
-          </span>
-        );
-      })}
-    </div>
+    <section className="panel px-3 py-2">
+      <h3 className="text-[11px] font-semibold text-zinc-200">{title}</h3>
+      <p className="text-[9px] text-zinc-600 mt-0.5 mb-2">{hint}</p>
+      <table className="w-full text-[10px]">
+        <thead>
+          <tr className="text-zinc-500 border-b border-zinc-800">
+            <th className="text-left py-1 pr-2">{showColdkey ? "Coldkey" : "Repo"}</th>
+            <th className="text-right py-1 px-1">👑</th>
+            <th className="text-right py-1 px-1">Active</th>
+            <th className="text-right py-1 px-1">Slot reward</th>
+            <th className="text-right py-1 pl-1">Weight</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 12).map((row) => (
+            <tr key={row.key} className="border-b border-zinc-800/50 align-top">
+              <td className="py-1.5 pr-2">
+                <p className="text-zinc-200 truncate max-w-[200px]" title={row.label}>
+                  {showColdkey ? shortAddr(row.label, 6) : shortRepo(row.label, 34)}
+                </p>
+                {row.crown_events[0] && (
+                  <p className="text-[9px] text-zinc-600 mt-0.5">
+                    last v{row.crown_events[0].king_version} · {fmtTime(row.crown_events[0].crowned_at)}
+                  </p>
+                )}
+              </td>
+              <td className="text-right py-1.5 px-1 mono text-amber-300">{row.coronations}</td>
+              <td className="text-right py-1.5 px-1 mono text-zinc-400">{fmtHours(row.total_active_hours)}</td>
+              <td className="text-right py-1.5 px-1 mono text-emerald-300">{fmtHours(row.total_slot_hours)}</td>
+              <td className="text-right py-1.5 pl-1 mono text-zinc-500">
+                {row.current_weight_pct > 0 ? fmtPct(row.current_weight_pct) : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }
 
-function DuelRow({ duel }: { duel: AlbedoDuelSummary }) {
+function JudgeScoreCell({ vote }: { vote: AlbedoDuelJudgeVote | undefined }) {
+  if (!vote) return <td className="py-1.5 px-1 text-center text-zinc-700">—</td>;
+  const agree = vote.agrees_with_verdict;
+  return (
+    <td
+      className={`py-1.5 px-1 text-center mono text-[10px] border-l border-zinc-800/50 ${
+        agree ? "text-emerald-300 bg-emerald-500/5" : "text-rose-300 bg-rose-500/5"
+      }`}
+      title={`${vote.judge}\nch ${fmtScore(vote.challenger_score)} · k ${fmtScore(vote.king_score)}\n${agree ? "matches verdict" : "dissents"}`}
+    >
+      <div>{fmtScore(vote.challenger_score)}</div>
+      <div className="text-[8px] opacity-70">{vote.pick_challenger ? "ch" : "k"}</div>
+    </td>
+  );
+}
+
+function judgeVoteMap(duel: AlbedoDuelSummary): Record<string, AlbedoDuelJudgeVote> {
+  const map: Record<string, AlbedoDuelJudgeVote> = {};
+  for (const v of duel.judge_votes ?? []) {
+    map[v.short_name] = v;
+  }
+  return map;
+}
+
+const JUDGE_COLUMNS = ["glm-5.1", "qwen3.5-397b-a17b", "deepseek-v3.2"];
+
+function DuelRow({ duel, judgeOrder }: { duel: AlbedoDuelSummary; judgeOrder: string[] }) {
   const won = duel.challenger_won;
+  const votes = judgeVoteMap(duel);
   return (
     <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
       <td className="py-1.5 pr-2 text-zinc-500 whitespace-nowrap">{fmtTime(duel.finished_at)}</td>
       <td className="py-1.5 pr-2">
-        <a href={modelLink(duel.model_uri)} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline block truncate max-w-[140px]">
-          {shortRepo(`${duel.namespace}/${duel.model_name}`, 28)}
+        <a href={modelLink(duel.model_uri)} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline block truncate max-w-[130px]">
+          {shortRepo(duel.repo ?? `${duel.namespace}/${duel.model_name}`, 26)}
         </a>
         <span className="text-[9px] text-zinc-600">uid {duel.uid}</span>
       </td>
-      <td className="py-1.5 pr-2 text-zinc-500 truncate max-w-[100px]">
-        vs {duel.king_model_name ? shortRepo(duel.king_model_name, 14) : "—"}
+      <td className="py-1.5 pr-2 text-zinc-500 truncate max-w-[90px]">
+        vs {duel.king_model_name ? shortRepo(duel.king_model_name, 12) : "—"}
       </td>
-      <td className="py-1.5 pr-2">
-        <JudgeVotes scores={duel.judge_scores} />
-      </td>
+      {judgeOrder.map((name) => (
+        <JudgeScoreCell key={name} vote={votes[name]} />
+      ))}
+      <td className="py-1.5 px-1 mono text-zinc-400 text-center">{duel.judge_spread != null ? fmtScore(duel.judge_spread) : "—"}</td>
       <td className="py-1.5 pr-2 mono text-zinc-300">{fmtScore(duel.score_challenger)}</td>
-      <td className={`py-1.5 pr-2 mono ${won ? "text-emerald-300" : "text-rose-300"}`}>
-        {fmtMargin(duel.win_margin)}
-      </td>
+      <td className={`py-1.5 pr-2 mono ${won ? "text-emerald-300" : "text-rose-300"}`}>{fmtMargin(duel.win_margin)}</td>
       <td className="py-1.5">
         <span
           className={`inline-block px-1.5 py-0.5 rounded text-[9px] border ${
@@ -321,6 +383,9 @@ function DuelRow({ duel }: { duel: AlbedoDuelSummary }) {
         >
           {duel.coronated ? "crowned" : won ? "challenger" : "defended"}
         </span>
+        {duel.panel_pattern && !duel.unanimous_panel && (
+          <span className="block text-[8px] text-zinc-600 mt-0.5">{duel.panel_pattern.replace(/_/g, " ")}</span>
+        )}
       </td>
     </tr>
   );
@@ -351,6 +416,11 @@ export default function AlbedoDuelPanel() {
     return () => clearInterval(id);
   }, [refresh]);
 
+  const judgeOrder = useMemo(() => {
+    const fromApi = (data?.judge_details ?? []).map((j) => j.short_name);
+    return fromApi.length ? fromApi : JUDGE_COLUMNS;
+  }, [data]);
+
   const multiSlotHolders = useMemo(
     () => (data?.reign_slot_holders ?? []).filter((h) => h.slots_held > 1),
     [data]
@@ -375,6 +445,9 @@ export default function AlbedoDuelPanel() {
               <h2 className="text-[12px] font-semibold text-zinc-100">Albedo duel analysis</h2>
               <p className="text-[10px] text-zinc-500 mt-0.5">
                 {data.total_duels} duels · {data.coronations} coronations · updated {fmtTime(data.updated_at)}
+                {data.miner_lookup_coverage_pct != null && (
+                  <span className="text-zinc-600"> · repo map {fmtPct(data.miner_lookup_coverage_pct)}</span>
+                )}
               </p>
             </div>
             <SectionTabs section={section} onChange={setSection} />
@@ -420,21 +493,35 @@ export default function AlbedoDuelPanel() {
           </div>
 
           <div className="grid lg:grid-cols-2 gap-3">
+            <CrownLeaderboard
+              title="Most crowns by repo"
+              hint="Coronations and reward hours (active king + slot tenure) merged from on-chain commits"
+              rows={data.crowns_by_repo ?? []}
+            />
+            <CrownLeaderboard
+              title="Most crowns by coldkey"
+              hint="Same reward time rollup grouped by owner coldkey"
+              rows={data.crowns_by_coldkey ?? []}
+              showColdkey
+            />
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-3">
             <section className="panel px-3 py-2">
-              <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Judge snapshot</h3>
+              <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Judge reliability snapshot</h3>
               <div className="grid sm:grid-cols-3 gap-2">
                 {(data.judge_details ?? []).map((j) => (
                   <div key={j.judge} className={`rounded border px-2 py-1.5 text-[10px] ${judgeStyle(j.short_name)}`}>
                     <p className="font-medium">{j.short_name}</p>
-                    <p className="mono mt-1">{fmtScore(j.avg_challenger_score)} ch</p>
-                    <p className="mono text-[9px] opacity-80">{fmtPct(j.agree_verdict_pct)} agree</p>
+                    <p className="mono mt-1">{fmtPct(j.agree_verdict_pct)} align</p>
+                    <p className="mono text-[9px] opacity-80">{j.overturn_duels} overturns</p>
                   </div>
                 ))}
               </div>
             </section>
             <section className="panel px-3 py-2">
-              <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Top namespaces</h3>
-              <WinRateTable rows={data.challenger_by_namespace.slice(0, 8)} showCoronations />
+              <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Top repos (challenger duels)</h3>
+              <WinRateTable rows={(data.challenger_by_repo ?? []).slice(0, 8)} showCoronations />
             </section>
           </div>
         </>
@@ -542,15 +629,30 @@ export default function AlbedoDuelPanel() {
             </table>
           </section>
 
+          <div className="grid lg:grid-cols-2 gap-3">
+            <CrownLeaderboard
+              title="Crown leaders by repo"
+              hint="Full history — slot reward hours ≈ time earning weight"
+              rows={data.crowns_by_repo ?? []}
+            />
+            <CrownLeaderboard
+              title="Crown leaders by coldkey"
+              hint="Owner-level crown count and cumulative reward time"
+              rows={data.crowns_by_coldkey ?? []}
+              showColdkey
+            />
+          </div>
+
           <section className="panel px-3 py-2">
-            <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Coronation history</h3>
+            <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Coronation history (repo / coldkey)</h3>
             <div className="overflow-x-auto">
               <table className="w-full text-[10px]">
                 <thead>
                   <tr className="text-zinc-500 border-b border-zinc-800">
                     <th className="text-left py-1 pr-2">Ver</th>
                     <th className="text-left py-1 pr-2">When</th>
-                    <th className="text-left py-1 pr-2">New king</th>
+                    <th className="text-left py-1 pr-2">Repo</th>
+                    <th className="text-left py-1 pr-2">Coldkey</th>
                     <th className="text-left py-1 pr-2">Defeated</th>
                     <th className="text-left py-1 pr-2">Margin</th>
                   </tr>
@@ -559,10 +661,13 @@ export default function AlbedoDuelPanel() {
                   {data.king_history.map((entry) => (
                     <tr key={entry.eval_run_id} className="border-b border-zinc-800/50">
                       <td className="py-1 pr-2 mono text-amber-300">v{entry.king_version}</td>
-                      <td className="py-1 pr-2 text-zinc-500">{fmtTime(entry.finished_at)}</td>
-                      <td className="py-1 pr-2 text-zinc-300">{shortRepo(entry.model_name, 22)}</td>
+                      <td className="py-1 pr-2 text-zinc-500 whitespace-nowrap">{fmtTime(entry.finished_at)}</td>
+                      <td className="py-1 pr-2 text-zinc-300 truncate max-w-[140px]" title={entry.repo ?? ""}>
+                        {shortRepo(entry.repo ?? entry.model_name, 28)}
+                      </td>
+                      <td className="py-1 pr-2 mono text-zinc-500">{entry.coldkey ? shortAddr(entry.coldkey, 5) : "—"}</td>
                       <td className="py-1 pr-2 text-zinc-500">
-                        {entry.defeated_model_name ? `v${entry.defeated_king_version} ${shortRepo(entry.defeated_model_name, 14)}` : "—"}
+                        {entry.defeated_model_name ? `v${entry.defeated_king_version}` : "—"}
                       </td>
                       <td className="py-1 pr-2 mono text-emerald-300">{fmtMargin(entry.win_margin)}</td>
                     </tr>
@@ -576,24 +681,31 @@ export default function AlbedoDuelPanel() {
 
       {section === "duels" && (
         <section className="panel px-3 py-2">
-          <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Recent duels</h3>
-          <p className="text-[9px] text-zinc-600 mb-2">Per-judge challenger scores · green = favors challenger</p>
+          <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge duel scores</h3>
+          <p className="text-[9px] text-zinc-600 mb-2">
+            Each cell = challenger score from that judge · green = agrees with final verdict · spread = max−min judge score
+          </p>
           <div className="overflow-x-auto">
-            <table className="w-full text-[10px]">
+            <table className="w-full text-[10px] min-w-[720px]">
               <thead>
                 <tr className="text-zinc-500 border-b border-zinc-800">
                   <th className="text-left py-1 pr-2">When</th>
-                  <th className="text-left py-1 pr-2">Challenger</th>
+                  <th className="text-left py-1 pr-2">Challenger repo</th>
                   <th className="text-left py-1 pr-2">King</th>
-                  <th className="text-left py-1 pr-2">Judges</th>
-                  <th className="text-left py-1 pr-2">Score</th>
+                  {judgeOrder.map((name) => (
+                    <th key={name} className={`text-center py-1 px-1 border-l border-zinc-800/50 ${judgeStyle(name).split(" ")[2]}`}>
+                      {name.split("-")[0]}
+                    </th>
+                  ))}
+                  <th className="text-center py-1 px-1 text-zinc-600">σ spread</th>
+                  <th className="text-left py-1 pr-2">Final</th>
                   <th className="text-left py-1 pr-2">Margin</th>
                   <th className="text-left py-1 pr-2">Result</th>
                 </tr>
               </thead>
               <tbody>
                 {data.recent_duels.map((duel) => (
-                  <DuelRow key={duel.eval_run_id} duel={duel} />
+                  <DuelRow key={duel.eval_run_id} duel={duel} judgeOrder={judgeOrder} />
                 ))}
               </tbody>
             </table>

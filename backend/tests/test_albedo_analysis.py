@@ -101,6 +101,8 @@ def test_build_analysis_overview_counts_and_history():
     assert overview.current_king.king_version == 2
     assert len(overview.king_history) == 1
     assert len(overview.judge_details) == 2
+    assert overview.recent_duels[0].judge_votes
+    assert len(overview.recent_duels[0].judge_votes) == 2
     assert overview.judge_details[0].short_name
     assert overview.judge_consensus
     assert len(overview.king_tenures) == 2

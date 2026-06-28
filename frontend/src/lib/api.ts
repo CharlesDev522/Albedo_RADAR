@@ -306,6 +306,16 @@ export interface AlbedoCurrentEval {
   started_at?: string | null;
 }
 
+export interface AlbedoDuelJudgeVote {
+  judge: string;
+  short_name: string;
+  challenger_score: number;
+  king_score: number;
+  pick_challenger: boolean;
+  agrees_with_verdict: boolean;
+  margin_from_neutral: number;
+}
+
 export interface AlbedoDuelSummary {
   eval_run_id: string;
   finished_at: string;
@@ -318,17 +328,25 @@ export interface AlbedoDuelSummary {
   model_uri: string;
   model_name: string;
   namespace: string;
+  repo?: string | null;
+  coldkey?: string | null;
   hotkey: string;
   uid: number;
   king_model_uri?: string | null;
   king_model_name?: string | null;
   king_namespace?: string | null;
+  king_repo?: string | null;
+  king_coldkey?: string | null;
   king_uid?: number | null;
   king_hotkey?: string | null;
   king_version_defended?: number | null;
   valid_turns?: number | null;
   total_turns?: number | null;
   judge_scores?: Record<string, number>;
+  judge_votes?: AlbedoDuelJudgeVote[];
+  judge_spread?: number | null;
+  panel_pattern?: string | null;
+  unanimous_panel?: boolean;
 }
 
 export interface AlbedoKingCoronation {
@@ -336,6 +354,8 @@ export interface AlbedoKingCoronation {
   model_uri: string;
   model_name: string;
   namespace: string;
+  repo?: string | null;
+  coldkey?: string | null;
   hotkey: string;
   uid: number;
   finished_at: string;
@@ -347,6 +367,8 @@ export interface AlbedoKingCoronation {
   defeated_model_uri?: string | null;
   defeated_model_name?: string | null;
   defeated_namespace?: string | null;
+  defeated_repo?: string | null;
+  defeated_coldkey?: string | null;
 }
 
 export interface AlbedoWinRateRow {
@@ -373,10 +395,14 @@ export interface AlbedoJudgeDetail {
   duels: number;
   avg_challenger_score: number;
   avg_king_score: number;
+  score_std?: number | null;
   pick_challenger_pct: number;
   pick_king_pct: number;
   agree_verdict_pct: number;
   overturn_duels: number;
+  split_majority_align_pct?: number | null;
+  solo_dissent_win_pct?: number | null;
+  extreme_call_pct?: number | null;
   avg_score_when_challenger_wins?: number | null;
   avg_score_when_king_wins?: number | null;
   unanimous_challenger_duels: number;
@@ -435,6 +461,8 @@ export interface AlbedoKingTenure {
   model_uri: string;
   model_name: string;
   namespace: string;
+  repo?: string | null;
+  coldkey?: string | null;
   hotkey: string;
   uid: number;
   reign_rank?: number | null;
@@ -453,6 +481,33 @@ export interface AlbedoKingTenure {
   defense_pct?: number | null;
   coronation_margin?: number | null;
   defeated_king_version?: number | null;
+}
+
+export interface AlbedoCrownEvent {
+  king_version: number;
+  crowned_at: string;
+  active_until?: string | null;
+  slot_until?: string | null;
+  active_hours?: number | null;
+  slot_hours?: number | null;
+  repo?: string | null;
+  coldkey?: string | null;
+  hotkey: string;
+  uid: number;
+  model_name: string;
+  is_current_king: boolean;
+}
+
+export interface AlbedoCrownLeaderboardRow {
+  key: string;
+  label: string;
+  group_type: string;
+  coronations: number;
+  total_active_hours: number;
+  total_slot_hours: number;
+  current_weight_pct: number;
+  reign_slots: number;
+  crown_events: AlbedoCrownEvent[];
 }
 
 export interface AlbedoAnalysisOverview {
@@ -477,9 +532,12 @@ export interface AlbedoAnalysisOverview {
   king_history: AlbedoKingCoronation[];
   king_tenures: AlbedoKingTenure[];
   reign_slot_holders: AlbedoReignSlotHolder[];
+  crowns_by_repo: AlbedoCrownLeaderboardRow[];
+  crowns_by_coldkey: AlbedoCrownLeaderboardRow[];
   recent_duels: AlbedoDuelSummary[];
   challenger_by_namespace: AlbedoWinRateRow[];
   challenger_by_hotkey: AlbedoWinRateRow[];
+  challenger_by_repo: AlbedoWinRateRow[];
   king_defense_by_model: AlbedoWinRateRow[];
   judge_aggregates: AlbedoJudgeAggregate[];
   judge_details: AlbedoJudgeDetail[];
@@ -488,6 +546,7 @@ export interface AlbedoAnalysisOverview {
   margin_histogram: AlbedoMarginBucket[];
   timeline: AlbedoTimelinePoint[];
   pipeline: AlbedoPipelineStage[];
+  miner_lookup_coverage_pct?: number | null;
   note: string;
 }
 

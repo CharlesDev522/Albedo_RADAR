@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
-from statistics import mean
+from statistics import mean, pstdev
 from typing import Any
 
 from app.config import Settings, get_settings
 from app.integrations.albedo_dashboard import fetch_dashboard, fetch_state
 from app.schemas.albedo_analysis import (
     AlbedoAnalysisOverview,
+    AlbedoCrownEvent,
+    AlbedoCrownLeaderboardRow,
     AlbedoCurrentEval,
+    AlbedoDuelJudgeVote,
     AlbedoDuelSummary,
     AlbedoJudgeAggregate,
     AlbedoJudgeConsensus,
@@ -26,6 +29,7 @@ from app.schemas.albedo_analysis import (
     AlbedoTimelinePoint,
     AlbedoWinRateRow,
 )
+from app.services.albedo_miner_lookup import MinerIdentity, MinerLookup, build_miner_lookup
 
 MARGIN_BUCKETS: list[tuple[str, float, float]] = [
     ("≤ -20%", -1.0, -0.20),
@@ -42,7 +46,6 @@ REIGN_CHAIN_SLOTS = 5
 
 
 def parse_model_uri(model_uri: str | None) -> tuple[str, str, str]:
-    """Return (namespace, model_name, full_uri) from an Albedo model URI."""
     if not model_uri:
         return "", "", ""
     base = model_uri.split("@", 1)[0]
@@ -80,6 +83,20 @@ def _hours_between(start: str | None, end: str | None) -> float | None:
     return round((b - a).total_seconds() / 3600.0, 1)
 
 
+def _resolve_repo(
+    lookup: MinerLookup | None,
+    *,
+    hotkey: str,
+    uid: int | None,
+    namespace: str,
+    model_name: str,
+) -> tuple[str | None, str | None]:
+    ident = lookup.resolve(hotkey=hotkey, uid=uid) if lookup else None
+    repo = ident.repo if ident and ident.repo else (f"{namespace}/{model_name}" if namespace else None)
+    coldkey = ident.coldkey if ident else None
+    return repo, coldkey
+
+
 def _win_rate_row(
     key: str,
     label: str,
@@ -102,96 +119,6 @@ def _win_rate_row(
         avg_margin=round(avg_margin, 4) if avg_margin is not None else None,
         coronations=coronations,
     )
-
-
-def _duel_summary(run: dict[str, Any]) -> AlbedoDuelSummary:
-    ns, name, uri = parse_model_uri(run.get("model_uri"))
-    king = run.get("king") or {}
-    k_ns, k_name, k_uri = parse_model_uri(king.get("model_uri"))
-    breakdown = run.get("score_breakdown") or {}
-    judge_scores = {str(k): float(v) for k, v in (breakdown.get("by_judge") or {}).items()}
-    return AlbedoDuelSummary(
-        eval_run_id=run.get("eval_run_id", ""),
-        finished_at=run.get("finished_at", ""),
-        challenger_won=bool(run.get("challenger_won")),
-        coronated=bool(run.get("coronated")),
-        king_version=run.get("king_version"),
-        score_challenger=float(run.get("score_challenger") or 0),
-        score_king=float(run.get("score_king") or 0),
-        win_margin=float(run.get("win_margin") or 0),
-        model_uri=uri,
-        model_name=name,
-        namespace=ns,
-        hotkey=run.get("hotkey", ""),
-        uid=int(run.get("uid") or 0),
-        king_model_uri=k_uri or None,
-        king_model_name=k_name or None,
-        king_namespace=k_ns or None,
-        king_uid=int(king["uid"]) if king.get("uid") is not None else None,
-        king_hotkey=king.get("hotkey"),
-        king_version_defended=int(king["king_version"]) if king.get("king_version") is not None else None,
-        valid_turns=run.get("valid_turns"),
-        total_turns=run.get("total_turns"),
-        judge_scores=judge_scores,
-    )
-
-
-def _reign_member(member: dict[str, Any]) -> AlbedoReignMember:
-    ns, name, uri = parse_model_uri(member.get("model_uri"))
-    return AlbedoReignMember(
-        king_version=int(member.get("king_version") or 0),
-        model_uri=uri,
-        model_name=name,
-        namespace=ns,
-        hotkey=member.get("hotkey", ""),
-        uid=int(member.get("uid") or 0),
-        weight_bps=int(member.get("weight_bps") or 0),
-        score_challenger=member.get("score_challenger"),
-        score_king=member.get("score_king"),
-        eval_run_id=member.get("eval_run_id"),
-    )
-
-
-def _current_eval(raw: dict[str, Any] | None) -> AlbedoCurrentEval | None:
-    if not raw:
-        return None
-    ns, name, uri = parse_model_uri(raw.get("model_uri"))
-    return AlbedoCurrentEval(
-        eval_run_id=raw.get("eval_run_id", ""),
-        state=raw.get("state", ""),
-        model_uri=uri,
-        model_name=name,
-        namespace=ns,
-        hotkey=raw.get("hotkey", ""),
-        uid=int(raw.get("uid") or 0),
-        sample_count=raw.get("sample_count"),
-        generated_sample_count=raw.get("generated_sample_count"),
-        started_at=raw.get("started_at"),
-    )
-
-
-def _margin_bucket(margin: float) -> str:
-    for label, lo, hi in MARGIN_BUCKETS:
-        if lo < margin <= hi or (label.startswith("≤") and margin <= hi) or (label.startswith(">") and margin > lo):
-            return label
-    return MARGIN_BUCKETS[-1][0]
-
-
-def _build_pipeline(state: dict[str, Any] | None) -> list[AlbedoPipelineStage]:
-    if not state:
-        return []
-    stages: list[AlbedoPipelineStage] = []
-    for key, value in state.items():
-        if not isinstance(value, dict):
-            continue
-        stages.append(
-            AlbedoPipelineStage(
-                stage=key,
-                status=value.get("state") or value.get("status"),
-                detail=value.get("detail") or value.get("message"),
-            )
-        )
-    return stages
 
 
 def _judge_votes(run: dict[str, Any]) -> dict[str, bool]:
@@ -229,6 +156,161 @@ CONSENSUS_LABELS = {
 }
 
 
+def _build_judge_vote_rows(run: dict[str, Any]) -> list[AlbedoDuelJudgeVote]:
+    challenger_won = bool(run.get("challenger_won"))
+    breakdown = run.get("score_breakdown") or {}
+    rows: list[AlbedoDuelJudgeVote] = []
+    for judge, score in (breakdown.get("by_judge") or {}).items():
+        s = float(score)
+        pick_ch = s > 0.5
+        rows.append(
+            AlbedoDuelJudgeVote(
+                judge=str(judge),
+                short_name=judge_short_name(str(judge)),
+                challenger_score=round(s, 4),
+                king_score=round(1.0 - s, 4),
+                pick_challenger=pick_ch,
+                agrees_with_verdict=pick_ch == challenger_won,
+                margin_from_neutral=round(s - 0.5, 4),
+            )
+        )
+    return rows
+
+
+def _duel_summary(
+    run: dict[str, Any],
+    lookup: MinerLookup | None = None,
+) -> AlbedoDuelSummary:
+    ns, name, uri = parse_model_uri(run.get("model_uri"))
+    king = run.get("king") or {}
+    k_ns, k_name, k_uri = parse_model_uri(king.get("model_uri"))
+    uid = int(run.get("uid") or 0)
+    king_uid = int(king["uid"]) if king.get("uid") is not None else None
+    repo, coldkey = _resolve_repo(lookup, hotkey=run.get("hotkey", ""), uid=uid, namespace=ns, model_name=name)
+    king_repo, king_coldkey = _resolve_repo(
+        lookup,
+        hotkey=king.get("hotkey", ""),
+        uid=king_uid,
+        namespace=k_ns,
+        model_name=k_name,
+    )
+    judge_votes = _build_judge_vote_rows(run)
+    scores = [v.challenger_score for v in judge_votes]
+    judge_spread = round(max(scores) - min(scores), 4) if len(scores) >= 2 else None
+    votes = _judge_votes(run)
+    pattern = _consensus_pattern(votes)
+    return AlbedoDuelSummary(
+        eval_run_id=run.get("eval_run_id", ""),
+        finished_at=run.get("finished_at", ""),
+        challenger_won=bool(run.get("challenger_won")),
+        coronated=bool(run.get("coronated")),
+        king_version=run.get("king_version"),
+        score_challenger=float(run.get("score_challenger") or 0),
+        score_king=float(run.get("score_king") or 0),
+        win_margin=float(run.get("win_margin") or 0),
+        model_uri=uri,
+        model_name=name,
+        namespace=ns,
+        repo=repo,
+        coldkey=coldkey,
+        hotkey=run.get("hotkey", ""),
+        uid=uid,
+        king_model_uri=k_uri or None,
+        king_model_name=k_name or None,
+        king_namespace=k_ns or None,
+        king_repo=king_repo,
+        king_coldkey=king_coldkey,
+        king_uid=king_uid,
+        king_hotkey=king.get("hotkey"),
+        king_version_defended=int(king["king_version"]) if king.get("king_version") is not None else None,
+        valid_turns=run.get("valid_turns"),
+        total_turns=run.get("total_turns"),
+        judge_scores={v.judge: v.challenger_score for v in judge_votes},
+        judge_votes=judge_votes,
+        judge_spread=judge_spread,
+        panel_pattern=pattern,
+        unanimous_panel=pattern in ("unanimous_challenger", "unanimous_king"),
+    )
+
+
+def _reign_member(member: dict[str, Any], lookup: MinerLookup | None) -> AlbedoReignMember:
+    ns, name, uri = parse_model_uri(member.get("model_uri"))
+    uid = int(member.get("uid") or 0)
+    repo, coldkey = _resolve_repo(lookup, hotkey=member.get("hotkey", ""), uid=uid, namespace=ns, model_name=name)
+    return AlbedoReignMember(
+        king_version=int(member.get("king_version") or 0),
+        model_uri=uri,
+        model_name=name,
+        namespace=ns,
+        hotkey=member.get("hotkey", ""),
+        uid=uid,
+        weight_bps=int(member.get("weight_bps") or 0),
+        repo=repo,
+        coldkey=coldkey,
+        score_challenger=member.get("score_challenger"),
+        score_king=member.get("score_king"),
+        eval_run_id=member.get("eval_run_id"),
+    )
+
+
+def _current_eval(raw: dict[str, Any] | None, lookup: MinerLookup | None) -> AlbedoCurrentEval | None:
+    if not raw:
+        return None
+    ns, name, uri = parse_model_uri(raw.get("model_uri"))
+    uid = int(raw.get("uid") or 0)
+    repo, coldkey = _resolve_repo(lookup, hotkey=raw.get("hotkey", ""), uid=uid, namespace=ns, model_name=name)
+    return AlbedoCurrentEval(
+        eval_run_id=raw.get("eval_run_id", ""),
+        state=raw.get("state", ""),
+        model_uri=uri,
+        model_name=name,
+        namespace=ns,
+        hotkey=raw.get("hotkey", ""),
+        uid=uid,
+        repo=repo,
+        coldkey=coldkey,
+        sample_count=raw.get("sample_count"),
+        generated_sample_count=raw.get("generated_sample_count"),
+        started_at=raw.get("started_at"),
+    )
+
+
+def _margin_bucket(margin: float) -> str:
+    for label, lo, hi in MARGIN_BUCKETS:
+        if lo < margin <= hi or (label.startswith("≤") and margin <= hi) or (label.startswith(">") and margin > lo):
+            return label
+    return MARGIN_BUCKETS[-1][0]
+
+
+def _build_pipeline(state: dict[str, Any] | None) -> list[AlbedoPipelineStage]:
+    if not state:
+        return []
+    stages: list[AlbedoPipelineStage] = []
+    for key, value in state.items():
+        if not isinstance(value, dict):
+            continue
+        stages.append(
+            AlbedoPipelineStage(
+                stage=key,
+                status=value.get("state") or value.get("status"),
+                detail=value.get("detail") or value.get("message"),
+            )
+        )
+    return stages
+
+
+def _solo_dissenter(votes: dict[str, bool]) -> str | None:
+    if len(votes) != 3:
+        return None
+    ch_votes = [j for j, v in votes.items() if v]
+    k_votes = [j for j, v in votes.items() if not v]
+    if len(ch_votes) == 1:
+        return ch_votes[0]
+    if len(k_votes) == 1:
+        return k_votes[0]
+    return None
+
+
 def _build_judge_details(
     eval_runs: list[dict[str, Any]],
     judge_models: list[str],
@@ -244,6 +326,11 @@ def _build_judge_details(
             "unanimous_challenger": 0,
             "unanimous_king": 0,
             "split": 0,
+            "split_agree": 0,
+            "split_total": 0,
+            "solo_dissent": 0,
+            "solo_dissent_wins": 0,
+            "extreme": 0,
         }
     )
     consensus_counts: dict[str, dict[str, int]] = defaultdict(lambda: {"duels": 0, "ch_wins": 0, "k_wins": 0})
@@ -252,14 +339,16 @@ def _build_judge_details(
         votes = _judge_votes(run)
         pattern = _consensus_pattern(votes)
         consensus_counts[pattern]["duels"] += 1
-        if run.get("challenger_won"):
+        challenger_won = bool(run.get("challenger_won"))
+        if challenger_won:
             consensus_counts[pattern]["ch_wins"] += 1
         else:
             consensus_counts[pattern]["k_wins"] += 1
 
-        challenger_won = bool(run.get("challenger_won"))
         breakdown = run.get("score_breakdown") or {}
         by_judge = breakdown.get("by_judge") or {}
+        is_split = pattern in ("split_2_1_challenger", "split_1_2_king")
+        dissenter = _solo_dissenter(votes)
 
         if len(votes) >= 2:
             all_ch = all(votes.values())
@@ -283,10 +372,21 @@ def _build_judge_details(
                 per_judge[judge]["agree"] += 1
             else:
                 per_judge[judge]["overturn"] += 1
+            if s >= 0.6 or s <= 0.4:
+                per_judge[judge]["extreme"] += 1
             if challenger_won:
                 per_judge[judge]["when_ch_wins"].append(s)
             else:
                 per_judge[judge]["when_k_wins"].append(s)
+            if is_split:
+                per_judge[judge]["split_total"] += 1
+                if picks_ch == challenger_won:
+                    per_judge[judge]["split_agree"] += 1
+            if dissenter == judge:
+                per_judge[judge]["solo_dissent"] += 1
+                dissenter_pick = votes[judge]
+                if dissenter_pick == challenger_won:
+                    per_judge[judge]["solo_dissent_wins"] += 1
 
     ordered_judges = judge_models or sorted(per_judge.keys())
     aggregates: list[AlbedoJudgeAggregate] = []
@@ -313,10 +413,18 @@ def _build_judge_details(
                 duels=duels,
                 avg_challenger_score=round(avg, 4),
                 avg_king_score=round(1.0 - avg, 4),
+                score_std=round(pstdev(stats["scores"]), 4) if len(stats["scores"]) > 1 else 0.0,
                 pick_challenger_pct=round(stats["pick_challenger"] / duels * 100, 1),
                 pick_king_pct=round((duels - stats["pick_challenger"]) / duels * 100, 1),
                 agree_verdict_pct=round(stats["agree"] / duels * 100, 1),
                 overturn_duels=stats["overturn"],
+                split_majority_align_pct=round(stats["split_agree"] / stats["split_total"] * 100, 1)
+                if stats["split_total"]
+                else None,
+                solo_dissent_win_pct=round(stats["solo_dissent_wins"] / stats["solo_dissent"] * 100, 1)
+                if stats["solo_dissent"]
+                else None,
+                extreme_call_pct=round(stats["extreme"] / duels * 100, 1),
                 avg_score_when_challenger_wins=round(mean(stats["when_ch_wins"]), 4)
                 if stats["when_ch_wins"]
                 else None,
@@ -339,18 +447,27 @@ def _build_judge_details(
             challenger_wins=stats["ch_wins"],
             king_wins=stats["k_wins"],
         )
-        for pattern, stats in sorted(
-            consensus_counts.items(),
-            key=lambda x: -x[1]["duels"],
-        )
+        for pattern, stats in sorted(consensus_counts.items(), key=lambda x: -x[1]["duels"])
         if stats["duels"] > 0 and pattern != "unknown"
     ]
     return aggregates, details, consensus
 
 
-def _build_reign_slot_holders(reign_members: list[AlbedoReignMember]) -> list[AlbedoReignSlotHolder]:
+def _build_reign_slot_holders(
+    reign_members: list[AlbedoReignMember],
+    lookup: MinerLookup | None,
+) -> list[AlbedoReignSlotHolder]:
     grouped: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"slots": 0, "weight_bps": 0, "versions": [], "uid": 0, "hotkey": "", "label": ""}
+        lambda: {
+            "slots": 0,
+            "weight_bps": 0,
+            "versions": [],
+            "uid": 0,
+            "hotkey": "",
+            "label": "",
+            "repo": None,
+            "coldkey": None,
+        }
     )
     for member in reign_members:
         key = member.hotkey or member.model_uri
@@ -360,11 +477,15 @@ def _build_reign_slot_holders(reign_members: list[AlbedoReignMember]) -> list[Al
         g["versions"].append(member.king_version)
         g["uid"] = member.uid
         g["hotkey"] = member.hotkey
-        g["label"] = f"{member.namespace}/{member.model_name}"
+        g["label"] = member.repo or f"{member.namespace}/{member.model_name}"
+        g["repo"] = member.repo
+        g["coldkey"] = member.coldkey
     rows = [
         AlbedoReignSlotHolder(
             key=key,
             label=data["label"],
+            repo=data["repo"],
+            coldkey=data["coldkey"],
             hotkey=data["hotkey"],
             uid=data["uid"],
             slots_held=data["slots"],
@@ -383,18 +504,17 @@ def _build_king_tenures(
     reign_members: list[AlbedoReignMember],
     king_history: list[AlbedoKingCoronation],
     updated_at: str | None,
+    lookup: MinerLookup | None,
 ) -> list[AlbedoKingTenure]:
     coronations_by_version = {c.king_version: c for c in king_history}
     sorted_coronations = sorted(king_history, key=lambda c: c.king_version)
     version_to_coronation_time = {c.king_version: c.finished_at for c in sorted_coronations}
 
-    # When version K is dethroned as active king: next coronation that defeated K.
     dethroned_at: dict[int, str] = {}
     for cor in sorted_coronations:
         if cor.defeated_king_version is not None:
             dethroned_at[cor.defeated_king_version] = cor.finished_at
 
-    # Slot exit: 5 newer coronations push the oldest slot out.
     slot_exit_at: dict[int, str] = {}
     versions_sorted = [c.king_version for c in sorted_coronations]
     for idx, version in enumerate(versions_sorted):
@@ -424,6 +544,10 @@ def _build_king_tenures(
         namespace = reign_member.namespace if reign_member else coronation.namespace
         hotkey = reign_member.hotkey if reign_member else coronation.hotkey
         uid = reign_member.uid if reign_member else coronation.uid
+        repo, coldkey = _resolve_repo(lookup, hotkey=hotkey, uid=uid, namespace=namespace, model_name=model_name)
+        if coronation:
+            repo = coronation.repo or repo
+            coldkey = coronation.coldkey or coldkey
 
         coronation_at = coronation.finished_at if coronation else None
         active_until = dethroned_at.get(version)
@@ -458,6 +582,8 @@ def _build_king_tenures(
                 model_uri=model_uri,
                 model_name=model_name,
                 namespace=namespace,
+                repo=repo,
+                coldkey=coldkey,
                 hotkey=hotkey,
                 uid=uid,
                 reign_rank=rank,
@@ -485,15 +611,119 @@ def _build_king_tenures(
     return tenures
 
 
+def _build_crown_leaderboards(
+    king_history: list[AlbedoKingCoronation],
+    reign_members: list[AlbedoReignMember],
+    updated_at: str | None,
+) -> tuple[list[AlbedoCrownLeaderboardRow], list[AlbedoCrownLeaderboardRow]]:
+    """Aggregate crown reward time by repo and coldkey across full coronation history."""
+    sorted_coronations = sorted(king_history, key=lambda c: c.king_version)
+    version_to_time = {c.king_version: c.finished_at for c in sorted_coronations}
+    dethroned_at: dict[int, str] = {}
+    for cor in sorted_coronations:
+        if cor.defeated_king_version is not None:
+            dethroned_at[cor.defeated_king_version] = cor.finished_at
+    slot_exit_at: dict[int, str] = {}
+    versions_sorted = [c.king_version for c in sorted_coronations]
+    for idx, version in enumerate(versions_sorted):
+        exit_idx = idx + REIGN_CHAIN_SLOTS
+        if exit_idx < len(versions_sorted):
+            slot_exit_at[version] = version_to_time[versions_sorted[exit_idx]]
+
+    reign_versions = {m.king_version for m in reign_members}
+    reign_weight = {m.king_version: m.weight_bps for m in reign_members}
+    now = updated_at or datetime.now(timezone.utc).isoformat()
+    current_king_version = reign_members[0].king_version if reign_members else None
+
+    events: list[AlbedoCrownEvent] = []
+    for cor in sorted_coronations:
+        active_until = dethroned_at.get(cor.king_version)
+        if cor.king_version == current_king_version:
+            active_until = None
+        slot_until = slot_exit_at.get(cor.king_version)
+        if cor.king_version in reign_versions and not slot_until:
+            slot_until = None
+        active_end = active_until or (now if cor.king_version == current_king_version else dethroned_at.get(cor.king_version) or now)
+        slot_end = slot_until or (now if cor.king_version in reign_versions else slot_exit_at.get(cor.king_version) or now)
+        events.append(
+            AlbedoCrownEvent(
+                king_version=cor.king_version,
+                crowned_at=cor.finished_at,
+                active_until=active_until,
+                slot_until=slot_until,
+                active_hours=_hours_between(cor.finished_at, active_end if active_until else now),
+                slot_hours=_hours_between(
+                    cor.finished_at,
+                    slot_end if slot_until else now if cor.king_version in reign_versions else slot_end,
+                ),
+                repo=cor.repo,
+                coldkey=cor.coldkey,
+                hotkey=cor.hotkey,
+                uid=cor.uid,
+                model_name=cor.model_name,
+                is_current_king=cor.king_version == current_king_version,
+            )
+        )
+
+    def _accumulate(group_type: str, key_fn) -> list[AlbedoCrownLeaderboardRow]:
+        grouped: dict[str, dict[str, Any]] = defaultdict(
+            lambda: {
+                "label": "",
+                "coronations": 0,
+                "active_hours": 0.0,
+                "slot_hours": 0.0,
+                "weight_pct": 0.0,
+                "reign_slots": 0,
+                "events": [],
+            }
+        )
+        for event in events:
+            key = key_fn(event)
+            if not key:
+                continue
+            g = grouped[key]
+            g["label"] = key
+            g["coronations"] += 1
+            g["active_hours"] += event.active_hours or 0.0
+            g["slot_hours"] += event.slot_hours or 0.0
+            if event.king_version in reign_weight:
+                g["weight_pct"] = max(g["weight_pct"], reign_weight[event.king_version] / 100.0)
+            g["events"].append(event)
+
+        rows = [
+            AlbedoCrownLeaderboardRow(
+                key=key,
+                label=data["label"],
+                group_type=group_type,
+                coronations=data["coronations"],
+                total_active_hours=round(data["active_hours"], 1),
+                total_slot_hours=round(data["slot_hours"], 1),
+                current_weight_pct=round(data["weight_pct"], 1),
+                reign_slots=0,
+                crown_events=sorted(data["events"], key=lambda e: e.king_version, reverse=True),
+            )
+            for key, data in grouped.items()
+        ]
+        rows.sort(key=lambda r: (-r.coronations, -r.total_slot_hours, -r.total_active_hours))
+        return rows
+
+    by_repo = _accumulate("repo", lambda e: e.repo)
+    by_coldkey = _accumulate("coldkey", lambda e: e.coldkey)
+    return by_repo, by_coldkey
+
+
 def build_analysis_overview(
     dashboard: dict[str, Any],
     *,
     state: dict[str, Any] | None = None,
     subnet: int = 97,
     source_url: str,
+    miner_lookup: MinerLookup | None = None,
 ) -> AlbedoAnalysisOverview:
     eval_runs: list[dict[str, Any]] = list(dashboard.get("eval_runs") or [])
-    reign_members = [_reign_member(m) for m in (dashboard.get("reign") or {}).get("members") or []]
+    reign_members = [
+        _reign_member(m, miner_lookup) for m in (dashboard.get("reign") or {}).get("members") or []
+    ]
     judge_models = list((dashboard.get("chain") or {}).get("judge_models") or [])
     updated_at = dashboard.get("updated_at")
 
@@ -507,6 +737,7 @@ def build_analysis_overview(
     k_scores = [float(r.get("score_king") or 0) for r in eval_runs]
 
     ns_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {"duels": 0, "wins": 0, "margins": [], "coronations": 0})
+    repo_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {"duels": 0, "wins": 0, "margins": [], "coronations": 0})
     hk_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {"duels": 0, "wins": 0, "margins": [], "coronations": 0, "uid": None})
     king_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {"duels": 0, "wins": 0, "margins": []})
     metric_scores: dict[str, list[float]] = defaultdict(list)
@@ -516,20 +747,19 @@ def build_analysis_overview(
     king_history: list[AlbedoKingCoronation] = []
 
     for run in eval_runs:
-        summary = _duel_summary(run)
+        summary = _duel_summary(run, miner_lookup)
         ns = summary.namespace or "unknown"
         hk = summary.hotkey or "unknown"
+        repo_key = summary.repo or f"{summary.namespace}/{summary.model_name}"
         won = summary.challenger_won
         margin = summary.win_margin
 
-        ns_stats[ns]["duels"] += 1
-        hk_stats[hk]["duels"] += 1
+        for bucket, key in ((ns_stats, ns), (repo_stats, repo_key), (hk_stats, hk)):
+            bucket[key]["duels"] += 1
+            if won:
+                bucket[key]["wins"] += 1
+            bucket[key]["margins"].append(margin)
         hk_stats[hk]["uid"] = summary.uid
-        if won:
-            ns_stats[ns]["wins"] += 1
-            hk_stats[hk]["wins"] += 1
-        ns_stats[ns]["margins"].append(margin)
-        hk_stats[hk]["margins"].append(margin)
 
         king_key = summary.king_model_uri or summary.king_model_name or "unknown"
         king_stats[king_key]["duels"] += 1
@@ -554,16 +784,26 @@ def build_analysis_overview(
                 timeline_raw[day]["coronations"] += 1
 
         if run.get("coronated"):
-            ns_stats[ns]["coronations"] += 1
-            hk_stats[hk]["coronations"] += 1
+            for bucket, key in ((ns_stats, ns), (repo_stats, repo_key), (hk_stats, hk)):
+                bucket[key]["coronations"] += 1
             defeated = run.get("king") or {}
             d_ns, d_name, d_uri = parse_model_uri(defeated.get("model_uri"))
+            d_uid = int(defeated["uid"]) if defeated.get("uid") is not None else None
+            d_repo, d_coldkey = _resolve_repo(
+                miner_lookup,
+                hotkey=defeated.get("hotkey", ""),
+                uid=d_uid,
+                namespace=d_ns,
+                model_name=d_name,
+            )
             king_history.append(
                 AlbedoKingCoronation(
                     king_version=int(run.get("king_version") or 0),
                     model_uri=summary.model_uri,
                     model_name=summary.model_name,
                     namespace=summary.namespace,
+                    repo=summary.repo,
+                    coldkey=summary.coldkey,
                     hotkey=summary.hotkey,
                     uid=summary.uid,
                     finished_at=summary.finished_at,
@@ -575,6 +815,8 @@ def build_analysis_overview(
                     defeated_model_uri=d_uri or None,
                     defeated_model_name=d_name or None,
                     defeated_namespace=d_ns or None,
+                    defeated_repo=d_repo,
+                    defeated_coldkey=d_coldkey,
                 )
             )
 
@@ -605,8 +847,11 @@ def build_analysis_overview(
         return rows
 
     judge_aggregates, judge_details, judge_consensus = _build_judge_details(eval_runs, judge_models)
-    reign_slot_holders = _build_reign_slot_holders(reign_members)
-    king_tenures = _build_king_tenures(eval_runs, reign_members, king_history, updated_at)
+    reign_slot_holders = _build_reign_slot_holders(reign_members, miner_lookup)
+    king_tenures = _build_king_tenures(eval_runs, reign_members, king_history, updated_at, miner_lookup)
+    crowns_by_repo, crowns_by_coldkey = _build_crown_leaderboards(
+        king_history, reign_members, updated_at
+    )
 
     metric_aggregates = [
         AlbedoMetricAggregate(
@@ -634,7 +879,11 @@ def build_analysis_overview(
         for day, v in sorted(timeline_raw.items())
     ]
 
-    recent_duels = [_duel_summary(r) for r in eval_runs[:40]]
+    recent_duels = [_duel_summary(r, miner_lookup) for r in eval_runs[:60]]
+
+    lookup_note = ""
+    if miner_lookup and miner_lookup.by_hotkey:
+        lookup_note = f" Repo/coldkey merged from {len(miner_lookup.by_hotkey)} on-chain commits ({miner_lookup.coverage_pct}% with repo)."
 
     return AlbedoAnalysisOverview(
         subnet=subnet,
@@ -652,13 +901,16 @@ def build_analysis_overview(
         avg_king_score=round(mean(k_scores), 4) if k_scores else None,
         reign=reign_members,
         current_king=reign_members[0] if reign_members else None,
-        current_eval=_current_eval(dashboard.get("current_eval")),
+        current_eval=_current_eval(dashboard.get("current_eval"), miner_lookup),
         queue_length=len(dashboard.get("queue") or []),
         king_history=king_history,
         king_tenures=king_tenures,
         reign_slot_holders=reign_slot_holders,
+        crowns_by_repo=crowns_by_repo,
+        crowns_by_coldkey=crowns_by_coldkey,
         recent_duels=recent_duels,
         challenger_by_namespace=_sorted_rows(ns_stats, lambda k, _s: k, min_duels=2, include_coronations=True)[:20],
+        challenger_by_repo=_sorted_rows(repo_stats, lambda k, _s: k, min_duels=2, include_coronations=True)[:20],
         challenger_by_hotkey=_sorted_rows(
             hk_stats,
             lambda k, s: f"uid {s.get('uid')} · {k[:8]}…" if len(k) > 12 else f"uid {s.get('uid')} · {k}",
@@ -677,7 +929,8 @@ def build_analysis_overview(
         margin_histogram=margin_histogram,
         timeline=timeline,
         pipeline=_build_pipeline(state),
-        note="Live duel data from Hippius Albedo dashboard JSON (eval_runs + reign chain).",
+        miner_lookup_coverage_pct=miner_lookup.coverage_pct if miner_lookup else None,
+        note="Live duel data from Hippius Albedo dashboard JSON (eval_runs + reign chain)." + lookup_note,
     )
 
 
@@ -685,6 +938,7 @@ async def get_albedo_analysis_overview(
     subnet: int = 97,
     *,
     settings: Settings | None = None,
+    miner_lookup: MinerLookup | None = None,
 ) -> AlbedoAnalysisOverview:
     settings = settings or get_settings()
     source_url = f"{settings.albedo_dashboard_url.rstrip('/')}/data/dashboard.json"
@@ -699,4 +953,5 @@ async def get_albedo_analysis_overview(
         state=state_payload,
         subnet=subnet,
         source_url=source_url,
+        miner_lookup=miner_lookup,
     )

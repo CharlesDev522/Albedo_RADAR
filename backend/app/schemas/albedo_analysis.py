@@ -13,6 +13,8 @@ class AlbedoReignMember(BaseModel):
     hotkey: str
     uid: int
     weight_bps: int
+    repo: str | None = None
+    coldkey: str | None = None
     score_challenger: float | None = None
     score_king: float | None = None
     eval_run_id: str | None = None
@@ -26,9 +28,21 @@ class AlbedoCurrentEval(BaseModel):
     namespace: str
     hotkey: str
     uid: int
+    repo: str | None = None
+    coldkey: str | None = None
     sample_count: int | None = None
     generated_sample_count: int | None = None
     started_at: str | None = None
+
+
+class AlbedoDuelJudgeVote(BaseModel):
+    judge: str
+    short_name: str
+    challenger_score: float
+    king_score: float
+    pick_challenger: bool
+    agrees_with_verdict: bool
+    margin_from_neutral: float
 
 
 class AlbedoDuelSummary(BaseModel):
@@ -43,17 +57,25 @@ class AlbedoDuelSummary(BaseModel):
     model_uri: str
     model_name: str
     namespace: str
+    repo: str | None = None
+    coldkey: str | None = None
     hotkey: str
     uid: int
     king_model_uri: str | None = None
     king_model_name: str | None = None
     king_namespace: str | None = None
+    king_repo: str | None = None
+    king_coldkey: str | None = None
     king_uid: int | None = None
     king_hotkey: str | None = None
     king_version_defended: int | None = None
     valid_turns: int | None = None
     total_turns: int | None = None
     judge_scores: dict[str, float] = Field(default_factory=dict)
+    judge_votes: list[AlbedoDuelJudgeVote] = Field(default_factory=list)
+    judge_spread: float | None = None
+    panel_pattern: str | None = None
+    unanimous_panel: bool = False
 
 
 class AlbedoKingCoronation(BaseModel):
@@ -61,6 +83,8 @@ class AlbedoKingCoronation(BaseModel):
     model_uri: str
     model_name: str
     namespace: str
+    repo: str | None = None
+    coldkey: str | None = None
     hotkey: str
     uid: int
     finished_at: str
@@ -72,6 +96,8 @@ class AlbedoKingCoronation(BaseModel):
     defeated_model_uri: str | None = None
     defeated_model_name: str | None = None
     defeated_namespace: str | None = None
+    defeated_repo: str | None = None
+    defeated_coldkey: str | None = None
 
 
 class AlbedoWinRateRow(BaseModel):
@@ -98,10 +124,14 @@ class AlbedoJudgeDetail(BaseModel):
     duels: int
     avg_challenger_score: float
     avg_king_score: float
+    score_std: float | None = None
     pick_challenger_pct: float
     pick_king_pct: float
     agree_verdict_pct: float
     overturn_duels: int
+    split_majority_align_pct: float | None = None
+    solo_dissent_win_pct: float | None = None
+    extreme_call_pct: float | None = None
     avg_score_when_challenger_wins: float | None = None
     avg_score_when_king_wins: float | None = None
     unanimous_challenger_duels: int = 0
@@ -147,6 +177,8 @@ class AlbedoPipelineStage(BaseModel):
 class AlbedoReignSlotHolder(BaseModel):
     key: str
     label: str
+    repo: str | None = None
+    coldkey: str | None = None
     hotkey: str
     uid: int
     slots_held: int
@@ -160,6 +192,8 @@ class AlbedoKingTenure(BaseModel):
     model_uri: str
     model_name: str
     namespace: str
+    repo: str | None = None
+    coldkey: str | None = None
     hotkey: str
     uid: int
     reign_rank: int | None = None
@@ -178,6 +212,33 @@ class AlbedoKingTenure(BaseModel):
     defense_pct: float | None = None
     coronation_margin: float | None = None
     defeated_king_version: int | None = None
+
+
+class AlbedoCrownEvent(BaseModel):
+    king_version: int
+    crowned_at: str
+    active_until: str | None = None
+    slot_until: str | None = None
+    active_hours: float | None = None
+    slot_hours: float | None = None
+    repo: str | None = None
+    coldkey: str | None = None
+    hotkey: str
+    uid: int
+    model_name: str
+    is_current_king: bool = False
+
+
+class AlbedoCrownLeaderboardRow(BaseModel):
+    key: str
+    label: str
+    group_type: str
+    coronations: int
+    total_active_hours: float
+    total_slot_hours: float
+    current_weight_pct: float
+    reign_slots: int
+    crown_events: list[AlbedoCrownEvent] = Field(default_factory=list)
 
 
 class AlbedoAnalysisOverview(BaseModel):
@@ -202,9 +263,12 @@ class AlbedoAnalysisOverview(BaseModel):
     king_history: list[AlbedoKingCoronation] = Field(default_factory=list)
     king_tenures: list[AlbedoKingTenure] = Field(default_factory=list)
     reign_slot_holders: list[AlbedoReignSlotHolder] = Field(default_factory=list)
+    crowns_by_repo: list[AlbedoCrownLeaderboardRow] = Field(default_factory=list)
+    crowns_by_coldkey: list[AlbedoCrownLeaderboardRow] = Field(default_factory=list)
     recent_duels: list[AlbedoDuelSummary] = Field(default_factory=list)
     challenger_by_namespace: list[AlbedoWinRateRow] = Field(default_factory=list)
     challenger_by_hotkey: list[AlbedoWinRateRow] = Field(default_factory=list)
+    challenger_by_repo: list[AlbedoWinRateRow] = Field(default_factory=list)
     king_defense_by_model: list[AlbedoWinRateRow] = Field(default_factory=list)
     judge_aggregates: list[AlbedoJudgeAggregate] = Field(default_factory=list)
     judge_details: list[AlbedoJudgeDetail] = Field(default_factory=list)
@@ -213,4 +277,5 @@ class AlbedoAnalysisOverview(BaseModel):
     margin_histogram: list[AlbedoMarginBucket] = Field(default_factory=list)
     timeline: list[AlbedoTimelinePoint] = Field(default_factory=list)
     pipeline: list[AlbedoPipelineStage] = Field(default_factory=list)
+    miner_lookup_coverage_pct: float | None = None
     note: str = ""
