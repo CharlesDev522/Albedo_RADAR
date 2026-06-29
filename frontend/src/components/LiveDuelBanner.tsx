@@ -3,8 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, hippiusModelUrl, shortRepo, type AlbedoLiveDuel, type AlbedoLiveDuelParticipant } from "@/lib/api";
 import { DEFAULT_SUBNET } from "@/lib/subnets";
+import { useSubnet } from "@/lib/useSubnet";
+import { usePageVisibility } from "@/lib/usePageVisibility";
 
 const POLL_MS = 8_000;
+const POLL_BACKGROUND_MS = 30_000;
 
 function fmtElapsed(sec: number | null | undefined): string {
   if (sec == null || !Number.isFinite(sec)) return "";
@@ -65,20 +68,24 @@ function FighterCard({
 
 export default function LiveDuelBanner() {
   const [live, setLive] = useState<AlbedoLiveDuel | null>(null);
+  const { view } = useSubnet();
+  const pageVisible = usePageVisibility();
+  const pollMs = view === "duels" || view === "dashboard" ? POLL_MS : POLL_BACKGROUND_MS;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (forceRefresh = false) => {
     try {
-      setLive(await api.getAlbedoLiveDuel(DEFAULT_SUBNET));
+      setLive(await api.getAlbedoLiveDuel(DEFAULT_SUBNET, forceRefresh));
     } catch {
       /* non-critical */
     }
   }, []);
 
   useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, POLL_MS);
+    if (!pageVisible) return;
+    void refresh(false);
+    const id = setInterval(() => void refresh(true), pollMs);
     return () => clearInterval(id);
-  }, [refresh]);
+  }, [pageVisible, pollMs, refresh]);
 
   if (!live?.is_active) return null;
 

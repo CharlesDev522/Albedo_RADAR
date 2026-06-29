@@ -30,6 +30,7 @@ import {
   matchesRepoTrack,
 } from "@/lib/searchFilter";
 import { useSubnet } from "@/lib/useSubnet";
+import { usePageVisibility } from "@/lib/usePageVisibility";
 
 const POLL_MS = 30_000;
 
@@ -126,7 +127,9 @@ function trackSourceColor(source: string | null | undefined): string {
 }
 
 export default function RepoActivityPanel() {
-  const { subnet } = useSubnet();
+  const { subnet, view } = useSubnet();
+  const pageVisible = usePageVisibility();
+  const panelActive = view === "activity" && pageVisible;
   const [overview, setOverview] = useState<RepoActivityOverview | null>(null);
   const [priorityMiners, setPriorityMiners] = useState<PriorityMinerStatus[]>([]);
   const [tracks, setTracks] = useState<RepoTrackEntry[]>([]);
@@ -142,13 +145,13 @@ export default function RepoActivityPanel() {
 
   const familyParam = family === "all" ? undefined : family;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (forceRefresh = false) => {
     try {
       const [ov, tr, fd, pm] = await Promise.all([
-        api.getRepoActivityOverview(subnet),
-        api.getRepoTracks(subnet, familyParam),
-        api.getRepoActivityFeed(subnet, { family: familyParam, limit: 60 }),
-        api.getPriorityMiners(subnet),
+        api.getRepoActivityOverview(subnet, forceRefresh),
+        api.getRepoTracks(subnet, familyParam, undefined, forceRefresh),
+        api.getRepoActivityFeed(subnet, { family: familyParam, limit: 60, forceRefresh }),
+        api.getPriorityMiners(subnet, forceRefresh),
       ]);
       setOverview(ov);
       setTracks(tr);
@@ -167,7 +170,7 @@ export default function RepoActivityPanel() {
     setSyncError(null);
     try {
       const result = await api.syncRepoActivity(subnet);
-      await refresh();
+      await refresh(true);
       if ((result.miners_checked as number) === 0) {
         setSyncError(
           "sync ran but found 0 qwen repos to poll — check slot scan and HF discovery"
@@ -183,21 +186,12 @@ export default function RepoActivityPanel() {
   }, [subnet, refresh]);
 
   useEffect(() => {
+    if (!panelActive) return;
     setLoading(true);
-    refresh();
-    const id = setInterval(refresh, POLL_MS);
+    void refresh(false);
+    const id = setInterval(() => void refresh(true), POLL_MS);
     return () => clearInterval(id);
-  }, [refresh]);
-
-  useEffect(() => {
-    void api
-      .syncRepoActivity(subnet)
-      .then(() => refresh())
-      .catch((e) => {
-        const msg = e instanceof Error ? e.message : "auto-sync failed";
-        setSyncError(msg);
-      });
-  }, [subnet, refresh]);
+  }, [panelActive, refresh]);
 
   useEffect(() => {
     setSearch("");

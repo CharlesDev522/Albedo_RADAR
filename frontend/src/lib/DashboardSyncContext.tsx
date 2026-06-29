@@ -19,12 +19,15 @@ import {
   type SyncStatus,
 } from "@/lib/api";
 import { getSubnetProfile } from "@/lib/subnets";
+import { usePageVisibility } from "@/lib/usePageVisibility";
 import { useSubnet } from "@/lib/useSubnet";
 
 const LIVE_URL = "/api/v1/live/stream";
 export const DASHBOARD_POLL_MS = 3000;
+const DASHBOARD_POLL_BACKGROUND_MS = 8000;
 const SYNC_POLL_MS = 30_000;
 const SUBNET_EXTRAS_POLL_MS = 4000;
+const SUBNET_EXTRAS_BACKGROUND_MS = 15_000;
 
 export interface LiveEvent {
   type: string;
@@ -85,7 +88,8 @@ export function DashboardSyncProvider({
   initialSlotData = null,
   initialSyncStatus = null,
 }: DashboardSyncProviderProps) {
-  const { subnet } = useSubnet();
+  const { subnet, view } = useSubnet();
+  const pageVisible = usePageVisibility();
   const [stats, setStats] = useState<CommitmentStats | null>(initialStats);
   const [commits, setCommits] = useState<Commitment[]>(initialCommits);
   const [registry, setRegistry] = useState<Registry | null>(initialRegistry);
@@ -213,23 +217,32 @@ export function DashboardSyncProvider({
   }, [subnet]);
 
   useEffect(() => {
+    if (!pageVisible) return;
+
     if (hydratedRef.current) {
       hydratedRef.current = false;
       void refreshSync();
     } else {
       void refresh();
     }
-    const interval = setInterval(refreshCore, DASHBOARD_POLL_MS);
+
+    const corePollMs = view === "dashboard" ? DASHBOARD_POLL_MS : DASHBOARD_POLL_BACKGROUND_MS;
+    const extrasPollMs =
+      view === "dashboard" ? SUBNET_EXTRAS_POLL_MS : SUBNET_EXTRAS_BACKGROUND_MS;
+
+    const interval = setInterval(refreshCore, corePollMs);
     const syncInterval = setInterval(refreshSync, SYNC_POLL_MS);
-    const extrasInterval = setInterval(refreshSubnetExtras, SUBNET_EXTRAS_POLL_MS);
+    const extrasInterval = setInterval(refreshSubnetExtras, extrasPollMs);
     return () => {
       clearInterval(interval);
       clearInterval(syncInterval);
       clearInterval(extrasInterval);
     };
-  }, [refresh, refreshCore, refreshSync, refreshSubnetExtras]);
+  }, [pageVisible, view, refresh, refreshCore, refreshSync, refreshSubnetExtras]);
 
   useEffect(() => {
+    if (!pageVisible) return;
+
     let es: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout>;
 
@@ -262,7 +275,7 @@ export function DashboardSyncProvider({
       es?.close();
       clearTimeout(retryTimer);
     };
-  }, [subnet, flash, refreshCore]);
+  }, [subnet, flash, refreshCore, pageVisible]);
 
   return (
     <DashboardSyncContext.Provider

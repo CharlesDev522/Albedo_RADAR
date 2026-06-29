@@ -681,7 +681,9 @@ export interface AlbedoAnalysisOverview {
   note: string;
 }
 
-async function fetchApi<T>(path: string): Promise<T> {
+import { fetchWithCache, invalidateApiCache } from "@/lib/apiCache";
+
+async function fetchApiRaw<T>(path: string): Promise<T> {
   const url = `${apiBase()}${path}`;
   const maxAttempts = typeof window === "undefined" ? 3 : 1;
   let lastError: unknown;
@@ -709,6 +711,13 @@ async function fetchApi<T>(path: string): Promise<T> {
   }
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+async function fetchApi<T>(path: string, opts?: { forceRefresh?: boolean }): Promise<T> {
+  if (typeof window === "undefined") {
+    return fetchApiRaw<T>(path);
+  }
+  return fetchWithCache(path, () => fetchApiRaw<T>(path), opts);
 }
 
 export const api = {
@@ -740,28 +749,32 @@ export const api = {
     fetchApi<IncentiveOverview>(
       `/incentives?subnet=${subnet}&limit=${limit}${live ? "&live=true" : ""}`
     ),
-  getMarketOverview: (subnet = DEFAULT_SUBNET) =>
-    fetchApi<MarketOverview>(`/market/overview?subnet=${subnet}`),
-  getRepoActivityOverview: (subnet = DEFAULT_SUBNET) =>
-    fetchApi<RepoActivityOverview>(`/repo-activity/overview?subnet=${subnet}`),
-  getRepoTracks: (subnet = DEFAULT_SUBNET, family?: string, inSync?: boolean) => {
+  getMarketOverview: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
+    fetchApi<MarketOverview>(`/market/overview?subnet=${subnet}`, { forceRefresh }),
+  getRepoActivityOverview: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
+    fetchApi<RepoActivityOverview>(`/repo-activity/overview?subnet=${subnet}`, { forceRefresh }),
+  getRepoTracks: (subnet = DEFAULT_SUBNET, family?: string, inSync?: boolean, forceRefresh = false) => {
     const params = new URLSearchParams({ subnet: String(subnet) });
     if (family) params.set("family", family);
     if (inSync !== undefined) params.set("in_sync", String(inSync));
-    return fetchApi<RepoTrackEntry[]>(`/repo-activity/repos?${params}`);
+    return fetchApi<RepoTrackEntry[]>(`/repo-activity/repos?${params}`, { forceRefresh });
   },
   getRepoActivityFeed: (
     subnet = DEFAULT_SUBNET,
-    opts?: { family?: string; eventType?: string; limit?: number }
+    opts?: { family?: string; eventType?: string; limit?: number; forceRefresh?: boolean }
   ) => {
     const params = new URLSearchParams({ subnet: String(subnet) });
     if (opts?.family) params.set("family", opts.family);
     if (opts?.eventType) params.set("event_type", opts.eventType);
     if (opts?.limit) params.set("limit", String(opts.limit));
-    return fetchApi<RepoActivityEvent[]>(`/repo-activity/feed?${params}`);
+    return fetchApi<RepoActivityEvent[]>(`/repo-activity/feed?${params}`, {
+      forceRefresh: opts?.forceRefresh,
+    });
   },
-  getPriorityMiners: (subnet = DEFAULT_SUBNET) =>
-    fetchApi<PriorityMinerStatus[]>(`/repo-activity/priority-miners?subnet=${subnet}`),
+  getPriorityMiners: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
+    fetchApi<PriorityMinerStatus[]>(`/repo-activity/priority-miners?subnet=${subnet}`, {
+      forceRefresh,
+    }),
   syncRepoActivity: async (subnet = DEFAULT_SUBNET) => {
     const res = await fetch(`${apiBase()}/repo-activity/sync?subnet=${subnet}`, {
       method: "POST",
@@ -770,12 +783,13 @@ export const api = {
     if (!res.ok) {
       throw new Error(`sync failed: HTTP ${res.status}`);
     }
+    invalidateApiCache("/repo-activity");
     return res.json() as Promise<Record<string, unknown>>;
   },
-  getAlbedoAnalysis: (subnet = DEFAULT_SUBNET) =>
-    fetchApi<AlbedoAnalysisOverview>(`/albedo/analysis?subnet=${subnet}`),
-  getAlbedoLiveDuel: (subnet = DEFAULT_SUBNET) =>
-    fetchApi<AlbedoLiveDuel>(`/albedo/live-duel?subnet=${subnet}`),
+  getAlbedoAnalysis: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
+    fetchApi<AlbedoAnalysisOverview>(`/albedo/analysis?subnet=${subnet}`, { forceRefresh }),
+  getAlbedoLiveDuel: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
+    fetchApi<AlbedoLiveDuel>(`/albedo/live-duel?subnet=${subnet}`, { forceRefresh }),
 };
 
 export function hippiusModelUrl(repo: string, branch = "main"): string {

@@ -1,11 +1,5 @@
-import { Suspense } from "react";
-import AlbedoDuelPanel from "@/components/AlbedoDuelPanel";
-import LiveDashboard from "@/components/LiveDashboard";
-import ChampionRewardPanel from "@/components/ChampionRewardPanel";
-import MinerGroupsPanel from "@/components/MinerGroupsPanel";
-import RepoActivityPanel from "@/components/RepoActivityPanel";
-import SlotStatusBoard from "@/components/SlotStatusBoard";
 import { DashboardSyncProvider } from "@/lib/DashboardSyncContext";
+import DashboardShell from "@/components/DashboardShell";
 import {
   api,
   DEFAULT_SUBNET,
@@ -14,7 +8,6 @@ import {
   type Registry,
   type SlotStatusData,
 } from "@/lib/api";
-import type { DashboardView } from "@/lib/subnets";
 
 export const dynamic = "force-dynamic";
 
@@ -26,20 +19,7 @@ async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   }
 }
 
-function parseView(raw: string | undefined): DashboardView {
-  if (raw === "clusters") return "clusters";
-  if (raw === "activity") return "activity";
-  if (raw === "duels") return "duels";
-  return "dashboard";
-}
-
-export default async function Page({
-  searchParams,
-}: {
-  searchParams?: Promise<{ view?: string }>;
-}) {
-  const params = (await searchParams) ?? {};
-  const view = parseView(params.view);
+export default async function Page() {
   const subnet = DEFAULT_SUBNET;
 
   const [stats, commits, registry, slotData, syncStatus] = await Promise.all([
@@ -59,33 +39,7 @@ export default async function Page({
       initialSlotData={slotData}
       initialSyncStatus={syncStatus}
     >
-      <div className="space-y-3" key={`dashboard-${view}`}>
-        {view === "clusters" ? (
-          <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading clusters…</div>}>
-            <MinerGroupsPanel />
-          </Suspense>
-        ) : view === "activity" ? (
-          <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading repo activity…</div>}>
-            <RepoActivityPanel />
-          </Suspense>
-        ) : view === "duels" ? (
-          <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading duel analysis…</div>}>
-            <AlbedoDuelPanel />
-          </Suspense>
-        ) : (
-          <>
-            <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading champion reward…</div>}>
-              <ChampionRewardPanel />
-            </Suspense>
-            <Suspense fallback={<div className="panel p-4 text-[10px] text-zinc-500">loading slots…</div>}>
-              <SlotStatusBoard />
-            </Suspense>
-            <Suspense fallback={null}>
-              <LiveDashboard />
-            </Suspense>
-          </>
-        )}
-      </div>
+      <DashboardShell />
     </DashboardSyncProvider>
   );
 }

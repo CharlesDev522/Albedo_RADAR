@@ -15,6 +15,7 @@ import {
   type AlbedoWinRateRow,
 } from "@/lib/api";
 import { useSubnet } from "@/lib/useSubnet";
+import { usePageVisibility } from "@/lib/usePageVisibility";
 
 const POLL_MS = 30_000;
 type Section = "overview" | "judges" | "kings" | "duels";
@@ -332,15 +333,17 @@ function DuelRow({ duel, judgeOrder }: { duel: AlbedoDuelSummary; judgeOrder: st
 }
 
 export default function AlbedoDuelPanel() {
-  const { subnet } = useSubnet();
+  const { subnet, view } = useSubnet();
+  const pageVisible = usePageVisibility();
+  const panelActive = view === "duels" && pageVisible;
   const [data, setData] = useState<AlbedoAnalysisOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("overview");
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (forceRefresh = false) => {
     try {
-      const overview = await api.getAlbedoAnalysis(subnet);
+      const overview = await api.getAlbedoAnalysis(subnet, forceRefresh);
       setData(overview);
       setError(null);
     } catch (e) {
@@ -351,10 +354,11 @@ export default function AlbedoDuelPanel() {
   }, [subnet]);
 
   useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, POLL_MS);
+    if (!panelActive) return;
+    void refresh(false);
+    const id = setInterval(() => void refresh(true), POLL_MS);
     return () => clearInterval(id);
-  }, [refresh]);
+  }, [panelActive, refresh]);
 
   const judgeOrder = useMemo(() => {
     const fromApi = (data?.judge_details ?? []).map((j) => j.short_name);
