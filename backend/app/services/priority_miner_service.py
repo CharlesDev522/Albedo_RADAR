@@ -94,7 +94,12 @@ async def build_priority_miner_status(
                 e
                 for e in events
                 if e.repo == repo
-                and e.event_type in ("hub_manifest_update", "on_chain_commit", "digest_mismatch")
+                and e.event_type in (
+                    "hub_manifest_update",
+                    "hub_repo_added",
+                    "on_chain_commit",
+                    "digest_mismatch",
+                )
             ]
             last_event = recent[0] if recent else None
             rstats = repo_stats.get(repo)

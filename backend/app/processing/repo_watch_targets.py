@@ -88,6 +88,7 @@ async def discover_watch_targets(
     netuid: int,
     *,
     extra_repos: list[str] | None = None,
+    hippius_hub_repos: list[str] | None = None,
     priority_repos: list[str] | None = None,
 ) -> list[RepoWatchTarget]:
     """Merge on-chain, slot, history, DB, and hub-search repo targets."""
@@ -219,6 +220,17 @@ async def discover_watch_targets(
             chain_digest=None,
             source=SOURCE_HUB_SEARCH,
             preferred_host="huggingface",
+        )
+
+    for repo in hippius_hub_repos or []:
+        _add(
+            repo,
+            hotkey=hub_watch_hotkey(repo, "hippius"),
+            uid=None,
+            coldkey=None,
+            chain_digest=None,
+            source=SOURCE_HUB_SEARCH,
+            preferred_host="hippius",
         )
 
     for repo in priority_repos or []:

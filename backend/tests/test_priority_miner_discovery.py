@@ -2,9 +2,11 @@
 
 from app.processing.priority_miner_discovery import (
     _repos_from_dashboard,
+    _repos_from_hippius_hub,
     compute_challenger_stats,
     resolve_watch_namespaces,
 )
+from app.integrations.hippius_hub_client import HippiusHubModel
 
 
 def test_repos_from_dashboard_filters_priority_namespaces():
@@ -31,6 +33,37 @@ def test_repos_from_dashboard_filters_priority_namespaces():
         "booksome/albedo-qwen3.6-35b-testc",
         "divinequest/albedo-qwen3.6-35b-g5ap8a74",
     }
+
+
+def test_repos_from_hippius_hub_filters_namespace_and_family():
+    index = {
+        "cyantest/albedo-qwen3.6-35b-a": HippiusHubModel(
+            repo="cyantest/albedo-qwen3.6-35b-a",
+            digest="sha256:a",
+            primary_tag="main",
+            indexed_at=None,
+            file_count=1,
+            total_size_bytes=1,
+        ),
+        "cyantest/not-albedo": HippiusHubModel(
+            repo="cyantest/not-albedo",
+            digest="sha256:b",
+            primary_tag="main",
+            indexed_at=None,
+            file_count=1,
+            total_size_bytes=1,
+        ),
+        "other/albedo-qwen3.6-35b-x": HippiusHubModel(
+            repo="other/albedo-qwen3.6-35b-x",
+            digest="sha256:c",
+            primary_tag="main",
+            indexed_at=None,
+            file_count=1,
+            total_size_bytes=1,
+        ),
+    }
+    repos = _repos_from_hippius_hub(index, {"cyantest"})
+    assert repos == {"cyantest/albedo-qwen3.6-35b-a"}
 
 
 def test_compute_challenger_stats_and_top_namespaces():

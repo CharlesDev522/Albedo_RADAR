@@ -9,9 +9,13 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chain_reader.albedo_model_family import infer_albedo_model_family
+from app.chain_reader.albedo_model_family import (
+    FAMILY_QWEN36_35B,
+    FAMILY_QWEN3_4B,
+    infer_albedo_model_family,
+    repo_from_slot_detail,
+)
 from app.config import Settings, get_settings
-from app.chain_reader.albedo_model_family import infer_albedo_model_family, repo_from_slot_detail
 from app.db.models import (
     CommitmentHistory,
     HippiusRepoRevision,
@@ -20,6 +24,7 @@ from app.db.models import (
     MinerSlotStatus,
     RepoActivityEvent,
 )
+from app.integrations.hippius_hub_client import HippiusHubClient, HippiusHubModel
 from app.integrations.model_registry import (
     ModelRegistryClient,
     RemoteRepoFile,
@@ -49,35 +54,70 @@ class RepoTrackBuilder:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.registry = ModelRegistryClient(self.settings)
+        self.hippius_hub = HippiusHubClient(self.settings)
 
     async def sync_subnet(self, session: AsyncSession, netuid: int) -> dict[str, int]:
         stats = {
             "miners_checked": 0,
             "unique_repos": 0,
             "hub_updates": 0,
+            "hub_discoveries": 0,
             "on_chain_events": 0,
             "mismatches": 0,
             "errors": 0,
             "hub_watches": 0,
+            "hippius_hub_indexed": 0,
         }
         await self._ingest_on_chain_history(session, netuid, stats)
 
-        hub_repos = await self._discover_hub_search_repos()
-        priority_repos = await self._discover_priority_miner_repos()
-        targets = await discover_watch_targets(
-            session, netuid, extra_repos=hub_repos, priority_repos=priority_repos
-        )
-        stats["unique_repos"] = len({t.repo for t in targets})
-        stats["hub_watches"] = sum(1 for t in targets if is_hub_watch_hotkey(t.hotkey))
-        if not targets:
-            await session.flush()
-            return stats
-
-        snapshot_cache: dict[tuple[str, str | None, str | None], RemoteRepoSnapshot | None] = {}
-
         async with httpx.AsyncClient(timeout=self.settings.market_http_timeout_seconds) as http:
+            hub_index = await self._fetch_hippius_hub_index(http)
+            stats["hippius_hub_indexed"] = len(hub_index)
+
+            hub_repos = self._albedo_repos_from_hub_index(hub_index)
+            hf_repos = await self._discover_hub_search_repos(http)
+            priority_repos = await self._discover_priority_miner_repos(http, hub_index=hub_index)
+            targets = await discover_watch_targets(
+                session,
+                netuid,
+                extra_repos=hf_repos,
+                hippius_hub_repos=hub_repos,
+                priority_repos=priority_repos,
+            )
+            stats["unique_repos"] = len({t.repo for t in targets})
+            stats["hub_watches"] = sum(1 for t in targets if is_hub_watch_hotkey(t.hotkey))
+            if not targets:
+                await session.flush()
+                return stats
+
+            for target in targets:
+                if target.preferred_host != "hippius":
+                    continue
+                entry = hub_index.get(target.repo)
+                if entry is None:
+                    continue
+                try:
+                    await self._apply_hub_index_entry(session, netuid, target, entry, stats)
+                except Exception:
+                    logger.exception("hippius hub index apply failed repo=%s", target.repo)
+
+            snapshot_cache: dict[tuple[str, str | None, str | None], RemoteRepoSnapshot | None] = {}
+            now = datetime.now(timezone.utc)
+
             for target in targets:
                 stats["miners_checked"] += 1
+                if target.preferred_host == "hippius":
+                    entry = hub_index.get(target.repo)
+                    if entry is not None:
+                        track = await self._get_track(session, netuid, target.hotkey)
+                        if (
+                            track
+                            and normalize_digest(track.hub_digest) == entry.digest
+                            and track.last_checked_at
+                            and (now - track.last_checked_at).total_seconds() < 120
+                        ):
+                            continue
+
                 cache_key = (target.repo, target.chain_digest, target.preferred_host)
                 try:
                     if cache_key not in snapshot_cache:
@@ -114,26 +154,147 @@ class RepoTrackBuilder:
         await session.flush()
         return stats
 
-    async def _discover_hub_search_repos(self) -> list[str]:
+    async def _fetch_hippius_hub_index(
+        self, client: httpx.AsyncClient
+    ) -> dict[str, HippiusHubModel]:
+        try:
+            return await self.hippius_hub.fetch_albedo_index(client=client)
+        except Exception:
+            logger.exception("hippius hub index fetch failed")
+            return {}
+
+    def _albedo_repos_from_hub_index(self, hub_index: dict[str, HippiusHubModel]) -> list[str]:
+        repos: list[str] = []
+        for repo in hub_index:
+            family = infer_albedo_model_family(repo)
+            if family in (FAMILY_QWEN36_35B, FAMILY_QWEN3_4B):
+                repos.append(repo)
+        return sorted(set(repos))
+
+    async def _discover_hub_search_repos(self, client: httpx.AsyncClient) -> list[str]:
         repos: list[str] = []
         try:
-            async with httpx.AsyncClient(timeout=self.settings.market_http_timeout_seconds) as http:
-                for query in HF_DISCOVERY_QUERIES:
-                    found = await self.registry.huggingface.search_models(
-                        query, limit=100, client=http
-                    )
-                    repos.extend(found)
+            for query in HF_DISCOVERY_QUERIES:
+                found = await self.registry.huggingface.search_models(
+                    query, limit=100, client=client
+                )
+                repos.extend(found)
         except Exception:
             logger.exception("hub search discovery failed")
         return list(dict.fromkeys(repos))
 
-    async def _discover_priority_miner_repos(self) -> list[str]:
+    async def _discover_priority_miner_repos(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        hub_index: dict[str, HippiusHubModel] | None = None,
+    ) -> list[str]:
         try:
-            async with httpx.AsyncClient(timeout=self.settings.market_http_timeout_seconds) as http:
-                return await discover_priority_miner_repos(settings=self.settings, client=http)
+            return await discover_priority_miner_repos(
+                settings=self.settings,
+                client=client,
+                hub_index=hub_index,
+            )
         except Exception:
             logger.exception("priority miner discovery failed")
             return []
+
+    async def _apply_hub_index_entry(
+        self,
+        session: AsyncSession,
+        netuid: int,
+        target: RepoWatchTarget,
+        entry: HippiusHubModel,
+        stats: dict[str, int],
+    ) -> None:
+        family = target.model_family or infer_albedo_model_family(target.repo)
+        chain_digest = normalize_digest(target.chain_digest)
+        hub_digest = entry.digest
+        now = datetime.now(timezone.utc)
+
+        track = await self._get_track(session, netuid, target.hotkey)
+        previous_digest = normalize_digest(track.hub_digest) if track else None
+        digest_changed = hub_digest != previous_digest
+
+        if track is None:
+            track = HippiusRepoTrack(
+                subnet=netuid,
+                repo=target.repo,
+                repo_host="hippius",
+                uid=target.uid,
+                hotkey=target.hotkey,
+                coldkey=target.coldkey,
+                model_family=family,
+                hub_revision=entry.primary_tag,
+            )
+            session.add(track)
+
+        track.repo = target.repo
+        track.repo_host = "hippius"
+        track.uid = target.uid
+        track.hotkey = target.hotkey
+        track.coldkey = target.coldkey
+        track.model_family = family
+        track.chain_digest = chain_digest
+        track.hub_revision = entry.primary_tag
+        track.hub_updated_at = entry.indexed_at
+        track.file_count = entry.file_count
+        track.total_bytes = entry.total_size_bytes
+        track.last_checked_at = now
+        track.last_updated = now
+
+        if digest_changed:
+            track.hub_digest = hub_digest
+            track.last_hub_change_at = entry.indexed_at or now
+            event_type = "hub_repo_added" if previous_digest is None else "hub_manifest_update"
+            emitted = await self._emit_event(
+                session,
+                netuid,
+                event_type=event_type,
+                repo=target.repo,
+                uid=target.uid,
+                hotkey=target.hotkey if not is_hub_watch_hotkey(target.hotkey) else None,
+                coldkey=target.coldkey,
+                model_family=family,
+                chain_digest=chain_digest,
+                hub_digest=hub_digest,
+                previous_digest=previous_digest,
+                revision=entry.primary_tag,
+                source_key=f"hub:hippius:{target.repo}:{hub_digest}",
+                detected_at=entry.indexed_at,
+                meta={
+                    "host": "hippius",
+                    "file_count": entry.file_count,
+                    "total_bytes": entry.total_size_bytes,
+                    "track_source": target.track_source,
+                    "index_source": "hippius_hub_api",
+                },
+            )
+            if emitted:
+                if event_type == "hub_repo_added":
+                    stats["hub_discoveries"] += 1
+                else:
+                    stats["hub_updates"] += 1
+
+            existing = await self._latest_revision(session, netuid, target.repo, hub_digest)
+            if existing is None:
+                session.add(
+                    HippiusRepoRevision(
+                        subnet=netuid,
+                        repo=target.repo,
+                        revision=entry.primary_tag,
+                        manifest_digest=hub_digest,
+                        hub_created_at=entry.indexed_at,
+                        file_count=entry.file_count,
+                        total_bytes=entry.total_size_bytes,
+                        files_json=[],
+                        changed_files=[],
+                    )
+                )
+        elif track.hub_digest is None:
+            track.hub_digest = hub_digest
+            if entry.indexed_at:
+                track.last_hub_change_at = entry.indexed_at
 
     async def _upsert_pending_track(
         self, session: AsyncSession, netuid: int, target: RepoWatchTarget
@@ -180,9 +341,9 @@ class RepoTrackBuilder:
         )
 
         track = await self._get_track(session, netuid, target.hotkey)
-        previous_digest = track.hub_digest if track else None
-        hub_changed = bool(previous_digest and previous_digest != hub_digest)
-        is_new_track = track is None
+        previous_digest = normalize_digest(track.hub_digest) if track else None
+        hub_digest = normalize_digest(snapshot.remote_digest)
+        digest_changed = bool(hub_digest and hub_digest != previous_digest)
         now = datetime.now(timezone.utc)
 
         if track is None:
@@ -214,36 +375,40 @@ class RepoTrackBuilder:
         track.last_checked_at = now
         track.last_updated = now
 
-        if hub_changed or (is_new_track and hub_digest):
+        if digest_changed:
             prev_files = await self._files_for_digest(session, netuid, target.repo, previous_digest)
             changed_files = diff_remote_files(prev_files, snapshot.files)
             track.hub_digest = hub_digest
             track.last_hub_change_at = snapshot.created_at or now
-            if hub_changed:
-                emitted = await self._emit_event(
-                    session,
-                    netuid,
-                    event_type="hub_manifest_update",
-                    repo=target.repo,
-                    uid=target.uid,
-                    hotkey=target.hotkey if not is_hub_watch_hotkey(target.hotkey) else None,
-                    coldkey=target.coldkey,
-                    model_family=family,
-                    chain_digest=chain_digest,
-                    hub_digest=hub_digest,
-                    previous_digest=previous_digest,
-                    revision=snapshot.revision,
-                    commit_message=snapshot.commit_message,
-                    changed_files=changed_files,
-                    source_key=f"hub:{snapshot.host}:{target.repo}:{hub_digest}",
-                    meta={
-                        "host": snapshot.host,
-                        "file_count": snapshot.file_count,
-                        "total_bytes": snapshot.total_bytes,
-                        "track_source": target.track_source,
-                    },
-                )
-                if emitted:
+            event_type = "hub_repo_added" if previous_digest is None else "hub_manifest_update"
+            emitted = await self._emit_event(
+                session,
+                netuid,
+                event_type=event_type,
+                repo=target.repo,
+                uid=target.uid,
+                hotkey=target.hotkey if not is_hub_watch_hotkey(target.hotkey) else None,
+                coldkey=target.coldkey,
+                model_family=family,
+                chain_digest=chain_digest,
+                hub_digest=hub_digest,
+                previous_digest=previous_digest,
+                revision=snapshot.revision,
+                commit_message=snapshot.commit_message,
+                changed_files=changed_files,
+                source_key=f"hub:{snapshot.host}:{target.repo}:{hub_digest}",
+                meta={
+                    "host": snapshot.host,
+                    "file_count": snapshot.file_count,
+                    "total_bytes": snapshot.total_bytes,
+                    "track_source": target.track_source,
+                    "index_source": "oci_manifest",
+                },
+            )
+            if emitted:
+                if event_type == "hub_repo_added":
+                    stats["hub_discoveries"] += 1
+                else:
                     stats["hub_updates"] += 1
             await self._record_revision(session, netuid, target.repo, snapshot, changed_files)
         elif track.hub_digest is None and hub_digest:

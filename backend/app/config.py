@@ -38,6 +38,14 @@ class Settings(BaseSettings):
 
     # Hippius registry repo tracking
     hippius_registry_url: str = "https://registry.hippius.com"
+    hippius_hub_api_url: str = "https://api.hippius.com/api/models"
+    hippius_hub_search_queries: list[str] = [
+        "albedo",
+        "albedo-qwen3.6-35b",
+        "albedo-qwen3-4b",
+    ]
+    hippius_hub_page_size: int = 100
+    hippius_hub_max_pages: int = 15
     huggingface_api_url: str = "https://huggingface.co/api"
     repo_track_interval_seconds: int = 60
     repo_track_revision: str = "main"
@@ -45,7 +53,6 @@ class Settings(BaseSettings):
         "cyantest",
         "booksome",
         "divinequest",
-        "devinequest",
     ]
     priority_challenger_top_n: int = 10
 

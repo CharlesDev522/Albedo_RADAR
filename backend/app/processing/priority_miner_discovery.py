@@ -17,6 +17,7 @@ from app.chain_reader.albedo_model_family import (
 )
 from app.config import Settings, get_settings
 from app.integrations.albedo_dashboard import fetch_dashboard
+from app.integrations.hippius_hub_client import HippiusHubClient, HippiusHubModel
 from app.integrations.huggingface_registry import HuggingFaceRegistryClient
 from app.integrations.model_registry import RepoHost
 
@@ -169,11 +170,26 @@ def huggingface_browse_url(repo: str, revision: str = "main") -> str:
     return f"https://huggingface.co/{repo}/tree/{revision}"
 
 
+def _repos_from_hippius_hub(
+    hub_index: dict[str, HippiusHubModel],
+    namespaces: set[str],
+) -> set[str]:
+    repos: set[str] = set()
+    for repo in hub_index:
+        if not _namespace_matches(repo, namespaces):
+            continue
+        family = infer_albedo_model_family(repo)
+        if family in (FAMILY_QWEN36_35B, FAMILY_QWEN3_4B):
+            repos.add(repo)
+    return repos
+
+
 async def discover_priority_miner_repos(
     *,
     settings: Settings | None = None,
     client: httpx.AsyncClient | None = None,
     dashboard: dict[str, Any] | None = None,
+    hub_index: dict[str, HippiusHubModel] | None = None,
 ) -> list[str]:
     """Collect Albedo repos for pinned + top-challenger namespaces."""
     settings = settings or get_settings()
@@ -192,6 +208,17 @@ async def discover_priority_miner_repos(
     repos: set[str] = set()
     if dashboard_payload:
         repos |= _repos_from_dashboard(dashboard_payload, namespaces)
+
+    hub = HippiusHubClient(settings)
+    index = hub_index
+    if index is None:
+        try:
+            index = await hub.fetch_albedo_index(client=client)
+        except Exception:
+            logger.warning("priority miner Hippius hub discovery failed", exc_info=True)
+            index = {}
+    if index:
+        repos |= _repos_from_hippius_hub(index, namespaces)
 
     hf = HuggingFaceRegistryClient(settings)
     for ns in sorted(namespaces):

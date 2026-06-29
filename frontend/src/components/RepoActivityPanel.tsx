@@ -64,6 +64,8 @@ function eventLabel(type: string): string {
   switch (type) {
     case "hub_manifest_update":
       return "hub update";
+    case "hub_repo_added":
+      return "new repo";
     case "on_chain_commit":
       return "on-chain commit";
     case "digest_mismatch":
@@ -77,6 +79,8 @@ function eventColor(type: string): string {
   switch (type) {
     case "hub_manifest_update":
       return "text-sky-300 border-sky-500/30 bg-sky-500/10";
+    case "hub_repo_added":
+      return "text-lime-300 border-lime-500/30 bg-lime-500/10";
     case "on_chain_commit":
       return "text-lime-300 border-lime-500/30 bg-lime-500/10";
     case "digest_mismatch":
@@ -217,9 +221,9 @@ export default function RepoActivityPanel() {
         <div>
           <h2 className="text-[12px] font-semibold text-zinc-100">Model repo activity</h2>
           <p className="text-[10px] text-zinc-500 mt-0.5 max-w-2xl">
-            Hub-first tracking: every Qwen3.6-35B / Qwen3-4B repo from chain slots and Hugging
-            Face discovery, polled on Hippius/HF in near real-time. On-chain commits are optional
-            — used only for uid linkage and digest sync when present.
+            Hub-first tracking: Qwen3.6-35B / Qwen3-4B repos from Hippius Hub index
+            (hub.hippius.com?q=albedo), chain slots, HF discovery, and priority miner namespaces —
+            polled on Hippius/HF in near real-time.
           </p>
         </div>
         <button
