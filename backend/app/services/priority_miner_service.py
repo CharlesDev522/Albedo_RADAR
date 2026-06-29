@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.db.models import HippiusRepoTrack, RepoActivityEvent
 from app.integrations.albedo_dashboard import fetch_dashboard
+from app.integrations.hippius_hub_client import HippiusHubClient
 from app.processing.priority_miner_discovery import (
     compute_challenger_stats,
     discover_priority_miner_repos,
@@ -23,6 +24,19 @@ def _namespace_from_repo(repo: str) -> str | None:
     if "/" not in repo:
         return None
     return repo.split("/", 1)[0].lower()
+
+
+def _repo_activity_timestamp(
+    *,
+    last_event_at: datetime | None,
+    hippius_updated_at: datetime | None,
+    huggingface_updated_at: datetime | None,
+) -> float:
+    best = 0.0
+    for ts in (last_event_at, hippius_updated_at, huggingface_updated_at):
+        if ts is not None:
+            best = max(best, ts.timestamp())
+    return best
 
 
 async def build_priority_miner_status(
@@ -44,7 +58,12 @@ async def build_priority_miner_status(
         return []
 
     ns_stats, repo_stats = compute_challenger_stats(dashboard)
-    discovered = await discover_priority_miner_repos(settings=settings, dashboard=dashboard)
+    hub_index = await HippiusHubClient(settings).fetch_albedo_index()
+    discovered = await discover_priority_miner_repos(
+        settings=settings,
+        dashboard=dashboard,
+        hub_index=hub_index,
+    )
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
 
     tracks = (
@@ -90,6 +109,7 @@ async def build_priority_miner_status(
             hosts = repo_hosts.get(repo, {})
             hippius = hosts.get("hippius")
             hf = hosts.get("huggingface")
+            hub_entry = hub_index.get(repo)
             recent = [
                 e
                 for e in events
@@ -110,8 +130,12 @@ async def build_priority_miner_status(
                     hippius_url=hippius_browse_url(repo),
                     huggingface_url=huggingface_browse_url(repo),
                     hippius_tracked=hippius is not None,
-                    hippius_digest=hippius.hub_digest if hippius else None,
-                    hippius_updated_at=hippius.hub_updated_at or hippius.last_hub_change_at if hippius else None,
+                    hippius_digest=hippius.hub_digest if hippius else (hub_entry.digest if hub_entry else None),
+                    hippius_updated_at=(
+                        hippius.hub_updated_at or hippius.last_hub_change_at
+                        if hippius
+                        else (hub_entry.indexed_at if hub_entry else None)
+                    ),
                     hippius_commit_message=hippius.hub_commit_message if hippius else None,
                     hippius_pending=hippius is None or hippius.hub_digest is None,
                     huggingface_tracked=hf is not None,
@@ -132,9 +156,12 @@ async def build_priority_miner_status(
 
         repo_rows.sort(
             key=lambda r: (
-                0 if r.is_top_repo else 1,
-                -(r.duel_count or 0),
-                -(r.last_event_at.timestamp() if r.last_event_at else 0),
+                -_repo_activity_timestamp(
+                    last_event_at=r.last_event_at,
+                    hippius_updated_at=r.hippius_updated_at,
+                    huggingface_updated_at=r.huggingface_updated_at,
+                ),
+                r.repo,
             ),
         )
 
@@ -164,7 +191,8 @@ async def build_priority_miner_status(
         status.updates_24h = sum(
             1
             for e in events
-            if _namespace_from_repo(e.repo) == ns and e.event_type == "hub_manifest_update"
+            if _namespace_from_repo(e.repo) == ns
+            and e.event_type in ("hub_manifest_update", "hub_repo_added")
         )
         results.append(status)
 

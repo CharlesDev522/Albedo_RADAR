@@ -91,6 +91,21 @@ class RepoRevisionResponse(BaseModel):
     detected_at: datetime
 
 
+class HippiusLatestRepo(BaseModel):
+    repo: str
+    model_family: str | None = None
+    digest: str
+    indexed_at: datetime | None = None
+    file_count: int | None = None
+    total_size_bytes: int | None = None
+    hub_url: str
+
+
+class HippiusLatestResponse(BaseModel):
+    total_indexed: int
+    repos: list[HippiusLatestRepo] = Field(default_factory=list)
+
+
 class PriorityMinerRepoStatus(BaseModel):
     repo: str
     model_family: str | None = None

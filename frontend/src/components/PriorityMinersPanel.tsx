@@ -10,8 +10,8 @@ import {
 
 type Filter = "all" | "pinned" | "top";
 
-/** Latest repos shown per miner — keeps the watchlist readable */
-const LATEST_REPOS_LIMIT = 3;
+/** Latest repos shown per miner — sorted by most recent hub activity */
+const LATEST_REPOS_LIMIT = 10;
 
 function fmtTime(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -46,7 +46,7 @@ function pickLatestRepos(repos: PriorityMinerRepoStatus[], limit = LATEST_REPOS_
       const ta = repoActivityTs(a);
       const tb = repoActivityTs(b);
       if (tb !== ta) return tb - ta;
-      return b.duel_count - a.duel_count;
+      return a.repo.localeCompare(b.repo);
     })
     .slice(0, limit);
 }
@@ -221,9 +221,9 @@ export default function PriorityMinersPanel({
     <section className="panel px-3 py-2.5 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-[12px] font-semibold text-zinc-100">Live repo activity</h3>
+          <h3 className="text-[12px] font-semibold text-zinc-100">Priority miner repos</h3>
           <p className="text-[10px] text-zinc-500 mt-0.5">
-            Latest {LATEST_REPOS_LIMIT} repos per miner · Hippius + Hugging Face links
+            Latest {LATEST_REPOS_LIMIT} repos per namespace · sorted by recent hub activity
           </p>
         </div>
         <div className="flex gap-1 text-[9px]">
@@ -231,7 +231,7 @@ export default function PriorityMinersPanel({
             [
               ["all", `All (${miners.length})`],
               ["pinned", `Pinned (${pinnedCount})`],
-              ["top", `Top (${topCount})`],
+              ["top", `Challengers (${topCount})`],
             ] as const
           ).map(([key, label]) => (
             <button

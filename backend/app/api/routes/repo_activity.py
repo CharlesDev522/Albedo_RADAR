@@ -10,12 +10,15 @@ from app.db.models import HippiusRepoRevision, HippiusRepoTrack, RepoActivityEve
 from app.db.session import get_db
 from app.processing.repo_track_builder import RepoTrackBuilder
 from app.schemas.repo_activity import (
+    HippiusLatestRepo,
+    HippiusLatestResponse,
     PriorityMinerStatus,
     RepoActivityEventResponse,
     RepoActivityOverview,
     RepoRevisionResponse,
     RepoTrackEntry,
 )
+from app.services.hippius_latest_service import fetch_latest_hippius_repos
 from app.services.priority_miner_service import build_priority_miner_status
 from app.services.repo_activity_service import merged_repo_tracks
 
@@ -71,7 +74,11 @@ async def repo_activity_overview(
         qwen3_4b_repos=sum(1 for t in merged if t.model_family == "qwen3-4b"),
         in_sync_count=sum(1 for t in merged if t.digest_in_sync is True),
         mismatch_count=sum(1 for t in merged if t.digest_in_sync is False),
-        hub_updates_24h=sum(1 for e in events_24h if e.event_type == "hub_manifest_update"),
+        hub_updates_24h=sum(
+            1
+            for e in events_24h
+            if e.event_type in ("hub_manifest_update", "hub_repo_added")
+        ),
         on_chain_events_24h=sum(1 for e in events_24h if e.event_type == "on_chain_commit"),
         last_poll_at=last_poll,
         hippius_count=sum(1 for t in merged if t.repo_host == "hippius"),
@@ -129,6 +136,15 @@ async def repo_revision_history(
     )
     rows = (await db.execute(q)).scalars().all()
     return [RepoRevisionResponse.model_validate(r) for r in rows]
+
+
+@router.get("/hippius-latest", response_model=HippiusLatestResponse)
+async def hippius_latest_repos(
+    limit: int = Query(default=10, ge=1, le=50),
+) -> HippiusLatestResponse:
+    """Live latest Albedo repos from Hippius Hub index (hub.hippius.com?q=albedo)."""
+    total, repos = await fetch_latest_hippius_repos(limit=limit)
+    return HippiusLatestResponse(total_indexed=total, repos=repos)
 
 
 @router.get("/priority-miners", response_model=list[PriorityMinerStatus])

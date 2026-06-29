@@ -239,6 +239,21 @@ export interface RepoActivityOverview {
   chain_committed_count?: number;
 }
 
+export interface HippiusLatestResponse {
+  total_indexed: number;
+  repos: HippiusLatestRepo[];
+}
+
+export interface HippiusLatestRepo {
+  repo: string;
+  model_family?: string | null;
+  digest: string;
+  indexed_at?: string | null;
+  file_count?: number | null;
+  total_size_bytes?: number | null;
+  hub_url: string;
+}
+
 export interface PriorityMinerRepoStatus {
   repo: string;
   model_family?: string | null;
@@ -773,6 +788,10 @@ export const api = {
   },
   getPriorityMiners: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
     fetchApi<PriorityMinerStatus[]>(`/repo-activity/priority-miners?subnet=${subnet}`, {
+      forceRefresh,
+    }),
+  getHippiusLatestRepos: (limit = 10, forceRefresh = false) =>
+    fetchApi<HippiusLatestResponse>(`/repo-activity/hippius-latest?limit=${limit}`, {
       forceRefresh,
     }),
   syncRepoActivity: async (subnet = DEFAULT_SUBNET) => {

@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import PriorityMinersPanel from "@/components/PriorityMinersPanel";
+import LatestHippiusReposPanel from "@/components/LatestHippiusReposPanel";
 import {
   api,
   hfModelUrl,
@@ -10,6 +11,7 @@ import {
   shortAddr,
   shortHash,
   shortRepo,
+  type HippiusLatestRepo,
   type PriorityMinerStatus,
   type RepoActivityEvent,
   type RepoActivityOverview,
@@ -33,6 +35,7 @@ import { useSubnet } from "@/lib/useSubnet";
 import { usePageVisibility } from "@/lib/usePageVisibility";
 
 const POLL_MS = 30_000;
+const TRACKED_REPOS_PREVIEW = 10;
 
 type FamilyFilter = "all" | "qwen3.6-35b" | "qwen3-4b";
 
@@ -136,6 +139,8 @@ export default function RepoActivityPanel() {
   const panelActive = view === "activity" && pageVisible;
   const [overview, setOverview] = useState<RepoActivityOverview | null>(null);
   const [priorityMiners, setPriorityMiners] = useState<PriorityMinerStatus[]>([]);
+  const [hippiusLatest, setHippiusLatest] = useState<HippiusLatestRepo[]>([]);
+  const [hippiusIndexTotal, setHippiusIndexTotal] = useState<number | null>(null);
   const [tracks, setTracks] = useState<RepoTrackEntry[]>([]);
   const [feed, setFeed] = useState<RepoActivityEvent[]>([]);
   const [family, setFamily] = useState<FamilyFilter>("all");
@@ -146,21 +151,25 @@ export default function RepoActivityPanel() {
   const [expandedRepo, setExpandedRepo] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<RepoTrackSortKey>("remote_newest");
+  const [showAllTracks, setShowAllTracks] = useState(false);
 
   const familyParam = family === "all" ? undefined : family;
 
   const refresh = useCallback(async (forceRefresh = false) => {
     try {
-      const [ov, tr, fd, pm] = await Promise.all([
+      const [ov, tr, fd, pm, latest] = await Promise.all([
         api.getRepoActivityOverview(subnet, forceRefresh),
         api.getRepoTracks(subnet, familyParam, undefined, forceRefresh),
         api.getRepoActivityFeed(subnet, { family: familyParam, limit: 60, forceRefresh }),
         api.getPriorityMiners(subnet, forceRefresh),
+        api.getHippiusLatestRepos(TRACKED_REPOS_PREVIEW, forceRefresh),
       ]);
       setOverview(ov);
       setTracks(tr);
       setFeed(fd);
       setPriorityMiners(pm);
+      setHippiusLatest(latest.repos);
+      setHippiusIndexTotal(latest.total_indexed);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load repo activity");
@@ -212,6 +221,11 @@ export default function RepoActivityPanel() {
       : tracks;
     return sortRepoTracks(matched, sortKey);
   }, [tracks, search, sortKey]);
+
+  const displayTracks = useMemo(() => {
+    if (showAllTracks || isSearchActive(search)) return filteredTracks;
+    return filteredTracks.slice(0, TRACKED_REPOS_PREVIEW);
+  }, [filteredTracks, showAllTracks, search]);
 
   const searchActive = isSearchActive(search);
 
@@ -323,6 +337,12 @@ export default function RepoActivityPanel() {
         </div>
       )}
 
+      <LatestHippiusReposPanel
+        repos={hippiusLatest}
+        loading={loading}
+        totalHint={hippiusIndexTotal}
+      />
+
       <PriorityMinersPanel miners={priorityMiners} loading={loading} />
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
@@ -391,15 +411,25 @@ export default function RepoActivityPanel() {
             <div>
               <h3 className="text-[11px] font-semibold text-zinc-100">Tracked repos</h3>
               <p className="text-[10px] text-zinc-500">
-                {searchActive
-                  ? `${filteredTracks.length}/${tracks.length} shown`
-                  : `${tracks.length} entries`}
+                {!showAllTracks && !searchActive && filteredTracks.length > TRACKED_REPOS_PREVIEW
+                  ? `Latest ${TRACKED_REPOS_PREVIEW} of ${filteredTracks.length}`
+                  : searchActive
+                    ? `${filteredTracks.length}/${tracks.length} shown`
+                    : `${filteredTracks.length} entries`}
                 {sortKey === "remote_newest"
-                  ? " · definite remote times first"
+                  ? " · sorted by remote update time"
                   : ` · ${REPO_TRACK_SORT_OPTIONS.find((o) => o.key === sortKey)?.label ?? sortKey}`}
-                {overview ? ` · ${overview.unique_repos} unique repos` : ""}
               </p>
             </div>
+            {!searchActive && filteredTracks.length > TRACKED_REPOS_PREVIEW && (
+              <button
+                type="button"
+                onClick={() => setShowAllTracks((v) => !v)}
+                className="px-2 py-1 rounded text-[10px] border border-zinc-700 text-zinc-400 hover:border-sky-500/40 hover:text-sky-200"
+              >
+                {showAllTracks ? "show latest 10" : `show all ${filteredTracks.length}`}
+              </button>
+            )}
           </div>
           <div className="scroll-pane overflow-x-auto max-h-[420px] overflow-y-auto">
             <table className="tbl">
@@ -418,7 +448,7 @@ export default function RepoActivityPanel() {
                 </tr>
               </thead>
               <tbody>
-                {filteredTracks.length === 0 ? (
+                {displayTracks.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="text-center text-zinc-500 py-8 text-[10px]">
                       {loading
@@ -429,7 +459,7 @@ export default function RepoActivityPanel() {
                     </td>
                   </tr>
                 ) : (
-                  filteredTracks.map((t) => {
+                  displayTracks.map((t) => {
                     const expanded = expandedRepo === `${t.hotkey}-${t.repo}`;
                     return (
                       <Fragment key={`${t.hotkey}-${t.repo}`}>
