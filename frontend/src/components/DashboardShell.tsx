@@ -28,6 +28,10 @@ const RepoActivityPanel = dynamic(() => import("@/components/RepoActivityPanel")
 const AlbedoDuelPanel = dynamic(() => import("@/components/AlbedoDuelPanel"), {
   loading: () => panelFallback("duel analysis"),
 });
+const LiveDuelBanner = dynamic(() => import("@/components/LiveDuelBanner"), {
+  loading: () => null,
+  ssr: false,
+});
 
 function PanelSlot({
   active,
@@ -78,6 +82,8 @@ export default function DashboardShell() {
 
   return (
     <div className="space-y-3">
+      {(view === "dashboard" || view === "duels") && <LiveDuelBanner />}
+
       <PanelSlot active={view === "clusters"} visited={visited.has("clusters")} viewKey="clusters">
         <MinerGroupsPanel />
       </PanelSlot>
