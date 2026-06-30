@@ -17,7 +17,7 @@ Notifications go live only when **all** of these are true:
 
 **Live time** = `max(5 min, full scan done, 2× repo track)` — then only **new** deltas post to `#albedo`.
 
-Restarts with existing alert history skip grace (resume mode).
+Grace runs on **every** collector start (including restarts with Postgres data). Prior alerts in the DB are only used for dedupe — they do **not** skip grace. Set `NOTIFICATION_SKIP_STARTUP_GRACE=true` only if you explicitly want instant live mode.
 
 ## Config (`.env`)
 
@@ -36,9 +36,9 @@ NOTIFICATION_MIN_REPO_TRACK_PASSES=2   # try 3 if hub index is slow
 
 | Situation | Try |
 |-----------|-----|
-| Still bulk flood at ~2 min | `NOTIFICATION_GRACE_SECONDS=600` (10 min) |
+| Still bulk flood at ~2 min | Check logs for `skip-startup-grace` or `resume mode` — grace may be bypassed. Otherwise try `NOTIFICATION_GRACE_SECONDS=600` |
 | Repos trickle in slowly | `NOTIFICATION_MIN_REPO_TRACK_PASSES=3` |
-| Want faster alerts on restart | Already instant if `alerts_in_db > 0` (resume mode) |
+| Want faster alerts on restart | `NOTIFICATION_SKIP_STARTUP_GRACE=true` (not recommended — can re-flood Slack) |
 | Fresh empty DB every build | Grace + seed always runs — this is correct |
 
 ## Deploy

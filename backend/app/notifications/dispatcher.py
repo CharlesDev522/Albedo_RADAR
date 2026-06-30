@@ -54,7 +54,7 @@ class NotificationDispatcher:
         return self._live_after
 
     def enable_resume_mode(self) -> None:
-        """Skip grace when alert history already exists (collector restart)."""
+        """Skip grace + sync gates (only when NOTIFICATION_SKIP_STARTUP_GRACE=true)."""
         self._live_after = datetime.now(timezone.utc)
         self._startup_finalized = True
 

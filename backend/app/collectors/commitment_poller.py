@@ -85,21 +85,30 @@ class CommitmentPoller:
         async with AsyncSessionLocal() as session:
             loaded = await self.notifier.hydrate(session)
             await self.notification_watcher.bootstrap(session)
-            if loaded > 0:
+            if self.settings.notification_skip_startup_grace:
                 self.notifier.enable_resume_mode()
                 logger.info(
-                    "notifications resume mode (%d prior alerts) — live immediately",
+                    "notifications skip-startup-grace — live immediately (%d prior alerts hydrated)",
                     loaded,
                 )
             else:
                 live_at = self.notifier.begin_startup_grace(
                     self.settings.notification_grace_seconds
                 )
-                logger.info(
-                    "notifications grace period until %s (%ds) — initial fetch will NOT post to Slack",
-                    live_at.isoformat(),
-                    self.settings.notification_grace_seconds,
-                )
+                if loaded > 0:
+                    logger.info(
+                        "notifications grace period until %s (%ds) — %d prior alerts "
+                        "hydrated; initial fetch will NOT post to Slack",
+                        live_at.isoformat(),
+                        self.settings.notification_grace_seconds,
+                        loaded,
+                    )
+                else:
+                    logger.info(
+                        "notifications grace period until %s (%ds) — initial fetch will NOT post to Slack",
+                        live_at.isoformat(),
+                        self.settings.notification_grace_seconds,
+                    )
         logger.info("notification cache hydrated (%d source keys)", loaded)
         for netuid in self.settings.dashboard_subnets:
             assert self._subtensor is not None

@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     # Silence Slack after fresh docker up until grace elapses AND initial sync completes.
     notification_grace_seconds: int = 300
     notification_min_repo_track_passes: int = 2
+    # Opt-in only: skip grace + sync gates (instant live). Default keeps grace on every start.
+    notification_skip_startup_grace: bool = False
 
     # Database
     database_url: str = "postgresql+asyncpg://minerwatch:minerwatch@localhost:5432/minerwatch"

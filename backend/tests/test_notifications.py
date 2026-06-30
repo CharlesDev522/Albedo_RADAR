@@ -83,6 +83,31 @@ async def test_dispatcher_suppressed_during_grace():
 
 
 @pytest.mark.asyncio
+async def test_dispatcher_hydrated_keys_still_require_finalize():
+    """Prior alert keys in cache must not bypass grace — only mark_startup_finalized does."""
+    settings = Settings(
+        notifications_enabled=True,
+        slack_webhook_url=None,
+        notification_grace_seconds=60,
+    )
+    dispatcher = NotificationDispatcher(settings)
+    dispatcher.begin_startup_grace(60)
+    dispatcher.mark_seen("alert:hub:hippius:old/repo:digest")
+    session = _mock_session_no_existing()
+
+    sent = await dispatcher.notify(
+        session,
+        kind="repo_new",
+        title="[repo_new] new/repo",
+        message="should not send during grace",
+        source_key="alert:hub:hippius:new/repo:digest",
+    )
+
+    assert sent is False
+    session.add.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_dispatcher_sends_after_startup_finalized():
     settings = Settings(notifications_enabled=True, slack_webhook_url=None)
     dispatcher = NotificationDispatcher(settings)
