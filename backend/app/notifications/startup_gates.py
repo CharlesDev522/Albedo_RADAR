@@ -31,15 +31,13 @@ def startup_ready_for_live(
     settings: Settings,
     grace_elapsed: bool,
     is_live: bool,
-    full_scan_done_for: set[int],
     hub_probes_by_subnet: dict[int, int],
     collector_started_at: datetime,
 ) -> bool:
+    """LIVE when grace elapsed and hub probe gate satisfied (no DB / full-scan gate)."""
     if is_live or not grace_elapsed:
         return False
     for netuid in settings.dashboard_subnets:
-        if netuid not in full_scan_done_for:
-            return False
         if not hub_probe_gate_satisfied(
             settings=settings,
             probes=hub_probes_by_subnet.get(netuid, 0),

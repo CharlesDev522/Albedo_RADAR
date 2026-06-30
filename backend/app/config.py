@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     # Silence Slack after fresh docker up until grace elapses AND initial sync completes.
     notification_grace_seconds: int = 300
     # Lightweight Hippius hub HTTP fetches during startup (no DB). 0 = skip this gate.
-    notification_min_hub_index_probes: int = 1
+    notification_min_hub_index_probes: int = 0
     # Go LIVE anyway after this many seconds from collector start (grace + full scan).
     notification_startup_max_seconds: int = 600
     # Opt-in only: skip grace + sync gates (instant live). Default keeps grace on every start.

@@ -57,7 +57,7 @@ docker compose up -d --force-recreate collector api
 
 ```bash
 curl http://localhost:8000/api/v1/notifications/status
-docker compose logs collector | grep -iE 'notification|HUB_PROBE|LIVE'
+docker compose logs --tail 500 collector 2>&1 | grep -iE 'NOTIFY_STATUS|notifications LIVE|HUB_PROBE|ALERT '
 ```
 
 Expected sequence:

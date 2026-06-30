@@ -29,6 +29,11 @@ from app.db.session import AsyncSessionLocal, engine
 from app.notifications.dispatcher import NotificationDispatcher
 from app.notifications.config_log import log_notification_config
 from app.notifications.startup_gates import hub_probe_gate_satisfied, startup_ready_for_live
+from app.notifications.status import (
+    NOTIFICATION_STARTUP_VERSION,
+    build_notification_status,
+    publish_notification_status,
+)
 from app.notifications.watcher import NotificationWatcher
 from app.processing.commitment_state_builder import CommitmentStateBuilder
 from app.processing.encrypted_commitment_state_builder import EncryptedCommitmentStateBuilder
@@ -77,6 +82,7 @@ class CommitmentPoller:
         self._startup_hub_probes: dict[int, int] = {}
         self._last_hub_probe: dict[int, float] = {}
         self._last_startup_wait_log: float = 0.0
+        self._last_status_publish: float = 0.0
         self._collector_started_at: datetime = datetime.now(timezone.utc)
 
     async def setup(self) -> None:
@@ -85,6 +91,13 @@ class CommitmentPoller:
         self._subtensor = self.subtensor_client._subtensor
         await self.publisher.connect()
         log_notification_config(self.settings, live=False)
+        logger.info(
+            "notifications: startup %s grace=%ds hub_probes=%d startup_max=%ds",
+            NOTIFICATION_STARTUP_VERSION,
+            self.settings.notification_grace_seconds,
+            self.settings.notification_min_hub_index_probes,
+            self.settings.notification_startup_max_seconds,
+        )
         self._collector_started_at = datetime.now(timezone.utc)
         async with AsyncSessionLocal() as session:
             loaded = await self.notifier.hydrate(session)
@@ -152,13 +165,13 @@ class CommitmentPoller:
                 logger.exception("Initial repo track failed netuid=%d", netuid)
 
         await self._maybe_finalize_notifications()
+        await self._publish_notification_status(force_log=True)
 
     def _startup_ready_for_live(self) -> bool:
         return startup_ready_for_live(
             settings=self.settings,
             grace_elapsed=self.notifier.grace_elapsed(),
             is_live=self.notifier.is_live,
-            full_scan_done_for=self._startup_full_scan_done,
             hub_probes_by_subnet=self._startup_hub_probes,
             collector_started_at=self._collector_started_at,
         )
@@ -174,32 +187,50 @@ class CommitmentPoller:
             blockers.append(f"grace {max(remaining, 0)}s remaining")
         required_probes = self.settings.notification_min_hub_index_probes
         max_wait = self.settings.notification_startup_max_seconds
+        age = int((datetime.now(timezone.utc) - self._collector_started_at).total_seconds())
         for netuid in self.settings.dashboard_subnets:
             if netuid not in self._startup_full_scan_done:
-                blockers.append(f"SN{netuid} waiting for full chain scan")
+                blockers.append(f"SN{netuid} full chain scan pending (not required for LIVE)")
             if required_probes <= 0:
                 continue
             probes = self._startup_hub_probes.get(netuid, 0)
-            if probes < required_probes:
-                if hub_probe_gate_satisfied(
-                    settings=self.settings,
-                    probes=probes,
-                    collector_started_at=self._collector_started_at,
-                ):
-                    continue
+            if probes < required_probes and not hub_probe_gate_satisfied(
+                settings=self.settings,
+                probes=probes,
+                collector_started_at=self._collector_started_at,
+            ):
                 need = required_probes - probes
                 blockers.append(
-                    f"SN{netuid} waiting for {need} hub index probe(s) "
-                    f"({probes}/{required_probes} HTTP ok, no DB required)"
+                    f"SN{netuid} hub probe {probes}/{required_probes} (HTTP, no DB)"
                 )
                 if max_wait > 0:
-                    age = int(
-                        (datetime.now(timezone.utc) - self._collector_started_at).total_seconds()
-                    )
-                    blockers.append(
-                        f"SN{netuid} fallback LIVE in {max(max_wait - age, 0)}s"
-                    )
+                    blockers.append(f"SN{netuid} fallback LIVE in {max(max_wait - age, 0)}s")
         return blockers
+
+    async def _publish_notification_status(self, *, force_log: bool = False) -> None:
+        blockers = [] if self.notifier.is_live else self._startup_blockers()
+        payload = build_notification_status(
+            settings=self.settings,
+            is_live=self.notifier.is_live,
+            grace_elapsed=self.notifier.grace_elapsed(),
+            live_after=self.notifier.live_after,
+            collector_started_at=self._collector_started_at,
+            hub_probes=dict(self._startup_hub_probes),
+            blockers=blockers,
+            seen_keys=self.notifier.seen_key_count,
+        )
+        await publish_notification_status(self.publisher._redis, payload)
+        now = time.monotonic()
+        if force_log or self.notifier.is_live or now - self._last_status_publish >= 60:
+            self._last_status_publish = now
+            logger.info(
+                "NOTIFY_STATUS live=%s grace_elapsed=%s uptime=%ss hub_probes=%s blockers=%s",
+                payload["is_live"],
+                payload["grace_elapsed"],
+                payload["collector_uptime_seconds"],
+                payload["hub_probes"],
+                blockers or "(none)",
+            )
 
     def _log_startup_wait(self) -> None:
         blockers = self._startup_blockers()
@@ -217,11 +248,21 @@ class CommitmentPoller:
 
     async def _maybe_finalize_notifications(self) -> None:
         if self.notifier.is_live:
-            return
-        if not self._startup_ready_for_live():
-            self._log_startup_wait()
+            await self._publish_notification_status()
             return
         required_probes = self.settings.notification_min_hub_index_probes
+        if required_probes > 0:
+            for netuid in self.settings.dashboard_subnets:
+                probes = self._startup_hub_probes.get(netuid, 0)
+                if probes < required_probes and self.notifier.grace_elapsed():
+                    try:
+                        await self._hub_index_probe(netuid)
+                    except Exception:
+                        logger.exception("Hub index probe before LIVE failed netuid=%d", netuid)
+        if not self._startup_ready_for_live():
+            self._log_startup_wait()
+            await self._publish_notification_status()
+            return
         for netuid in self.settings.dashboard_subnets:
             probes = self._startup_hub_probes.get(netuid, 0)
             if required_probes > 0 and probes < required_probes:
@@ -255,6 +296,7 @@ class CommitmentPoller:
             marked,
         )
         log_notification_config(self.settings, live=True)
+        await self._publish_notification_status(force_log=True)
 
     async def _slot_poll(self, netuid: int, snapshot: ChainSnapshot) -> dict[str, int]:
         assert self._subtensor is not None
@@ -507,6 +549,8 @@ class CommitmentPoller:
         async with self._poll_lock:
             await self._maybe_finalize_notifications()
             now = time.monotonic()
+
+            await self._publish_notification_status()
 
             if (
                 not self.notifier.is_live

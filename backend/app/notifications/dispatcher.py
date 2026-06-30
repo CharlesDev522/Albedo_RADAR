@@ -73,6 +73,10 @@ class NotificationDispatcher:
     def mark_seen(self, source_key: str) -> None:
         self._seen_keys.add(source_key)
 
+    @property
+    def seen_key_count(self) -> int:
+        return len(self._seen_keys)
+
     async def hydrate(self, session: AsyncSession) -> int:
         """Load existing source keys — avoids DB lookup on every notify."""
         result = await session.execute(select(AlertNotification.source_key))

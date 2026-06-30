@@ -8,6 +8,7 @@ from app.config import get_settings
 from app.db.models import AlertNotification
 from app.db.session import get_db
 from app.notifications.slack import send_slack_alert
+from app.notifications.status import NOTIFICATION_STARTUP_VERSION, read_notification_status
 from app.schemas.notifications import AlertNotificationList, AlertNotificationResponse
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -24,6 +25,8 @@ async def notification_status(db: AsyncSession = Depends(get_db)) -> dict:
             select(func.count()).select_from(AlertNotification).where(AlertNotification.slack_sent.is_(True))
         )
     ).scalar() or 0
+    collector = await read_notification_status(settings.redis_url)
+    live = collector.get("is_live") if collector else None
     return {
         "enabled": settings.notifications_enabled,
         "webhook_configured": bool(webhook),
@@ -34,12 +37,17 @@ async def notification_status(db: AsyncSession = Depends(get_db)) -> dict:
         "min_hub_index_probes": settings.notification_min_hub_index_probes,
         "startup_max_seconds": settings.notification_startup_max_seconds,
         "skip_startup_grace": settings.notification_skip_startup_grace,
+        "startup_version": NOTIFICATION_STARTUP_VERSION,
+        "collector_live": live,
+        "collector_status": collector,
         "alerts_in_db": total,
         "alerts_slack_sent": sent,
         "hint": (
-            "OK — collector will post new events to Slack after startup sync"
-            if webhook and settings.notifications_enabled
-            else "Set SLACK_WEBHOOK_URL in .env and restart: docker compose up -d --force-recreate collector"
+            "Collector is LIVE — new events should post to Slack"
+            if live is True and webhook and settings.notifications_enabled
+            else "Collector not LIVE yet, or webhook missing — see collector_status.blockers"
+            if collector and not live
+            else "Rebuild/restart collector; then: curl .../notifications/status and docker compose logs collector | grep NOTIFY_STATUS"
         ),
     }
 
