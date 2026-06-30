@@ -75,7 +75,7 @@ class CommitmentPoller:
         self._last_metagraph_sync: dict[int, float] = {}
         self._last_incentive_sync: dict[int, float] = {}
         self._last_repo_track: dict[int, float] = {}
-        self._last_notification_poll: dict[int, float] = {}
+        self._notif_task: asyncio.Task[None] | None = None
         self._poll_lock = asyncio.Lock()
         self._seen_hotkeys: dict[int, set[str]] = {}
         self._startup_full_scan_done: set[int] = set()
@@ -323,7 +323,29 @@ class CommitmentPoller:
                 logger.exception("Repo track poll after slot update failed netuid=%d", netuid)
         return stats
 
+    async def _notification_loop(self) -> None:
+        """Fast duel/crown/reg-fee poll — independent of chain snapshot cycle."""
+        interval = max(self.settings.albedo_notification_poll_seconds, 1)
+        while self._running:
+            for netuid in self.settings.dashboard_subnets:
+                try:
+                    async with AsyncSessionLocal() as session:
+                        sent = await self.notification_watcher.poll_subnet(session, netuid)
+                        await session.commit()
+                    if sent:
+                        logger.info("NOTIFICATIONS netuid=%d sent=%d", netuid, sent)
+                except Exception:
+                    logger.exception("Notification poll failed netuid=%d", netuid)
+            await asyncio.sleep(interval)
+
     async def teardown(self) -> None:
+        if self._notif_task is not None:
+            self._notif_task.cancel()
+            try:
+                await self._notif_task
+            except asyncio.CancelledError:
+                pass
+            self._notif_task = None
         await self.notifier.close()
         await self.subtensor_client.disconnect()
         await self.publisher.disconnect()
@@ -603,25 +625,15 @@ class CommitmentPoller:
                 await self._slot_poll(netuid, snapshot)
                 self._last_slot_scan[netuid] = now
 
-            if (
-                now - self._last_notification_poll.get(netuid, 0.0)
-                >= self.settings.albedo_notification_poll_seconds
-            ):
-                try:
-                    async with AsyncSessionLocal() as session:
-                        sent = await self.notification_watcher.poll_subnet(session, netuid)
-                        await session.commit()
-                    if sent:
-                        logger.info("NOTIFICATIONS netuid=%d sent=%d", netuid, sent)
-                except Exception:
-                    logger.exception("Notification poll failed netuid=%d", netuid)
-                self._last_notification_poll[netuid] = now
-
             return stats
 
     async def run(self) -> None:
         self._running = True
         await self.setup()
+        self._notif_task = asyncio.create_task(
+            self._notification_loop(),
+            name="albedo-notification-loop",
+        )
 
         while self._running:
             for netuid in self.settings.dashboard_subnets:

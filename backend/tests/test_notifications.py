@@ -275,7 +275,7 @@ async def test_watcher_king_defended_requires_explicit_loss():
 
 
 @pytest.mark.asyncio
-async def test_watcher_poll_uses_live_dashboard():
+async def test_watcher_poll_uses_fresh_dashboard():
     settings = Settings(notifications_enabled=True, default_subnet=97)
     dispatcher = NotificationDispatcher(settings)
     dispatcher.enable_resume_mode()
@@ -300,7 +300,7 @@ async def test_watcher_poll_uses_live_dashboard():
         await watcher.poll_subnet(session, 97)
 
     fetch_mock.assert_awaited_once()
-    assert fetch_mock.await_args.kwargs.get("live") is True
+    assert fetch_mock.await_args.kwargs.get("fresh") is True
 
 
 @pytest.mark.asyncio

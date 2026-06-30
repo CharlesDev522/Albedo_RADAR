@@ -35,6 +35,7 @@ async def fetch_albedo_json(
     settings: Settings | None = None,
     client: httpx.AsyncClient | None = None,
     live: bool = False,
+    fresh: bool = False,
 ) -> dict[str, Any]:
     """Fetch a JSON document from the Albedo Hippius dashboard mirror."""
     settings = settings or get_settings()
@@ -43,9 +44,10 @@ async def fetch_albedo_json(
     ttl = _LIVE_CACHE_TTL_SECONDS if live else _CACHE_TTL_SECONDS
     cache_key = f"{url}|ttl={ttl}"
 
-    cached = _cache_get(cache_key)
-    if cached is not None:
-        return cached
+    if not fresh:
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return cached
 
     timeout = settings.market_http_timeout_seconds
 
@@ -63,7 +65,8 @@ async def fetch_albedo_json(
         else:
             async with httpx.AsyncClient(timeout=timeout) as c:
                 result = await _do(c)
-        _cache_set(cache_key, result, ttl)
+        if not fresh:
+            _cache_set(cache_key, result, ttl)
         return result
     except Exception:
         logger.warning("Albedo dashboard fetch failed url=%s", url, exc_info=True)
@@ -75,8 +78,15 @@ async def fetch_dashboard(
     settings: Settings | None = None,
     client: httpx.AsyncClient | None = None,
     live: bool = False,
+    fresh: bool = False,
 ) -> dict[str, Any]:
-    return await fetch_albedo_json("data/dashboard.json", settings=settings, client=client, live=live)
+    return await fetch_albedo_json(
+        "data/dashboard.json",
+        settings=settings,
+        client=client,
+        live=live,
+        fresh=fresh,
+    )
 
 
 async def fetch_state(
@@ -84,5 +94,12 @@ async def fetch_state(
     settings: Settings | None = None,
     client: httpx.AsyncClient | None = None,
     live: bool = False,
+    fresh: bool = False,
 ) -> dict[str, Any]:
-    return await fetch_albedo_json("data/state.json", settings=settings, client=client, live=live)
+    return await fetch_albedo_json(
+        "data/state.json",
+        settings=settings,
+        client=client,
+        live=live,
+        fresh=fresh,
+    )

@@ -247,7 +247,7 @@ class NotificationWatcher:
         if netuid != self.settings.default_subnet:
             return 0
         try:
-            dashboard = await fetch_dashboard(settings=self.settings, live=True)
+            dashboard = await fetch_dashboard(settings=self.settings, fresh=True)
         except Exception:
             logger.warning("duel notification: dashboard fetch failed", exc_info=True)
             return 0
