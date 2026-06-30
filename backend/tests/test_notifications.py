@@ -276,7 +276,7 @@ async def test_watcher_reg_fee_skips_already_below_at_bootstrap():
     settings = Settings(
         notifications_enabled=True,
         default_subnet=97,
-        notification_reg_fee_threshold_tao=0.75,
+        notification_reg_fee_thresholds_tao=[1.0, 0.75, 0.6],
     )
     dispatcher = NotificationDispatcher(settings)
     dispatcher.enable_resume_mode()
@@ -299,7 +299,7 @@ async def test_watcher_reg_fee_skips_already_below_at_bootstrap():
         await watcher.bootstrap(session)
         sent = await watcher.poll_subnet(session, 97)
 
-    assert watcher._reg_fee_below is True
+    assert watcher._reg_fee_alerted_tiers == {1.0, 0.75, 0.6}
     assert sent == 0
     dispatcher.notify_content.assert_not_awaited()
 
@@ -454,11 +454,45 @@ async def test_watcher_probe_hub_index_counts_albedo_repos():
 
 
 @pytest.mark.asyncio
+async def test_watcher_reg_fee_alerts_each_tier_once():
+    settings = Settings(
+        notifications_enabled=True,
+        default_subnet=97,
+        notification_reg_fee_thresholds_tao=[1.0, 0.75, 0.6],
+    )
+    dispatcher = NotificationDispatcher(settings)
+    dispatcher.enable_resume_mode()
+    dispatcher.notify_content = AsyncMock(return_value=True)
+    watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+    watcher._bootstrapped = True
+
+    session = _mock_session_no_existing()
+    empty_dashboard = {
+        "reign": {"members": [{"king_version": 1, "model_uri": "cyantest/model@v1"}]},
+        "eval_runs": [],
+    }
+    with (
+        patch("app.notifications.watcher.fetch_dashboard", return_value=empty_dashboard),
+        patch(
+            "app.notifications.watcher.fetch_subnet_economics",
+            return_value={"registration_burn_tao": 0.55, "alpha_price_tao": 0.03},
+        ),
+    ):
+        sent = await watcher.poll_subnet(session, 97)
+
+    assert sent == 3
+    keys = [call.args[1].source_key for call in dispatcher.notify_content.await_args_list]
+    assert "reg_fee_low:sn97:tier_1" in keys
+    assert "reg_fee_low:sn97:tier_0.75" in keys
+    assert "reg_fee_low:sn97:tier_0.6" in keys
+
+
+@pytest.mark.asyncio
 async def test_watcher_reg_fee_below_threshold():
     settings = Settings(
         notifications_enabled=True,
         default_subnet=97,
-        notification_reg_fee_threshold_tao=0.75,
+        notification_reg_fee_thresholds_tao=[1.0, 0.75, 0.6],
     )
     dispatcher = NotificationDispatcher(settings)
     dispatcher.enable_resume_mode()
@@ -482,7 +516,7 @@ async def test_watcher_reg_fee_below_threshold():
     ):
         sent = await watcher.poll_subnet(session, 97)
 
-    assert sent == 1
+    assert sent == 3
     alert = dispatcher.notify_content.await_args.args[1]
     assert alert.kind == "reg_fee_low"
     assert alert.title.startswith("[reg_fee_low]")
@@ -493,7 +527,7 @@ async def test_watcher_reg_fee_skips_above_threshold():
     settings = Settings(
         notifications_enabled=True,
         default_subnet=97,
-        notification_reg_fee_threshold_tao=0.75,
+        notification_reg_fee_thresholds_tao=[1.0, 0.75, 0.6],
     )
     dispatcher = NotificationDispatcher(settings)
     dispatcher.enable_resume_mode()

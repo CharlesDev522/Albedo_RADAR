@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -65,7 +66,7 @@ class Settings(BaseSettings):
     slack_webhook_url: str | None = None
     slack_channel: str | None = None
     slack_app_name: str = "Albedo_Notification"
-    notification_reg_fee_threshold_tao: float = 0.75
+    notification_reg_fee_thresholds_tao: list[float] = [1.0, 0.75, 0.6]
     albedo_notification_poll_seconds: int = 8
     # Silence Slack after fresh docker up until grace elapses AND initial sync completes.
     notification_grace_seconds: int = 300
@@ -89,6 +90,13 @@ class Settings(BaseSettings):
 
     # CORS
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8000"]
+
+    @field_validator("notification_reg_fee_thresholds_tao", mode="before")
+    @classmethod
+    def _parse_reg_fee_thresholds(cls, v: object) -> list[float]:
+        from app.notifications.reg_fee_tiers import normalize_reg_fee_thresholds
+
+        return normalize_reg_fee_thresholds(v)
 
 
 @lru_cache

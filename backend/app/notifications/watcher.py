@@ -29,6 +29,11 @@ from app.notifications.messages import (
     build_king_defended_alert,
     build_reg_fee_low_alert,
 )
+from app.notifications.reg_fee_tiers import (
+    normalize_reg_fee_thresholds,
+    tiers_newly_crossed,
+    tiers_to_seed_at_bootstrap,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +72,7 @@ class NotificationWatcher:
         self.dispatcher = dispatcher or NotificationDispatcher(self.settings)
         self._last_king_version: int | None = None
         self._last_king_uri: str | None = None
-        self._reg_fee_below: bool = False
+        self._reg_fee_alerted_tiers: set[float] = set()
         self._bootstrapped: bool = False
         self._last_live_eval_id: str | None = None
 
@@ -106,22 +111,24 @@ class NotificationWatcher:
             self._last_king_version = int(current_version)
             self._last_king_uri = current.get("model_uri")
 
-        threshold = self.settings.notification_reg_fee_threshold_tao
+        thresholds = self._reg_fee_thresholds()
         try:
             econ = await fetch_subnet_economics(netuid, settings=self.settings)
             burn = econ.get("registration_burn_tao")
-            if burn is not None and float(burn) < threshold:
-                self._reg_fee_below = True
+            if burn is not None and thresholds:
+                self._reg_fee_alerted_tiers |= tiers_to_seed_at_bootstrap(
+                    float(burn), thresholds
+                )
         except Exception:
             logger.debug("notification bootstrap: reg fee seed skipped", exc_info=True)
 
         self._bootstrapped = True
         logger.info(
-            "notification bootstrap SN%d king=v%s live_duel=%s reg_below=%s",
+            "notification bootstrap SN%d king=v%s live_duel=%s reg_tiers_alerted=%s",
             netuid,
             self._last_king_version,
             self._last_live_eval_id,
-            self._reg_fee_below,
+            sorted(self._reg_fee_alerted_tiers, reverse=True),
         )
 
     async def probe_hub_index(self) -> int:
@@ -217,6 +224,9 @@ class NotificationWatcher:
         marked += await self._seed_hub_index_keys()
         logger.info("notification HTTP-only seed complete — marked %d keys", marked)
         return marked
+
+    def _reg_fee_thresholds(self) -> list[float]:
+        return normalize_reg_fee_thresholds(self.settings.notification_reg_fee_thresholds_tao)
 
     async def poll_subnet(self, session: AsyncSession, netuid: int) -> int:
         if not self.dispatcher.enabled:
@@ -358,7 +368,9 @@ class NotificationWatcher:
         return 0
 
     async def _poll_reg_fee(self, session: AsyncSession, netuid: int) -> int:
-        threshold = self.settings.notification_reg_fee_threshold_tao
+        thresholds = self._reg_fee_thresholds()
+        if not thresholds:
+            return 0
         try:
             econ = await fetch_subnet_economics(netuid, settings=self.settings)
         except Exception:
@@ -369,31 +381,33 @@ class NotificationWatcher:
         if burn is None:
             return 0
 
-        below = float(burn) < threshold
-        if not below:
-            self._reg_fee_below = False
-            return 0
-
-        if self._reg_fee_below:
-            return 0
-
         burn_f = float(burn)
-        source_key = f"reg_fee_low:sn{netuid}:{burn_f:.4f}"
-        detail: dict[str, Any] = {
-            "registration_burn_tao": round(burn_f, 6),
-            "threshold_tao": threshold,
-            "alpha_price_tao": econ.get("alpha_price_tao"),
-            "chain_block": econ.get("chain_block"),
-            "network": self.settings.bittensor_network,
-        }
-        alert = build_reg_fee_low_alert(
-            netuid=netuid,
-            source_key=source_key,
-            detail=detail,
-            burn=burn_f,
-            threshold=threshold,
-        )
-        if await self.dispatcher.notify_content(session, alert):
-            self._reg_fee_below = True
-            return 1
-        return 0
+        if burn_f >= max(thresholds):
+            self._reg_fee_alerted_tiers.clear()
+            return 0
+
+        crossed = tiers_newly_crossed(burn_f, thresholds, self._reg_fee_alerted_tiers)
+        if not crossed:
+            return 0
+
+        sent = 0
+        for tier in crossed:
+            source_key = f"reg_fee_low:sn{netuid}:tier_{tier:g}"
+            detail: dict[str, Any] = {
+                "registration_burn_tao": round(burn_f, 6),
+                "threshold_tao": tier,
+                "alpha_price_tao": econ.get("alpha_price_tao"),
+                "chain_block": econ.get("chain_block"),
+                "network": self.settings.bittensor_network,
+            }
+            alert = build_reg_fee_low_alert(
+                netuid=netuid,
+                source_key=source_key,
+                detail=detail,
+                burn=burn_f,
+                threshold=tier,
+            )
+            if await self.dispatcher.notify_content(session, alert):
+                self._reg_fee_alerted_tiers.add(tier)
+                sent += 1
+        return sent

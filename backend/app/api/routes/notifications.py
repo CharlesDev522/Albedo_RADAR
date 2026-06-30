@@ -32,7 +32,7 @@ async def notification_status(db: AsyncSession = Depends(get_db)) -> dict:
         "webhook_configured": bool(webhook),
         "slack_channel": settings.slack_channel,
         "slack_app_name": settings.slack_app_name,
-        "reg_fee_threshold_tao": settings.notification_reg_fee_threshold_tao,
+        "reg_fee_thresholds_tao": settings.notification_reg_fee_thresholds_tao,
         "grace_seconds": settings.notification_grace_seconds,
         "min_hub_index_probes": settings.notification_min_hub_index_probes,
         "startup_max_seconds": settings.notification_startup_max_seconds,

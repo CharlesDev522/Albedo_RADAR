@@ -397,8 +397,8 @@ def build_reg_fee_low_alert(
 ) -> AlertContent:
     return AlertContent(
         kind="reg_fee_low",
-        title=f"[reg_fee_low] SN{netuid} — {burn:.4f} τ",
-        message=f"Registration burn {burn:.4f} τ is below {threshold} τ threshold",
+        title=f"[reg_fee_low] SN{netuid} · below {threshold:g} τ",
+        message=f"Registration burn *{burn:.4f} τ* crossed below *{threshold:g} τ* tier",
         source_key=source_key,
         detail=detail,
         subnet=netuid,

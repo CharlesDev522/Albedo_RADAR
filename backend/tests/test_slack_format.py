@@ -27,6 +27,21 @@ def test_build_slack_payload_has_header_fields_and_links():
     assert "SN97" in context
 
 
+def test_build_slack_payload_reg_fee_tier_emoji():
+    payload = build_slack_payload(
+        kind="reg_fee_low",
+        title="[reg_fee_low] SN97 · below 0.75 τ",
+        message="Registration burn crossed below tier",
+        detail={"registration_burn_tao": 0.52, "threshold_tao": 0.75},
+        subnet=97,
+    )
+    header = payload["blocks"][0]["text"]["text"]
+    section = payload["blocks"][1]["text"]["text"]
+    assert ":money_with_wings:" in header
+    assert ":money_with_wings:" in section
+    assert "0.75" in section
+
+
 def test_build_slack_payload_commit_compact():
     payload = build_slack_payload(
         kind="commit_new",

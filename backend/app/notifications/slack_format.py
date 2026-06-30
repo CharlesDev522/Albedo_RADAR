@@ -7,6 +7,7 @@ from typing import Any
 
 from app.notifications.kinds import SLACK_EMOJI, AlertKind
 from app.notifications.messages import KIND_LABELS
+from app.notifications.reg_fee_tiers import reg_fee_tier_emoji
 
 _TITLE_TAG_RE = re.compile(r"^\[[\w_]+\]\s*")
 
@@ -91,8 +92,9 @@ def _compact_summary(kind: AlertKind, message: str, detail: dict[str, Any]) -> s
         m = f" · margin {margin:+.3f}" if margin is not None else ""
         return f"King held{m}"
     if kind == "reg_fee_low":
+        tier = detail.get("threshold_tao")
         burn = detail.get("registration_burn_tao")
-        return f"Burn *{burn}* τ (threshold {detail.get('threshold_tao')} τ)"
+        return f"Burn *{burn}* τ · crossed below *{tier:g} τ* tier"
     return message[:240]
 
 
@@ -124,7 +126,9 @@ def _fields_for_kind(kind: AlertKind, detail: dict[str, Any], subnet: int | None
         add("UID", "uid")
     elif kind == "reg_fee_low":
         add("Burn τ", "registration_burn_tao")
+        add("Tier τ", "threshold_tao")
         add("Alpha", "alpha_price_tao")
+        add("Block", "chain_block")
 
     if subnet is not None and kind not in ("reg_fee_low",):
         fields.append(("Subnet", f"SN{subnet}"))
@@ -148,6 +152,10 @@ def build_slack_payload(
     subnet: int | None,
 ) -> dict[str, Any]:
     emoji = SLACK_EMOJI.get(kind, ":bell:")
+    if kind == "reg_fee_low":
+        tier = detail.get("threshold_tao")
+        if tier is not None:
+            emoji = reg_fee_tier_emoji(float(tier))
     label = KIND_LABELS.get(kind, kind)
     subject = _subject_from_title(title)
     header = f"{emoji} {label} · {subject}"[:150]
@@ -157,7 +165,7 @@ def build_slack_payload(
 
     blocks: list[dict[str, Any]] = [
         {"type": "header", "text": {"type": "plain_text", "text": header, "emoji": True}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": summary}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"{emoji} {summary}"}},
     ]
     if fields:
         blocks.append({"type": "section", "fields": fields})
