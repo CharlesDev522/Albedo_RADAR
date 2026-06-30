@@ -12,10 +12,13 @@ Notifications go live only when **all** of these are true:
 |------|---------|---------|
 | `NOTIFICATION_GRACE_SECONDS` | **300** (5 min) | Minimum wait after collector start |
 | Full chain scan | automatic | All on-chain commits loaded once |
-| `NOTIFICATION_MIN_REPO_TRACK_PASSES` | **2** | Hub/repo index scanned twice (catches slow discovery) |
-| Startup seed | automatic | Mark all ingested DB + dashboard state as "already seen" |
+| `NOTIFICATION_MIN_REPO_TRACK_PASSES` | **2** | Hub/repo index scanned twice (when sync succeeds) |
+| `NOTIFICATION_STARTUP_MAX_SECONDS` | **600** (10 min) | Go LIVE anyway if repo track keeps failing |
+| Startup seed | automatic | Mark DB + dashboard + Hippius hub index as "already seen" |
 
-**Live time** = `max(5 min, full scan done, 2× repo track)` — then only **new** deltas post to `#albedo`.
+**Live time** = `max(5 min, full scan done, 2× repo track OR 10 min cap)` — then only **new** deltas post to `#albedo`.
+
+If repo track sync fails (check `REPO_TRACK failed` in logs), notifications still go LIVE after the startup max wait. The hub index is seeded at LIVE to prevent repo bulk floods.
 
 Grace runs on **every** collector start (including restarts with Postgres data). Prior alerts in the DB are only used for dedupe — they do **not** skip grace. Set `NOTIFICATION_SKIP_STARTUP_GRACE=true` only if you explicitly want instant live mode.
 
@@ -30,14 +33,16 @@ SLACK_APP_NAME=Albedo_Notification
 # Tune if you still see bulk after docker up:
 NOTIFICATION_GRACE_SECONDS=300          # 5 min (try 600 for slow machines)
 NOTIFICATION_MIN_REPO_TRACK_PASSES=2   # try 3 if hub index is slow
+NOTIFICATION_STARTUP_MAX_SECONDS=600   # go LIVE after 10 min even if repo track fails
 ```
 
 ### Tuning guide
 
 | Situation | Try |
 |-----------|-----|
-| Still bulk flood at ~2 min | Check logs for `skip-startup-grace` or `resume mode` — grace may be bypassed. Otherwise try `NOTIFICATION_GRACE_SECONDS=600` |
+| Still bulk flood at ~2 min | Check logs for `skip-startup-grace` — grace may be bypassed. Otherwise try `NOTIFICATION_GRACE_SECONDS=600` |
 | Repos trickle in slowly | `NOTIFICATION_MIN_REPO_TRACK_PASSES=3` |
+| Stuck on repo track passes (`REPO_TRACK failed`) | Fix network/DB; or wait for `NOTIFICATION_STARTUP_MAX_SECONDS` fallback LIVE |
 | Want faster alerts on restart | `NOTIFICATION_SKIP_STARTUP_GRACE=true` (not recommended — can re-flood Slack) |
 | Fresh empty DB every build | Grace + seed always runs — this is correct |
 

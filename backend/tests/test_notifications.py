@@ -1,5 +1,6 @@
 """Tests for alert notification dispatcher, messages, and watcher."""
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -365,6 +366,73 @@ async def test_watcher_bootstrap_marks_historical_crown():
 
     assert watcher._bootstrapped is True
     assert dispatcher.is_seen("crown_won:ev-old:cyantest/model@v2")
+
+
+@pytest.mark.asyncio
+async def test_watcher_hub_index_seed_marks_albedo_repos():
+    settings = Settings(notifications_enabled=True)
+    dispatcher = NotificationDispatcher(settings)
+    watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+    hub_index = {
+        "cyantest/albedo-qwen3-4b-test": type(
+            "M",
+            (),
+            {"digest": "sha256:abc123def456789012345678901234567890123456789012345678901234"},
+        )(),
+        "other/random-model": type(
+            "M",
+            (),
+            {"digest": "sha256:deadbeef"},
+        )(),
+    }
+    with patch(
+        "app.notifications.watcher.HippiusHubClient.fetch_albedo_index",
+        new_callable=AsyncMock,
+        return_value=hub_index,
+    ):
+        marked = await watcher._seed_hub_index_keys()
+
+    assert marked == 1
+    assert dispatcher.is_seen(
+        "alert:hub:hippius:cyantest/albedo-qwen3-4b-test:sha256:abc123def456789012345678901234567890123456789012345678901234"
+    )
+
+
+def test_poller_repo_track_gate_falls_back_after_max_wait():
+    from datetime import timedelta
+
+    from app.collectors.commitment_poller import CommitmentPoller
+
+    poller = CommitmentPoller()
+    poller.settings = Settings(
+        notification_min_repo_track_passes=2,
+        notification_startup_max_seconds=600,
+        dashboard_subnets=[97],
+    )
+    poller._collector_started_at = datetime.now(timezone.utc) - timedelta(seconds=700)
+    poller._startup_full_scan_done.add(97)
+    poller._startup_repo_track_passes[97] = 0
+
+    assert poller._repo_track_gate_satisfied(97) is True
+
+
+def test_poller_repo_track_gate_requires_passes_before_max_wait():
+    from app.collectors.commitment_poller import CommitmentPoller
+
+    poller = CommitmentPoller()
+    poller.settings = Settings(
+        notification_min_repo_track_passes=2,
+        notification_startup_max_seconds=600,
+        dashboard_subnets=[97],
+    )
+    poller._collector_started_at = datetime.now(timezone.utc)
+    poller._startup_full_scan_done.add(97)
+    poller._startup_repo_track_passes[97] = 1
+
+    assert poller._repo_track_gate_satisfied(97) is False
+
+    poller._startup_repo_track_passes[97] = 2
+    assert poller._repo_track_gate_satisfied(97) is True
 
 
 @pytest.mark.asyncio

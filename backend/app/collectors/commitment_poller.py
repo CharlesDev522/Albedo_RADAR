@@ -75,6 +75,7 @@ class CommitmentPoller:
         self._startup_full_scan_done: set[int] = set()
         self._startup_repo_track_passes: dict[int, int] = {}
         self._last_startup_wait_log: float = 0.0
+        self._collector_started_at: datetime = datetime.now(timezone.utc)
 
     async def setup(self) -> None:
         await init_db(engine)
@@ -82,6 +83,7 @@ class CommitmentPoller:
         self._subtensor = self.subtensor_client._subtensor
         await self.publisher.connect()
         log_notification_config(self.settings, live=False)
+        self._collector_started_at = datetime.now(timezone.utc)
         async with AsyncSessionLocal() as session:
             loaded = await self.notifier.hydrate(session)
             await self.notification_watcher.bootstrap(session)
@@ -140,14 +142,23 @@ class CommitmentPoller:
 
         await self._maybe_finalize_notifications()
 
+    def _repo_track_gate_satisfied(self, netuid: int) -> bool:
+        required = max(self.settings.notification_min_repo_track_passes, 1)
+        if self._startup_repo_track_passes.get(netuid, 0) >= required:
+            return True
+        max_wait = self.settings.notification_startup_max_seconds
+        if max_wait <= 0:
+            return False
+        age = (datetime.now(timezone.utc) - self._collector_started_at).total_seconds()
+        return age >= max_wait
+
     def _startup_ready_for_live(self) -> bool:
         if self.notifier.is_live or not self.notifier.grace_elapsed():
             return False
-        required_passes = max(self.settings.notification_min_repo_track_passes, 1)
         for netuid in self.settings.dashboard_subnets:
             if netuid not in self._startup_full_scan_done:
                 return False
-            if self._startup_repo_track_passes.get(netuid, 0) < required_passes:
+            if not self._repo_track_gate_satisfied(netuid):
                 return False
         return True
 
@@ -161,12 +172,26 @@ class CommitmentPoller:
             )
             blockers.append(f"grace {max(remaining, 0)}s remaining")
         required_passes = max(self.settings.notification_min_repo_track_passes, 1)
+        max_wait = self.settings.notification_startup_max_seconds
         for netuid in self.settings.dashboard_subnets:
             if netuid not in self._startup_full_scan_done:
                 blockers.append(f"SN{netuid} waiting for full chain scan")
-            need = required_passes - self._startup_repo_track_passes.get(netuid, 0)
-            if need > 0:
-                blockers.append(f"SN{netuid} waiting for {need} more repo track pass(es)")
+            passes = self._startup_repo_track_passes.get(netuid, 0)
+            if passes < required_passes:
+                if max_wait > 0 and self._repo_track_gate_satisfied(netuid):
+                    continue
+                need = required_passes - passes
+                blockers.append(
+                    f"SN{netuid} waiting for {need} successful repo track pass(es) "
+                    f"({passes}/{required_passes} done)"
+                )
+                if max_wait > 0:
+                    age = int(
+                        (datetime.now(timezone.utc) - self._collector_started_at).total_seconds()
+                    )
+                    blockers.append(
+                        f"SN{netuid} repo track fallback LIVE in {max(max_wait - age, 0)}s"
+                    )
         return blockers
 
     def _log_startup_wait(self) -> None:
@@ -189,6 +214,22 @@ class CommitmentPoller:
         if not self._startup_ready_for_live():
             self._log_startup_wait()
             return
+        required_passes = max(self.settings.notification_min_repo_track_passes, 1)
+        for netuid in self.settings.dashboard_subnets:
+            passes = self._startup_repo_track_passes.get(netuid, 0)
+            if passes < required_passes:
+                age = int(
+                    (datetime.now(timezone.utc) - self._collector_started_at).total_seconds()
+                )
+                logger.warning(
+                    "notifications LIVE without full repo track seed — SN%d has %d/%d passes "
+                    "after %ds (startup max %ds); hub index will be seeded to avoid repo bulk",
+                    netuid,
+                    passes,
+                    required_passes,
+                    age,
+                    self.settings.notification_startup_max_seconds,
+                )
         async with AsyncSessionLocal() as session:
             marked = await self.notification_watcher.finalize_startup_seed(session)
             await session.commit()
@@ -409,17 +450,32 @@ class CommitmentPoller:
 
     async def _repo_track_poll(self, netuid: int) -> None:
         t0 = time.monotonic()
-        async with AsyncSessionLocal() as session:
-            stats = await self.repo_track_builder.sync_subnet(session, netuid)
-            await self.repo_track_builder.prune_stale_tracks(session, netuid)
-            await session.commit()
+        required = max(self.settings.notification_min_repo_track_passes, 1)
+        try:
+            async with AsyncSessionLocal() as session:
+                stats = await self.repo_track_builder.sync_subnet(session, netuid)
+                await self.repo_track_builder.prune_stale_tracks(session, netuid)
+                await session.commit()
+        except Exception:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            logger.exception(
+                "REPO_TRACK failed netuid=%d after %dms (startup pass %d/%d)",
+                netuid,
+                elapsed_ms,
+                self._startup_repo_track_passes.get(netuid, 0),
+                required,
+            )
+            raise
+
         if not self.notifier.is_live:
             self._startup_repo_track_passes[netuid] = (
                 self._startup_repo_track_passes.get(netuid, 0) + 1
             )
         elapsed_ms = int((time.monotonic() - t0) * 1000)
+        passes = self._startup_repo_track_passes.get(netuid, 0)
         logger.info(
-            "REPO_TRACK netuid=%d miners=%d repos=%d hub_updates=%d on_chain=%d mismatches=%d errors=%d %dms",
+            "REPO_TRACK netuid=%d miners=%d repos=%d hub_updates=%d on_chain=%d mismatches=%d "
+            "errors=%d %dms startup_pass=%d/%d",
             netuid,
             stats["miners_checked"],
             stats["unique_repos"],
@@ -428,6 +484,8 @@ class CommitmentPoller:
             stats["mismatches"],
             stats["errors"],
             elapsed_ms,
+            passes,
+            required,
         )
 
     async def poll_once(self, netuid: int | None = None) -> dict[str, int]:
@@ -437,6 +495,13 @@ class CommitmentPoller:
         async with self._poll_lock:
             await self._maybe_finalize_notifications()
             now = time.monotonic()
+
+            if now - self._last_repo_track.get(netuid, 0.0) >= self.settings.repo_track_interval_seconds:
+                try:
+                    await self._repo_track_poll(netuid)
+                except Exception:
+                    logger.exception("Repo track poll failed netuid=%d", netuid)
+                self._last_repo_track[netuid] = now
 
             if now - self._last_metagraph_sync.get(netuid, 0.0) >= self.settings.metagraph_sync_interval_seconds:
                 self._neurons[netuid] = await _neuron_index(self._subtensor, netuid)
@@ -469,13 +534,6 @@ class CommitmentPoller:
             if run_slot:
                 await self._slot_poll(netuid, snapshot)
                 self._last_slot_scan[netuid] = now
-
-            if now - self._last_repo_track.get(netuid, 0.0) >= self.settings.repo_track_interval_seconds:
-                try:
-                    await self._repo_track_poll(netuid)
-                except Exception:
-                    logger.exception("Repo track poll failed netuid=%d", netuid)
-                self._last_repo_track[netuid] = now
 
             if (
                 now - self._last_notification_poll.get(netuid, 0.0)

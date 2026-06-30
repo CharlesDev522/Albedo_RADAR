@@ -6,12 +6,19 @@ import logging
 import re
 from typing import Any
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chain_reader.albedo_model_family import (
+    FAMILY_QWEN36_35B,
+    FAMILY_QWEN3_4B,
+    infer_albedo_model_family,
+)
 from app.config import Settings, get_settings
 from app.db.models import MinerCommitment, MinerSlotStatus, RepoActivityEvent
 from app.integrations.albedo_dashboard import fetch_dashboard
+from app.integrations.hippius_hub_client import HippiusHubClient
 from app.integrations.market_client import fetch_subnet_economics
 from app.notifications.dispatcher import NotificationDispatcher
 from app.notifications.messages import (
@@ -117,6 +124,30 @@ class NotificationWatcher:
             self._reg_fee_below,
         )
 
+    async def _seed_hub_index_keys(self) -> int:
+        """Mark current Hippius hub albedo repos as seen (anti-bulk when repo track sync fails)."""
+        marked = 0
+        try:
+            hub = HippiusHubClient(self.settings)
+            timeout = self.settings.market_http_timeout_seconds
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                index = await hub.fetch_albedo_index(client=client)
+        except Exception:
+            logger.warning("notification hub index seed failed", exc_info=True)
+            return 0
+
+        for repo, entry in index.items():
+            family = infer_albedo_model_family(repo)
+            if family not in (FAMILY_QWEN36_35B, FAMILY_QWEN3_4B):
+                continue
+            sk = f"alert:hub:hippius:{repo}:{entry.digest}"
+            if not self.dispatcher.is_seen(sk):
+                self.dispatcher.mark_seen(sk)
+                marked += 1
+        if marked:
+            logger.info("notification hub index seed — marked %d repos from Hippius hub", marked)
+        return marked
+
     async def finalize_startup_seed(self, session: AsyncSession) -> int:
         """After grace period, mark all ingested DB/dashboard state as already seen."""
         marked = 0
@@ -147,6 +178,7 @@ class NotificationWatcher:
 
         self._bootstrapped = False
         await self.bootstrap(session)
+        marked += await self._seed_hub_index_keys()
         logger.info("notification startup seed complete — marked %d keys", marked)
         return marked
 
