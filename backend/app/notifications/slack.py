@@ -8,8 +8,8 @@ from typing import Any
 import httpx
 
 from app.config import Settings
-from app.notifications.kinds import SLACK_EMOJI, AlertKind
-from app.notifications.messages import format_alert_body
+from app.notifications.kinds import AlertKind
+from app.notifications.slack_format import build_slack_payload
 
 logger = logging.getLogger(__name__)
 
@@ -37,22 +37,13 @@ async def send_slack_alert(
     if not webhook:
         return False
 
-    emoji = SLACK_EMOJI.get(kind, ":bell:")
-    header = f"{emoji} {title}"
-    body = format_alert_body(kind, message, detail)
-    if subnet is not None:
-        body = f"{body}\n*Subnet:* SN{subnet}"
-
-    payload: dict[str, Any] = {
-        "text": f"{header}\n{message}",
-        "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": header[:150]}},
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": body[:3000]},
-            },
-        ],
-    }
+    payload = build_slack_payload(
+        kind=kind,
+        title=title,
+        message=message,
+        detail=detail,
+        subnet=subnet,
+    )
     channel = _slack_channel(settings.slack_channel)
     if channel:
         payload["channel"] = channel

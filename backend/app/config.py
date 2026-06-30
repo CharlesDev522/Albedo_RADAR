@@ -20,10 +20,10 @@ class Settings(BaseSettings):
     # Bittensor / Subtensor
     bittensor_network: str = "finney"
     default_subnet: int = 97
-    poll_interval_seconds: int = 3
-    metagraph_sync_interval_seconds: int = 60
+    poll_interval_seconds: int = 2
+    metagraph_sync_interval_seconds: int = 45
     full_scan_interval_seconds: int = 300
-    slot_scan_interval_seconds: int = 30
+    slot_scan_interval_seconds: int = 15
     mechid: int = 0
 
     # Primary dashboard subnet (SN97 Albedo)
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     slack_channel: str | None = None
     slack_app_name: str = "Albedo_Notification"
     notification_reg_fee_threshold_tao: float = 0.75
-    albedo_notification_poll_seconds: int = 15
+    albedo_notification_poll_seconds: int = 8
     # Silence Slack after fresh docker up until grace elapses AND initial sync completes.
     notification_grace_seconds: int = 300
     # Lightweight Hippius hub HTTP fetches during startup (no DB). 0 = skip this gate.

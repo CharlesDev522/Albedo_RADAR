@@ -153,12 +153,12 @@ def build_commit_updated_alert(commit: Commit, *, previous_hash: str) -> AlertCo
 
 def build_slot_new_alert(slot: SlotStatus, netuid: int) -> AlertContent:
     detail = slot_alert_detail(slot)
-    ctype = slot.commitment_type.value
+    model = slot.detail or "?"
     return AlertContent(
         kind="slot_new",
-        title=f"[slot_new] uid {slot.uid} — {ctype}",
-        message=f"SN{netuid} new slot commitment at block {slot.commit_block}",
-        source_key=f"slot_new:{netuid}:{slot.uid}:{slot.payload_hash or ctype}",
+        title=f"[slot_new] uid {slot.uid} — new slot",
+        message=f"SN{netuid} slot purchased at block {slot.commit_block} · {model}",
+        source_key=f"slot_new:{netuid}:{slot.uid}:{slot.payload_hash or slot.commit_block}",
         detail=detail,
         subnet=netuid,
     )
@@ -171,13 +171,11 @@ def build_slot_changed_alert(
     previous: dict[str, Any],
 ) -> AlertContent:
     detail = slot_alert_detail(slot, previous=previous)
-    ctype = slot.commitment_type.value
+    model = slot.detail or "?"
     return AlertContent(
         kind="slot_changed",
-        title=f"[slot_changed] uid {slot.uid} — {ctype}",
-        message=(
-            f"SN{netuid} slot updated block {previous.get('commit_block')} → {slot.commit_block}"
-        ),
+        title=f"[slot_changed] uid {slot.uid} — new slot",
+        message=f"SN{netuid} slot purchased at block {slot.commit_block} · {model}",
         source_key=f"slot_changed:{netuid}:{slot.uid}:{slot.payload_hash or slot.commit_block}",
         detail=detail,
         subnet=netuid,
