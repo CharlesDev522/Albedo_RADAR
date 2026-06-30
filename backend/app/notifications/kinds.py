@@ -1,4 +1,4 @@
-"""Alert kinds surfaced to Slack and the Windows notifier."""
+"""Alert kinds surfaced to Slack."""
 
 from __future__ import annotations
 

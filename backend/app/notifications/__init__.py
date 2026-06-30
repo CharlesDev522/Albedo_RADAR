@@ -1,4 +1,4 @@
-"""Alert notifications (Slack + persisted feed for Windows client)."""
+"""Alert notifications (Slack)."""
 
 from app.notifications.dispatcher import NotificationDispatcher
 

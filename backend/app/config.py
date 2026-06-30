@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     ]
     priority_challenger_top_n: int = 10
 
-    # Notifications (Slack + Windows desktop client)
+    # Notifications (Slack)
     notifications_enabled: bool = True
     slack_webhook_url: str | None = None
     slack_channel: str | None = None

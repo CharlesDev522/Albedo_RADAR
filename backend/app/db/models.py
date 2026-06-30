@@ -440,7 +440,7 @@ class RepoActivityEvent(Base):
 
 
 class AlertNotification(Base):
-    """Persisted alerts for Slack + Windows desktop notifier."""
+    """Persisted alerts for Slack delivery and history."""
 
     __tablename__ = "alert_notifications"
     __table_args__ = (
@@ -458,5 +458,4 @@ class AlertNotification(Base):
     source_key: Mapped[str] = mapped_column(String(256), nullable=False)
     subnet: Mapped[int | None] = mapped_column(Integer, nullable=True)
     slack_sent: Mapped[bool] = mapped_column(Boolean, default=False)
-    windows_ack_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

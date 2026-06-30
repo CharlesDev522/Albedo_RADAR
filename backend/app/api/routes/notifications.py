@@ -1,6 +1,4 @@
-"""Alert notification feed for Windows desktop client."""
-
-from datetime import datetime, timezone
+"""Alert notification history API."""
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
@@ -30,17 +28,3 @@ async def list_notifications(
     items = [AlertNotificationResponse.model_validate(r) for r in rows]
     latest_id = items[-1].id if items else (since_id if since_id else None)
     return AlertNotificationList(items=items, latest_id=latest_id)
-
-
-@router.post("/{notification_id}/ack")
-async def ack_notification(
-    notification_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, str]:
-    """Mark alert as shown on Windows (optional bookkeeping)."""
-    row = await db.get(AlertNotification, notification_id)
-    if row is None:
-        return {"status": "not_found"}
-    row.windows_ack_at = datetime.now(timezone.utc)
-    await db.commit()
-    return {"status": "ok"}

@@ -1,6 +1,6 @@
-# Notifications — Slack + Windows 11
+# Notifications — Slack
 
-MinerWatch emits **kind-tagged alerts** from the collector (Docker) and delivers them via **Slack** and/or a **desktop notifier**.
+MinerWatch emits **kind-tagged alerts** from the collector (Docker) and delivers them to **Slack** (`#albedo` via `Albedo_Notification`).
 
 ## Alert kinds
 
@@ -20,7 +20,7 @@ Each alert has a **message** line plus ordered **detail** fields (uid, hotkey, d
 
 ---
 
-## Docker setup (recommended)
+## Docker setup
 
 1. Copy env file:
 
@@ -46,50 +46,13 @@ docker compose build --no-cache api collector
 docker compose up -d
 ```
 
-The **collector** sends Slack alerts and persists them to PostgreSQL. No extra setup required for Slack.
-
-4. Optional — log notifier container (polls API inside Docker network):
-
-```bash
-docker compose --profile notifier up -d notifier
-```
-
-This service logs kind-tagged alerts to stdout. For **native Win11 toasts**, run the client on your Windows host (below).
+The **collector** sends Slack alerts and persists them to PostgreSQL.
 
 ---
 
-## Windows 11 desktop toasts
-
-Run on your **Windows PC** (points at Docker API on `localhost:8000`):
-
-```powershell
-cd backend
-pip install -r requirements.txt -r requirements-notifier.txt
-$env:MINERWATCH_API_URL = "http://localhost:8000/api/v1"
-python -m app.notifiers.poll_client
-```
-
-Or use the legacy host script:
-
-```powershell
-pip install -r scripts/requirements-windows.txt
-python scripts/windows_notifier.py
-```
-
-Optional filters:
-
-```env
-NOTIFIER_POLL_SECONDS=10
-NOTIFIER_KINDS=crown_won,crown_lost,commit_new,reg_fee_low
-NOTIFIER_ACK=true
-```
-
----
-
-## API
+## Alert history API (optional)
 
 - `GET /api/v1/notifications?since_id=0&limit=50&kinds=crown_won,commit_new`
-- `POST /api/v1/notifications/{id}/ack`
 
 ---
 
@@ -100,10 +63,7 @@ collector (Docker)
   ├─ commits / slots / repos → NotificationDispatcher
   ├─ crown + reg fee poll    → NotificationWatcher
   ├─ dedupe (memory + DB)    → alert_notifications table
-  └─ Slack webhook           → your channel
-
-notifier (optional Docker profile OR Windows host)
-  └─ polls GET /notifications → Win11 toast / logs
+  └─ Slack webhook           → #albedo
 ```
 
 On **fresh install**, crown history is bootstrapped (no flood of old coronations).

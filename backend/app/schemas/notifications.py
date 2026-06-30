@@ -18,7 +18,6 @@ class AlertNotificationResponse(BaseModel):
     source_key: str
     subnet: int | None
     slack_sent: bool
-    windows_ack_at: datetime | None
     created_at: datetime
 
 

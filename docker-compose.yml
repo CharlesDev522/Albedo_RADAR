@@ -1,9 +1,6 @@
 # Docker Compose — MinerWatch stack
 # Copy .env.example → .env and set SLACK_WEBHOOK_URL for Slack alerts.
-#
-# Full stack:        docker compose up -d
-# With desktop feed: docker compose --profile notifier up -d
-# Win11 toasts:      run poll client on Windows host (see NOTIFICATIONS.md)
+# Full stack: docker compose up -d
 
 x-notification-env: &notification-env
   NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-true}
@@ -95,23 +92,6 @@ services:
         condition: service_healthy
       api:
         condition: service_started
-    restart: unless-stopped
-
-  notifier:
-    profiles: [notifier]
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.notifier
-    env_file:
-      - .env
-    environment:
-      MINERWATCH_API_URL: http://api:8000/api/v1
-      NOTIFIER_POLL_SECONDS: ${NOTIFIER_POLL_SECONDS:-10}
-      NOTIFIER_ACK: ${NOTIFIER_ACK:-true}
-      NOTIFIER_KINDS: ${NOTIFIER_KINDS:-}
-    depends_on:
-      api:
-        condition: service_healthy
     restart: unless-stopped
 
   frontend:

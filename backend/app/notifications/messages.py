@@ -22,7 +22,7 @@ KIND_LABELS: dict[AlertKind, str] = {
     "reg_fee_low": "Low Reg Fee",
 }
 
-# Ordered keys per kind for Slack / desktop detail lines (most important first).
+# Ordered keys per kind for Slack detail lines (most important first).
 DETAIL_ORDER: dict[AlertKind, tuple[str, ...]] = {
     "crown_won": (
         "repo",
@@ -302,7 +302,7 @@ def build_reg_fee_low_alert(
 
 
 def format_detail_lines(kind: AlertKind, detail: dict[str, Any]) -> list[str]:
-    """Ordered, human-readable detail lines for Slack and desktop toasts."""
+    """Ordered, human-readable detail lines for Slack messages."""
     order = DETAIL_ORDER.get(kind, ())
     lines: list[str] = []
     seen: set[str] = set()
