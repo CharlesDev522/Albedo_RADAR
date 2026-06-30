@@ -93,7 +93,12 @@ class NotificationWatcher:
             eval_id = run.get("eval_run_id") or run.get("id")
             if run.get("coronated"):
                 self.dispatcher.mark_seen(_crown_won_source_key(run))
-            if eval_id and run.get("finished_at") and not run.get("challenger_won"):
+            if (
+                eval_id
+                and run.get("finished_at")
+                and run.get("challenger_won") is False
+                and not run.get("coronated")
+            ):
                 self.dispatcher.mark_seen(_king_defended_source_key(str(eval_id)))
 
         current_eval = dashboard.get("current_eval") or {}
@@ -242,12 +247,13 @@ class NotificationWatcher:
         if netuid != self.settings.default_subnet:
             return 0
         try:
-            dashboard = await fetch_dashboard(settings=self.settings)
+            dashboard = await fetch_dashboard(settings=self.settings, live=True)
         except Exception:
             logger.warning("duel notification: dashboard fetch failed", exc_info=True)
             return 0
 
         sent = 0
+        crown_won_sent = False
         reign = dashboard.get("reign") or {}
         members = reign.get("members") or []
         reign_king = members[0] if members else {}
@@ -285,12 +291,14 @@ class NotificationWatcher:
                 )
                 if await self.dispatcher.notify_content(session, alert):
                     sent += 1
+                    crown_won_sent = True
                 continue
 
             if (
                 eval_id
                 and run.get("finished_at")
-                and not run.get("challenger_won")
+                and run.get("challenger_won") is False
+                and not run.get("coronated")
             ):
                 source_key = _king_defended_source_key(str(eval_id))
                 if self.dispatcher.is_seen(source_key):
@@ -307,7 +315,8 @@ class NotificationWatcher:
                     sent += 1
 
         if (
-            self._last_king_version is not None
+            not crown_won_sent
+            and self._last_king_version is not None
             and current_version is not None
             and current_version != self._last_king_version
         ):

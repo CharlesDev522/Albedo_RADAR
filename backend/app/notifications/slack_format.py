@@ -1,4 +1,4 @@
-"""Compact, visual Slack block payloads for alerts."""
+"""Clean Slack block payloads — single rich section, no bulky headers."""
 
 from __future__ import annotations
 
@@ -6,10 +6,23 @@ import re
 from typing import Any
 
 from app.notifications.kinds import SLACK_EMOJI, AlertKind
-from app.notifications.messages import KIND_LABELS
 from app.notifications.reg_fee_tiers import reg_fee_tier_emoji
 
 _TITLE_TAG_RE = re.compile(r"^\[[\w_]+\]\s*")
+
+_KIND_HEADLINE: dict[AlertKind, str] = {
+    "crown_won": "New King",
+    "crown_lost": "King Dethroned",
+    "duel_new": "Duel Started",
+    "king_defended": "King Defended",
+    "slot_new": "Slot Purchased",
+    "slot_changed": "Slot Purchased",
+    "commit_new": "New Commit",
+    "commit_updated": "Commit Updated",
+    "repo_new": "New Repo",
+    "repo_updated": "Repo Updated",
+    "reg_fee_low": "Reg Fee Drop",
+}
 
 
 def hippius_repo_url(repo: str, revision: str = "main") -> str:
@@ -31,10 +44,6 @@ def _short(s: str | None, n: int = 14) -> str:
     return text if len(text) <= n else f"{text[:n]}…"
 
 
-def _subject_from_title(title: str) -> str:
-    return _TITLE_TAG_RE.sub("", title).strip()
-
-
 def _repo_from_detail(detail: dict[str, Any]) -> str | None:
     for key in ("repo", "detail", "king_repo", "new_repo", "model_uri"):
         raw = detail.get(key)
@@ -48,6 +57,124 @@ def _repo_from_detail(detail: dict[str, Any]) -> str | None:
     return None
 
 
+def _fmt_scores(detail: dict[str, Any]) -> str | None:
+    ch = detail.get("score_challenger")
+    kg = detail.get("score_king")
+    if ch is None and kg is None:
+        return None
+    ch_s = f"{float(ch):.3f}" if ch is not None else "?"
+    kg_s = f"{float(kg):.3f}" if kg is not None else "?"
+    return f"scores {ch_s} vs {kg_s}"
+
+
+def _fmt_margin(detail: dict[str, Any]) -> str | None:
+    margin = detail.get("win_margin")
+    if margin is None:
+        return None
+    return f"margin {float(margin):+.3f}"
+
+
+def _headline(kind: AlertKind, detail: dict[str, Any], subnet: int | None) -> str:
+    emoji = SLACK_EMOJI.get(kind, ":bell:")
+    if kind == "reg_fee_low":
+        tier = detail.get("threshold_tao")
+        if tier is not None:
+            emoji = reg_fee_tier_emoji(float(tier))
+    label = _KIND_HEADLINE.get(kind, kind.replace("_", " ").title())
+    sn = f" · SN{subnet}" if subnet is not None else ""
+    return f"{emoji} *{label}*{sn}"
+
+
+def _body_line(kind: AlertKind, message: str, detail: dict[str, Any]) -> str:
+    repo = _repo_from_detail(detail)
+    repo_s = f"`{repo}`" if repo else None
+    uid = detail.get("uid")
+    block = detail.get("commit_block")
+    digest = detail.get("digest") or detail.get("hub_digest")
+    king_v = detail.get("king_version")
+    defeated_v = detail.get("defeated_king_version")
+    king_repo = detail.get("king_repo")
+    scores = _fmt_scores(detail)
+    margin = _fmt_margin(detail)
+
+    if kind == "duel_new":
+        vs = f" vs king v{king_v}" if king_v is not None else ""
+        king = f" (`{king_repo}`)" if king_repo else ""
+        return f"Challenger {repo_s or '?'} started{vs}{king}"
+
+    if kind == "crown_won":
+        vers = ""
+        if king_v is not None and defeated_v is not None:
+            vers = f" · v{king_v} ← defeated v{defeated_v}"
+        elif king_v is not None:
+            vers = f" · crowned v{king_v}"
+        parts = [p for p in [repo_s, vers.strip() if vers else None, margin, scores] if p]
+        return " · ".join(parts) if parts else message[:200]
+
+    if kind == "king_defended":
+        parts = [f"Challenger {repo_s or '?'} failed"]
+        if king_v is not None:
+            parts.append(f"king v{king_v} held")
+        if margin:
+            parts.append(margin)
+        if scores:
+            parts.append(scores)
+        return " · ".join(parts)
+
+    if kind == "crown_lost":
+        prev_v = detail.get("previous_king_version")
+        new_v = detail.get("new_king_version")
+        new_repo = detail.get("new_repo")
+        new_s = f"`{new_repo}`" if new_repo else "?"
+        return f"Reign v{prev_v} ended · new king v{new_v} is {new_s}"
+
+    if kind in ("commit_new", "commit_updated"):
+        d = _short(str(digest).replace("sha256:", ""), 12) if digest else "?"
+        return f"uid *{uid}* · block *{block}* · `{d}`" + (f" · {repo_s}" if repo_s else "")
+
+    if kind in ("slot_new", "slot_changed"):
+        model = detail.get("detail") or repo or "?"
+        return f"uid *{uid}* · block *{block}* · `{model}`"
+
+    if kind in ("repo_new", "repo_updated"):
+        d = _short(str(digest).replace("sha256:", ""), 12) if digest else "?"
+        fam = detail.get("model_family")
+        fam_s = f" · {fam}" if fam else ""
+        return f"{repo_s or '?'}{fam_s} · `{d}`"
+
+    if kind == "reg_fee_low":
+        burn = detail.get("registration_burn_tao")
+        tier = detail.get("threshold_tao")
+        burn_s = f"{float(burn):.4f}" if burn is not None else "?"
+        tier_s = f"{float(tier):g}" if tier is not None else "?"
+        return f"Burn *{burn_s} τ* crossed below *{tier_s} τ* tier"
+
+    return message[:240]
+
+
+def _meta_line(kind: AlertKind, detail: dict[str, Any]) -> str | None:
+    bits: list[str] = []
+    if kind in ("duel_new", "crown_won", "king_defended"):
+        if detail.get("uid") is not None:
+            bits.append(f"uid {detail['uid']}")
+        if detail.get("hotkey"):
+            bits.append(f"hk `{_short(str(detail['hotkey']), 18)}`")
+        eval_id = detail.get("eval_run_id")
+        if eval_id:
+            bits.append(f"run `{str(eval_id)[:8]}`")
+    elif kind in ("commit_new", "commit_updated", "slot_new", "slot_changed"):
+        if detail.get("hotkey"):
+            bits.append(f"hk `{_short(str(detail['hotkey']), 18)}`")
+        if detail.get("version"):
+            bits.append(str(detail["version"]))
+    elif kind == "reg_fee_low":
+        if detail.get("alpha_price_tao") is not None:
+            bits.append(f"α {float(detail['alpha_price_tao']):.4f} τ")
+        if detail.get("chain_block") is not None:
+            bits.append(f"block {detail['chain_block']}")
+    return " · ".join(bits) if bits else None
+
+
 def _link_line(kind: AlertKind, detail: dict[str, Any], subnet: int | None) -> str:
     parts: list[str] = []
     repo = _repo_from_detail(detail)
@@ -56,91 +183,7 @@ def _link_line(kind: AlertKind, detail: dict[str, Any], subnet: int | None) -> s
         parts.append(f"<{huggingface_repo_url(repo)}|HF>")
     if subnet is not None:
         parts.append(f"<{taostats_subnet_url(subnet)}|SN{subnet}>")
-    eval_id = detail.get("eval_run_id")
-    if eval_id and kind in ("duel_new", "crown_won", "king_defended"):
-        parts.append(f"`{str(eval_id)[:8]}…`")
     return " · ".join(parts)
-
-
-def _compact_summary(kind: AlertKind, message: str, detail: dict[str, Any]) -> str:
-    repo = _repo_from_detail(detail)
-    uid = detail.get("uid")
-    block = detail.get("commit_block")
-    digest = detail.get("digest") or detail.get("hub_digest")
-    king_v = detail.get("king_version")
-    king_repo = detail.get("king_repo")
-
-    if kind == "duel_new":
-        vs = f" vs king v{king_v}" if king_v is not None else ""
-        king = f" ({king_repo})" if king_repo else ""
-        return f"*{repo or '?'}*{vs}{king}"
-    if kind in ("commit_new", "commit_updated"):
-        d = _short(str(digest).replace("sha256:", ""), 12) if digest else "?"
-        return f"uid *{uid}* · block *{block}* · `{d}`"
-    if kind in ("slot_new", "slot_changed"):
-        model = detail.get("detail") or repo or "?"
-        return f"uid *{uid}* · block *{block}* · `{model}`"
-    if kind in ("repo_new", "repo_updated"):
-        d = _short(str(digest).replace("sha256:", ""), 12) if digest else "?"
-        return f"*{repo or '?'}* · `{d}`"
-    if kind == "crown_won":
-        return message.split("—")[0].strip()[:200]
-    if kind == "crown_lost":
-        return message[:200]
-    if kind == "king_defended":
-        margin = detail.get("win_margin")
-        m = f" · margin {margin:+.3f}" if margin is not None else ""
-        return f"King held{m}"
-    if kind == "reg_fee_low":
-        tier = detail.get("threshold_tao")
-        burn = detail.get("registration_burn_tao")
-        return f"Burn *{burn}* τ · crossed below *{tier:g} τ* tier"
-    return message[:240]
-
-
-def _fields_for_kind(kind: AlertKind, detail: dict[str, Any], subnet: int | None) -> list[dict[str, str]]:
-    fields: list[tuple[str, Any]] = []
-
-    def add(label: str, key: str) -> None:
-        val = detail.get(key)
-        if val is not None and val != "":
-            fields.append((label, val))
-
-    if kind in ("commit_new", "commit_updated"):
-        add("UID", "uid")
-        add("Block", "commit_block")
-        add("Version", "version")
-        add("Hotkey", "hotkey")
-    elif kind == "duel_new":
-        add("UID", "uid")
-        add("State", "state")
-        add("King v", "king_version")
-        add("Samples", "sample_count")
-    elif kind in ("slot_new", "slot_changed"):
-        add("UID", "uid")
-        add("Block", "commit_block")
-        add("Type", "commitment_type")
-    elif kind in ("repo_new", "repo_updated"):
-        add("Family", "model_family")
-        add("Revision", "revision")
-        add("UID", "uid")
-    elif kind == "reg_fee_low":
-        add("Burn τ", "registration_burn_tao")
-        add("Tier τ", "threshold_tao")
-        add("Alpha", "alpha_price_tao")
-        add("Block", "chain_block")
-
-    if subnet is not None and kind not in ("reg_fee_low",):
-        fields.append(("Subnet", f"SN{subnet}"))
-
-    out: list[dict[str, str]] = []
-    for label, val in fields[:8]:
-        if isinstance(val, float):
-            text = f"{val:.4f}" if label.endswith("τ") else f"{val}"
-        else:
-            text = _short(str(val), 22) if label == "Hotkey" else str(val)
-        out.append({"type": "mrkdwn", "text": f"*{label}*\n{text}"})
-    return out
 
 
 def build_slack_payload(
@@ -151,28 +194,22 @@ def build_slack_payload(
     detail: dict[str, Any],
     subnet: int | None,
 ) -> dict[str, Any]:
-    emoji = SLACK_EMOJI.get(kind, ":bell:")
-    if kind == "reg_fee_low":
-        tier = detail.get("threshold_tao")
-        if tier is not None:
-            emoji = reg_fee_tier_emoji(float(tier))
-    label = KIND_LABELS.get(kind, kind)
-    subject = _subject_from_title(title)
-    header = f"{emoji} {label} · {subject}"[:150]
-    summary = _compact_summary(kind, message, detail)
-    fields = _fields_for_kind(kind, detail, subnet)
+    headline = _headline(kind, detail, subnet)
+    body = _body_line(kind, message, detail)
+    meta = _meta_line(kind, detail)
     links = _link_line(kind, detail, subnet)
 
+    main = f"{headline}\n{body}"
+    if meta:
+        main = f"{main}\n_{meta}_"
+
     blocks: list[dict[str, Any]] = [
-        {"type": "header", "text": {"type": "plain_text", "text": header, "emoji": True}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"{emoji} {summary}"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": main[:3000]}},
     ]
-    if fields:
-        blocks.append({"type": "section", "fields": fields})
     if links:
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": links}]})
 
-    fallback = f"{header}\n{summary}"
+    fallback = f"{headline} — {body}"
     if links:
-        fallback = f"{fallback}\n{links}"
+        fallback = f"{fallback} ({links})"
     return {"text": fallback[:500], "blocks": blocks}

@@ -194,6 +194,116 @@ def test_format_alert_body_orders_detail():
 
 
 @pytest.mark.asyncio
+async def test_watcher_skips_crown_lost_when_crown_won_same_poll():
+    """Avoid duplicate crown_lost + crown_won on the same king transition."""
+    settings = Settings(notifications_enabled=True, default_subnet=97)
+    dispatcher = NotificationDispatcher(settings)
+    dispatcher.enable_resume_mode()
+    dispatcher.notify_content = AsyncMock(return_value=True)
+    watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+    watcher._bootstrapped = True
+    watcher._last_king_version = 1
+    watcher._last_king_uri = "org/old-king@sha256:2"
+
+    dashboard = {
+        "reign": {"members": [{"king_version": 2, "model_uri": "org/new-king@sha256:1"}]},
+        "current_eval": None,
+        "eval_runs": [
+            {
+                "coronated": True,
+                "eval_run_id": "r1",
+                "model_uri": "org/new-king@sha256:1",
+                "king_version": 2,
+                "defeated_king_version": 1,
+                "finished_at": "2026-06-27T10:00:00+00:00",
+                "challenger_won": True,
+            }
+        ],
+    }
+
+    session = _mock_session_no_existing()
+    with (
+        patch("app.notifications.watcher.fetch_dashboard", return_value=dashboard),
+        patch(
+            "app.notifications.watcher.fetch_subnet_economics",
+            return_value={"registration_burn_tao": 1.5},
+        ),
+    ):
+        sent = await watcher.poll_subnet(session, 97)
+
+    kinds = [c.args[1].kind for c in dispatcher.notify_content.await_args_list]
+    assert "crown_won" in kinds
+    assert "crown_lost" not in kinds
+    assert sent == 1
+
+
+@pytest.mark.asyncio
+async def test_watcher_king_defended_requires_explicit_loss():
+    settings = Settings(notifications_enabled=True, default_subnet=97)
+    dispatcher = NotificationDispatcher(settings)
+    dispatcher.enable_resume_mode()
+    dispatcher.notify_content = AsyncMock(return_value=True)
+    watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+    watcher._bootstrapped = True
+
+    dashboard = {
+        "reign": {"members": [{"king_version": 2, "model_uri": "cyantest/king@v2"}]},
+        "current_eval": None,
+        "eval_runs": [
+            {
+                "eval_run_id": "r-pending",
+                "finished_at": "2026-06-14T13:00:00Z",
+                "challenger_won": None,
+                "coronated": False,
+                "model_uri": "other/challenger@v1",
+            }
+        ],
+    }
+
+    session = _mock_session_no_existing()
+    with (
+        patch("app.notifications.watcher.fetch_dashboard", return_value=dashboard),
+        patch(
+            "app.notifications.watcher.fetch_subnet_economics",
+            return_value={"registration_burn_tao": 1.5},
+        ),
+    ):
+        sent = await watcher.poll_subnet(session, 97)
+
+    assert sent == 0
+    dispatcher.notify_content.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_watcher_poll_uses_live_dashboard():
+    settings = Settings(notifications_enabled=True, default_subnet=97)
+    dispatcher = NotificationDispatcher(settings)
+    dispatcher.enable_resume_mode()
+    watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+    watcher._bootstrapped = True
+
+    session = _mock_session_no_existing()
+    with (
+        patch(
+            "app.notifications.watcher.fetch_dashboard",
+            new_callable=AsyncMock,
+            return_value={
+                "reign": {"members": [{"king_version": 1, "model_uri": "cyantest/model@v1"}]},
+                "eval_runs": [],
+            },
+        ) as fetch_mock,
+        patch(
+            "app.notifications.watcher.fetch_subnet_economics",
+            return_value={"registration_burn_tao": 1.5},
+        ),
+    ):
+        await watcher.poll_subnet(session, 97)
+
+    fetch_mock.assert_awaited_once()
+    assert fetch_mock.await_args.kwargs.get("live") is True
+
+
+@pytest.mark.asyncio
 async def test_watcher_emits_king_defended():
     settings = Settings(notifications_enabled=True, default_subnet=97)
     dispatcher = NotificationDispatcher(settings)

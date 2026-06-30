@@ -3,7 +3,7 @@
 from app.notifications.slack_format import build_slack_payload, hippius_repo_url
 
 
-def test_build_slack_payload_has_header_fields_and_links():
+def test_build_slack_payload_duel_clean_section():
     payload = build_slack_payload(
         kind="duel_new",
         title="[duel_new] k/albedo-qwen3.6-35b-k03",
@@ -18,13 +18,63 @@ def test_build_slack_payload_has_header_fields_and_links():
         subnet=97,
     )
     blocks = payload["blocks"]
-    assert blocks[0]["type"] == "header"
-    assert "New Duel" in blocks[0]["text"]["text"]
-    section = blocks[1]["text"]["text"]
-    assert "k/albedo-qwen3.6-35b-k03" in section
+    assert blocks[0]["type"] == "section"
+    assert "header" not in {b["type"] for b in blocks}
+    text = blocks[0]["text"]["text"]
+    assert "*Duel Started*" in text
+    assert "SN97" in text
+    assert "`k/albedo-qwen3.6-35b-k03`" in text
+    assert "king v42" in text
     context = blocks[-1]["elements"][0]["text"]
     assert hippius_repo_url("k/albedo-qwen3.6-35b-k03") in context
     assert "SN97" in context
+
+
+def test_build_slack_payload_crown_won_scores():
+    payload = build_slack_payload(
+        kind="crown_won",
+        title="[crown_won] org/new-king",
+        message="SN97 crowned king v2 (defeated v1)",
+        detail={
+            "repo": "org/new-king",
+            "king_version": 2,
+            "defeated_king_version": 1,
+            "win_margin": 0.2,
+            "score_challenger": 0.6,
+            "score_king": 0.4,
+            "uid": 10,
+            "eval_run_id": "r1",
+        },
+        subnet=97,
+    )
+    text = payload["blocks"][0]["text"]["text"]
+    assert "*New King*" in text
+    assert "`org/new-king`" in text
+    assert "v2" in text and "v1" in text
+    assert "margin +0.200" in text
+    assert "0.600 vs 0.400" in text
+
+
+def test_build_slack_payload_king_defended():
+    payload = build_slack_payload(
+        kind="king_defended",
+        title="[king_defended] other/challenger",
+        message="SN97 duel finished — king defended",
+        detail={
+            "repo": "other/challenger",
+            "king_version": 2,
+            "win_margin": -0.1,
+            "score_challenger": 0.45,
+            "score_king": 0.55,
+            "uid": 20,
+        },
+        subnet=97,
+    )
+    text = payload["blocks"][0]["text"]["text"]
+    assert "*King Defended*" in text
+    assert "`other/challenger`" in text
+    assert "king v2 held" in text
+    assert "margin -0.100" in text
 
 
 def test_build_slack_payload_reg_fee_tier_emoji():
@@ -35,11 +85,11 @@ def test_build_slack_payload_reg_fee_tier_emoji():
         detail={"registration_burn_tao": 0.52, "threshold_tao": 0.75},
         subnet=97,
     )
-    header = payload["blocks"][0]["text"]["text"]
-    section = payload["blocks"][1]["text"]["text"]
-    assert ":money_with_wings:" in header
-    assert ":money_with_wings:" in section
-    assert "0.75" in section
+    text = payload["blocks"][0]["text"]["text"]
+    assert ":money_with_wings:" in text
+    assert "*Reg Fee Drop*" in text
+    assert "0.52" in text
+    assert "0.75" in text
 
 
 def test_build_slack_payload_commit_compact():
@@ -55,5 +105,6 @@ def test_build_slack_payload_commit_compact():
         },
         subnet=97,
     )
-    assert "uid *166*" in payload["blocks"][1]["text"]["text"]
+    text = payload["blocks"][0]["text"]["text"]
+    assert "uid *166*" in text
     assert "foremost/albedo" in payload["text"]
