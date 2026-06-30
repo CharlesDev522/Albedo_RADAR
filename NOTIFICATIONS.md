@@ -1,114 +1,62 @@
 # Notifications — Slack
 
-MinerWatch sends **Slack-only** alerts for live changes detected **after** collector startup (no bulk flood on `docker compose up`).
+MinerWatch sends **Slack-only** alerts for **genuinely new** changes after `docker compose up`.
 
-## What notifies (your requirements)
+## 60-second grace period (fixes bulk flood)
 
-| Your event | Alert kind | When it fires | Post-startup only |
-|------------|------------|---------------|-------------------|
-| New repo on hub | `repo_new` | Hippius/hub index discovers a repo not seen before | Yes — startup sync is silent |
-| New duel started | `duel_new` | `current_eval` gets a new `eval_run_id` | Yes — live duel at boot is seeded |
-| New on-chain commit | `commit_new` | New v6 commitment row for a hotkey | Yes |
-| Reg fee drops below threshold | `reg_fee_low` | Burn crosses **below** 0.75 τ (edge-triggered) | Yes — already-low fee at boot is seeded |
-| Duel finish — crowned | `crown_won` | `eval_runs` entry with `coronated: true` | Yes — history bootstrapped |
-| Duel finish — king defended | `king_defended` | Finished duel, `challenger_won: false` | Yes — history bootstrapped |
-| King reign ended | `crown_lost` | `king_version` changes in reign | Yes |
+On fresh `docker compose up`:
 
-### Also sent (optional noise — on-chain/hub)
-
-| Alert kind | When |
-|------------|------|
-| `commit_updated` | On-chain digest changes |
-| `repo_updated` | Hub manifest digest changes |
-| `slot_new` / `slot_changed` | Slot commitment changes |
-
-## Troubleshooting — no Slack messages
-
-### 1. Create `.env` (required)
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and set your real webhook:
+1. **0–60s grace** — collector ingests all repos, commits, slots, duels silently (no Slack)
+2. **After 60s** — seeds everything already in DB + dashboard as "seen"
+3. **Live** — only real new changes post to `#albedo`
 
 ```env
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T07UP6DQ519/...
-SLACK_CHANNEL=#albedo
-SLACK_APP_NAME=Albedo_Notification
-NOTIFICATIONS_ENABLED=true
+NOTIFICATION_GRACE_SECONDS=60
 ```
 
-### 2. Recreate collector (loads new env)
-
-```bash
-docker compose up -d --force-recreate collector
-```
-
-### 3. Check status
-
-```bash
-curl http://localhost:8000/api/v1/notifications/status
-```
-
-`webhook_configured` must be `true`.
-
-### 4. Send test message
-
-```bash
-curl -X POST http://localhost:8000/api/v1/notifications/test-slack
-```
-
-You should see a test message in `#albedo` immediately.
-
-### 5. Check collector logs
-
-```bash
-docker compose logs collector | grep -i notification
-```
-
-Look for:
+Collector logs:
 
 ```
-notifications: enabled webhook=set channel=#albedo ...
-notifications armed after startup sync ...
+notifications grace period until 2026-... (60s) — initial fetch will NOT post to Slack
+notifications LIVE from 2026-... — only changes after docker grace are sent
 ```
 
-If you see `SLACK_WEBHOOK_URL is missing` — `.env` is not loaded; fix step 1–2.
+Restarts with existing alert history skip grace (resume mode).
 
----
+## What notifies
+
+| Your event | Alert kind | When it fires |
+|------------|------------|---------------|
+| New repo on hub | `repo_new` | Hub discovers a repo not seen before |
+| New duel started | `duel_new` | New `current_eval.eval_run_id` |
+| New on-chain commit | `commit_new` | New v6 commitment for a hotkey |
+| Reg fee drops below threshold | `reg_fee_low` | Burn crosses below 0.75 τ |
+| Duel finish — crowned | `crown_won` | `coronated: true` |
+| Duel finish — king defended | `king_defended` | Finished duel, challenger lost |
+| King reign ended | `crown_lost` | `king_version` changes |
+
+## Setup
 
 ```bash
 cp .env.example .env
 # set SLACK_WEBHOOK_URL, SLACK_CHANNEL=#albedo, SLACK_APP_NAME=Albedo_Notification
-docker compose build --no-cache collector
-docker compose up -d
+docker compose build --no-cache collector api
+docker compose up -d --force-recreate collector api
 ```
 
-Collector log when ready:
+## Verify
 
-```
-notifications armed after startup sync — only new events from 2026-... will post to Slack
-```
-
-## Slack config (`.env`)
-
-```env
-NOTIFICATIONS_ENABLED=true
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
-SLACK_CHANNEL=#albedo
-SLACK_APP_NAME=Albedo_Notification
-NOTIFICATION_REG_FEE_THRESHOLD_TAO=0.75
+```bash
+curl http://localhost:8000/api/v1/notifications/status
+curl -X POST http://localhost:8000/api/v1/notifications/test-slack
+docker compose logs collector | grep -i notification
 ```
 
 ## How it works
 
 ```
 docker compose up
-  → collector DISARMED
-  → full sync (repos, commits, slots, duels) — silent
-  → notifications ARMED
-  → only deltas after this point → Slack #albedo
+  → 60s grace (silent ingest)
+  → seed all DB + dashboard state as seen
+  → LIVE — only new deltas → Slack #albedo
 ```
-
-Dedup: in-memory cache + `alert_notifications.source_key` in PostgreSQL.

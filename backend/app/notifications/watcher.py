@@ -6,9 +6,11 @@ import logging
 import re
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
+from app.db.models import MinerCommitment, MinerSlotStatus, RepoActivityEvent
 from app.integrations.albedo_dashboard import fetch_dashboard
 from app.integrations.market_client import fetch_subnet_economics
 from app.notifications.dispatcher import NotificationDispatcher
@@ -114,6 +116,39 @@ class NotificationWatcher:
             self._last_live_eval_id,
             self._reg_fee_below,
         )
+
+    async def finalize_startup_seed(self, session: AsyncSession) -> int:
+        """After grace period, mark all ingested DB/dashboard state as already seen."""
+        marked = 0
+
+        repo_keys = (
+            await session.execute(select(RepoActivityEvent.source_key))
+        ).scalars().all()
+        for key in repo_keys:
+            sk = f"alert:{key}"
+            if not self.dispatcher.is_seen(sk):
+                self.dispatcher.mark_seen(sk)
+                marked += 1
+
+        for row in (await session.execute(select(MinerCommitment))).scalars().all():
+            for prefix in ("commit_new", "commit_updated"):
+                sk = f"{prefix}:{row.subnet}:{row.hotkey}:{row.payload_hash}"
+                if not self.dispatcher.is_seen(sk):
+                    self.dispatcher.mark_seen(sk)
+                    marked += 1
+
+        for row in (await session.execute(select(MinerSlotStatus))).scalars().all():
+            sk_new = f"slot_new:{row.subnet}:{row.uid}:{row.payload_hash or row.commitment_type}"
+            sk_chg = f"slot_changed:{row.subnet}:{row.uid}:{row.payload_hash or row.commit_block}"
+            for sk in (sk_new, sk_chg):
+                if not self.dispatcher.is_seen(sk):
+                    self.dispatcher.mark_seen(sk)
+                    marked += 1
+
+        self._bootstrapped = False
+        await self.bootstrap(session)
+        logger.info("notification startup seed complete — marked %d keys", marked)
+        return marked
 
     async def poll_subnet(self, session: AsyncSession, netuid: int) -> int:
         if not self.dispatcher.enabled:

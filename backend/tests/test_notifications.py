@@ -59,9 +59,14 @@ async def test_dispatcher_skips_when_disabled():
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_suppressed_until_armed():
-    settings = Settings(notifications_enabled=True, slack_webhook_url=None)
+async def test_dispatcher_suppressed_during_grace():
+    settings = Settings(
+        notifications_enabled=True,
+        slack_webhook_url=None,
+        notification_grace_seconds=60,
+    )
     dispatcher = NotificationDispatcher(settings)
+    dispatcher.begin_startup_grace(60)
     session = _mock_session_no_existing()
 
     sent = await dispatcher.notify(
@@ -73,14 +78,15 @@ async def test_dispatcher_suppressed_until_armed():
     )
 
     assert sent is False
+    assert dispatcher.should_finalize_startup() is False
     session.add.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_sends_after_armed():
+async def test_dispatcher_sends_after_startup_finalized():
     settings = Settings(notifications_enabled=True, slack_webhook_url=None)
     dispatcher = NotificationDispatcher(settings)
-    dispatcher.arm()
+    dispatcher.enable_resume_mode()
     session = _mock_session_no_existing()
 
     with patch("app.notifications.dispatcher.send_slack_alert", new_callable=AsyncMock):
@@ -100,7 +106,7 @@ async def test_dispatcher_sends_after_armed():
 async def test_dispatcher_memory_dedupe():
     settings = Settings(notifications_enabled=True, slack_webhook_url=None)
     dispatcher = NotificationDispatcher(settings)
-    dispatcher.arm()
+    dispatcher.enable_resume_mode()
     dispatcher.mark_seen("commit_new:97:hk:hash")
     session = _mock_session_no_existing()
 
@@ -121,7 +127,7 @@ async def test_dispatcher_memory_dedupe():
 async def test_dispatcher_persists_without_slack():
     settings = Settings(notifications_enabled=True, slack_webhook_url=None)
     dispatcher = NotificationDispatcher(settings)
-    dispatcher.arm()
+    dispatcher.enable_resume_mode()
     session = _mock_session_no_existing()
 
     with patch("app.notifications.dispatcher.send_slack_alert", new_callable=AsyncMock) as slack:
@@ -165,7 +171,7 @@ def test_format_alert_body_orders_detail():
 async def test_watcher_emits_king_defended():
     settings = Settings(notifications_enabled=True, default_subnet=97)
     dispatcher = NotificationDispatcher(settings)
-    dispatcher.arm()
+    dispatcher.enable_resume_mode()
     dispatcher.notify_content = AsyncMock(return_value=True)
     watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
     watcher._bootstrapped = True
@@ -207,7 +213,7 @@ async def test_watcher_emits_king_defended():
 async def test_watcher_emits_duel_new():
     settings = Settings(notifications_enabled=True, default_subnet=97)
     dispatcher = NotificationDispatcher(settings)
-    dispatcher.arm()
+    dispatcher.enable_resume_mode()
     dispatcher.notify_content = AsyncMock(return_value=True)
     watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
     watcher._bootstrapped = True
@@ -247,7 +253,7 @@ async def test_watcher_reg_fee_skips_already_below_at_bootstrap():
         notification_reg_fee_threshold_tao=0.75,
     )
     dispatcher = NotificationDispatcher(settings)
-    dispatcher.arm()
+    dispatcher.enable_resume_mode()
     dispatcher.notify_content = AsyncMock(return_value=True)
     watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
 
@@ -276,7 +282,7 @@ async def test_watcher_reg_fee_skips_already_below_at_bootstrap():
 async def test_watcher_emits_crown_won():
     settings = Settings(notifications_enabled=True, default_subnet=97)
     dispatcher = NotificationDispatcher(settings)
-    dispatcher.arm()
+    dispatcher.enable_resume_mode()
     dispatcher.notify_content = AsyncMock(return_value=True)
     watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
     watcher._bootstrapped = True
@@ -344,7 +350,7 @@ async def test_watcher_reg_fee_below_threshold():
         notification_reg_fee_threshold_tao=0.75,
     )
     dispatcher = NotificationDispatcher(settings)
-    dispatcher.arm()
+    dispatcher.enable_resume_mode()
     dispatcher.notify_content = AsyncMock(return_value=True)
     watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
     watcher._bootstrapped = True
@@ -379,7 +385,7 @@ async def test_watcher_reg_fee_skips_above_threshold():
         notification_reg_fee_threshold_tao=0.75,
     )
     dispatcher = NotificationDispatcher(settings)
-    dispatcher.arm()
+    dispatcher.enable_resume_mode()
     dispatcher.notify_content = AsyncMock(return_value=True)
     watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
     watcher._bootstrapped = True

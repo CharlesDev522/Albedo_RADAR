@@ -6,6 +6,7 @@ import asyncio
 import logging
 import signal
 import time
+from datetime import datetime, timezone
 
 from bittensor.core.async_subtensor import AsyncSubtensor
 
@@ -77,16 +78,24 @@ class CommitmentPoller:
         await self.subtensor_client.connect()
         self._subtensor = self.subtensor_client._subtensor
         await self.publisher.connect()
-        log_notification_config(self.settings, armed=False)
+        log_notification_config(self.settings, live=False)
         async with AsyncSessionLocal() as session:
             loaded = await self.notifier.hydrate(session)
             await self.notification_watcher.bootstrap(session)
             if loaded > 0:
-                armed_at = self.notifier.arm()
+                self.notifier.enable_resume_mode()
                 logger.info(
-                    "notifications armed immediately (resumed, %d prior alerts) at %s",
+                    "notifications resume mode (%d prior alerts) — live immediately",
                     loaded,
-                    armed_at.isoformat(),
+                )
+            else:
+                live_at = self.notifier.begin_startup_grace(
+                    self.settings.notification_grace_seconds
+                )
+                logger.info(
+                    "notifications grace period until %s (%ds) — initial fetch will NOT post to Slack",
+                    live_at.isoformat(),
+                    self.settings.notification_grace_seconds,
                 )
         logger.info("notification cache hydrated (%d source keys)", loaded)
         for netuid in self.settings.dashboard_subnets:
@@ -117,13 +126,21 @@ class CommitmentPoller:
             except Exception:
                 logger.exception("Initial repo track failed netuid=%d", netuid)
 
-        if not self.notifier.armed:
-            armed_at = self.notifier.arm()
-            logger.info(
-                "notifications armed after startup sync — only new events from %s will post to Slack",
-                armed_at.isoformat(),
-            )
-        log_notification_config(self.settings, armed=self.notifier.armed)
+        await self._maybe_finalize_notifications()
+
+    async def _maybe_finalize_notifications(self) -> None:
+        if not self.notifier.should_finalize_startup():
+            return
+        async with AsyncSessionLocal() as session:
+            marked = await self.notification_watcher.finalize_startup_seed(session)
+            await session.commit()
+        self.notifier.mark_startup_finalized()
+        logger.info(
+            "notifications LIVE from %s — only changes after docker grace are sent (%d keys seeded)",
+            datetime.now(timezone.utc).isoformat(),
+            marked,
+        )
+        log_notification_config(self.settings, live=True)
 
     async def _slot_poll(self, netuid: int, snapshot: ChainSnapshot) -> dict[str, int]:
         assert self._subtensor is not None
@@ -354,6 +371,7 @@ class CommitmentPoller:
         assert self._subtensor is not None
 
         async with self._poll_lock:
+            await self._maybe_finalize_notifications()
             now = time.monotonic()
 
             if now - self._last_metagraph_sync.get(netuid, 0.0) >= self.settings.metagraph_sync_interval_seconds:

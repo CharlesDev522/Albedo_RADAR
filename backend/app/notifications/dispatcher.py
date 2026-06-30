@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -20,32 +20,49 @@ logger = logging.getLogger(__name__)
 
 
 class NotificationDispatcher:
-    """Deduplicated alert dispatch (DB + optional Slack) with in-memory cache."""
+    """Deduplicated alert dispatch (DB + optional Slack) with startup grace window."""
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self._seen_keys: set[str] = set()
         self._http: httpx.AsyncClient | None = None
-        self._armed = False
-        self._armed_at: datetime | None = None
-
-    @property
-    def armed(self) -> bool:
-        return self._armed
-
-    @property
-    def armed_at(self) -> datetime | None:
-        return self._armed_at
-
-    def arm(self) -> datetime:
-        """Enable Slack delivery — call after initial startup sync completes."""
-        self._armed = True
-        self._armed_at = datetime.now(timezone.utc)
-        return self._armed_at
+        self._live_after: datetime = datetime.now(timezone.utc)
+        self._startup_finalized: bool = False
 
     @property
     def enabled(self) -> bool:
         return bool(self.settings.notifications_enabled)
+
+    @property
+    def is_live(self) -> bool:
+        """True when grace elapsed and startup seed completed."""
+        return self._startup_finalized
+
+    @property
+    def live_after(self) -> datetime:
+        return self._live_after
+
+    @property
+    def armed(self) -> bool:
+        """Backward-compatible alias for is_live."""
+        return self.is_live
+
+    def begin_startup_grace(self, seconds: int) -> datetime:
+        """Silence Slack until N seconds after collector start (fresh docker up)."""
+        self._live_after = datetime.now(timezone.utc) + timedelta(seconds=max(seconds, 0))
+        self._startup_finalized = False
+        return self._live_after
+
+    def enable_resume_mode(self) -> None:
+        """Skip grace when alert history already exists (collector restart)."""
+        self._live_after = datetime.now(timezone.utc)
+        self._startup_finalized = True
+
+    def should_finalize_startup(self) -> bool:
+        return not self._startup_finalized and datetime.now(timezone.utc) >= self._live_after
+
+    def mark_startup_finalized(self) -> None:
+        self._startup_finalized = True
 
     def is_seen(self, source_key: str) -> bool:
         return source_key in self._seen_keys
@@ -97,7 +114,7 @@ class NotificationDispatcher:
         if not self.enabled:
             return False
 
-        if not self._armed:
+        if not self._startup_finalized:
             return False
 
         if source_key in self._seen_keys:

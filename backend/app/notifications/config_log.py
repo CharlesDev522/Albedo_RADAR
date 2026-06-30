@@ -9,7 +9,7 @@ from app.config import Settings
 logger = logging.getLogger(__name__)
 
 
-def log_notification_config(settings: Settings, *, armed: bool | None = None) -> bool:
+def log_notification_config(settings: Settings, *, live: bool | None = None) -> bool:
     """Log Slack notification config; return True if webhook is configured."""
     enabled = bool(settings.notifications_enabled)
     webhook = (settings.slack_webhook_url or "").strip()
@@ -26,11 +26,11 @@ def log_notification_config(settings: Settings, *, armed: bool | None = None) ->
         )
         return False
 
-    armed_s = "unknown" if armed is None else ("yes" if armed else "no (startup sync)")
+    live_s = "unknown" if live is None else ("yes" if live else f"no (grace {settings.notification_grace_seconds}s)")
     logger.info(
-        "notifications: enabled webhook=set channel=%s app=%s armed=%s",
+        "notifications: enabled webhook=set channel=%s app=%s live=%s",
         settings.slack_channel or "(webhook default)",
         settings.slack_app_name,
-        armed_s,
+        live_s,
     )
     return True

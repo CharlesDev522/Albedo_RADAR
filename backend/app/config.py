@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     slack_app_name: str = "Albedo_Notification"
     notification_reg_fee_threshold_tao: float = 0.75
     albedo_notification_poll_seconds: int = 15
+    notification_grace_seconds: int = 60
 
     # Database
     database_url: str = "postgresql+asyncpg://minerwatch:minerwatch@localhost:5432/minerwatch"
