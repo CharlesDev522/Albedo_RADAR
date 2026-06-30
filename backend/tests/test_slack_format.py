@@ -1,20 +1,23 @@
-"""Tests for compact Slack block formatting."""
-
-import re
+"""Tests for human-readable Slack formatting."""
 
 from app.notifications.kinds import SLACK_EMOJI
-from app.notifications.slack_format import build_slack_payload, hippius_repo_url
+from app.notifications.slack_format import (
+    build_slack_payload,
+    hippius_repo_url,
+    huggingface_repo_url,
+    taostats_subnet_url,
+)
 
 
-def _emoji_count(text: str, emoji: str) -> int:
-    return text.count(emoji)
+def _full_text(payload: dict) -> str:
+    return payload["blocks"][0]["text"]["text"]
 
 
-def test_build_slack_payload_duel_single_emoji_structured():
+def test_duel_prose_with_full_urls():
     payload = build_slack_payload(
         kind="duel_new",
         title="[duel_new] evernear/albedo-qwen3.6-35b-v9",
-        message="SN97 new duel started — vs king v42",
+        message="SN97 new duel started",
         detail={
             "repo": "evernear/albedo-qwen3.6-35b-v9",
             "uid": 176,
@@ -22,61 +25,54 @@ def test_build_slack_payload_duel_single_emoji_structured():
             "sample_count": 128,
             "king_version": 42,
             "king_repo": "moon/albedo-qwen3.6-35b-well",
-            "eval_run_id": "2e3516d1-7830-4cf2-a2c3-43202e8beefd",
         },
         subnet=97,
     )
-    blocks = payload["blocks"]
-    assert blocks[0]["type"] == "section"
-    assert "header" not in {b["type"] for b in blocks}
-    assert "fields" not in str(blocks)
-    text = blocks[0]["text"]["text"]
-    emoji = SLACK_EMOJI["duel_new"]
-    assert _emoji_count(text, emoji) == 1
-    assert "*Duel Started*" in text
-    assert "*Challenger*" in text
-    assert "`evernear/albedo-qwen3.6-35b-v9`" in text
-    assert "*King*" in text and "v42" in text
-    assert "`moon/albedo-qwen3.6-35b-well`" in text
-    assert "UID 176" in text
-    assert "DISPATCHED" in text
-    assert "128 samples" in text
-    context = blocks[-1]["elements"][0]["text"]
-    assert hippius_repo_url("evernear/albedo-qwen3.6-35b-v9") in context
+    text = _full_text(payload)
+    assert text.count(SLACK_EMOJI["duel_new"]) == 1
+    assert "New duel started on Subnet 97" in text
+    assert "evernear/albedo-qwen3.6-35b-v9 (UID 176)" in text
+    assert "moon/albedo-qwen3.6-35b-well at king version 42" in text
+    assert "status is DISPATCHED" in text
+    assert "128 samples are queued" in text
+    assert hippius_repo_url("evernear/albedo-qwen3.6-35b-v9") in text
+    assert huggingface_repo_url("evernear/albedo-qwen3.6-35b-v9") in text
+    assert hippius_repo_url("moon/albedo-qwen3.6-35b-well") in text
+    assert taostats_subnet_url(97) in text
+    assert "Useful links:" in text
+    assert "fields" not in str(payload["blocks"])
 
 
-def test_build_slack_payload_king_defended_single_emoji():
+def test_king_defended_prose():
     payload = build_slack_payload(
         kind="king_defended",
-        title="[king_defended] foremost/albedo-qwen3.6-35b-albedo-12",
-        message="SN97 duel finished — king defended",
+        title="[king_defended] foremost/albedo",
+        message="king defended",
         detail={
             "repo": "foremost/albedo-qwen3.6-35b-albedo-12",
             "king_version": 42,
             "king_repo": "moon/albedo-qwen3.6-35b-well",
-            "win_margin": 0.039,
+            "win_margin": -0.039,
             "score_challenger": 0.48,
             "score_king": 0.52,
             "uid": 166,
-            "eval_run_id": "85c6f11f-7830-4cf2-a2c3-43202e8beefd",
         },
         subnet=97,
     )
-    text = payload["blocks"][0]["text"]["text"]
-    emoji = SLACK_EMOJI["king_defended"]
-    assert _emoji_count(text, emoji) == 1
-    assert "*King Defended*" in text
-    assert "`foremost/albedo-qwen3.6-35b-albedo-12`" in text
-    assert "Margin +0.039" in text
-    assert "Scores 0.480 vs 0.520" in text
-    assert "UID 166" in text
+    text = _full_text(payload)
+    assert "The king defended the crown on Subnet 97" in text
+    assert "foremost/albedo-qwen3.6-35b-albedo-12 (UID 166)" in text
+    assert "did not take the crown" in text
+    assert "challenger scored 0.480" in text
+    assert "king scored 0.520" in text
+    assert "king won by a margin of 0.039" in text
 
 
-def test_build_slack_payload_crown_won_scores():
+def test_crown_won_prose():
     payload = build_slack_payload(
         kind="crown_won",
         title="[crown_won] org/new-king",
-        message="SN97 crowned king v2 (defeated v1)",
+        message="crowned",
         detail={
             "repo": "org/new-king",
             "king_version": 2,
@@ -85,41 +81,41 @@ def test_build_slack_payload_crown_won_scores():
             "score_challenger": 0.6,
             "score_king": 0.4,
             "uid": 10,
-            "eval_run_id": "r1",
         },
         subnet=97,
     )
-    text = payload["blocks"][0]["text"]["text"]
-    assert _emoji_count(text, SLACK_EMOJI["crown_won"]) == 1
-    assert "*New King*" in text
-    assert "*Champion*" in text
-    assert "`org/new-king`" in text
-    assert "v2" in text and "v1" in text
-    assert "Margin +0.200" in text
-    assert "0.600 vs 0.400" in text
+    text = _full_text(payload)
+    assert "A new king was crowned on Subnet 97" in text
+    assert "org/new-king (UID 10)" in text
+    assert "version 2, replacing king version 1" in text
+    assert "challenger won by a margin of +0.200" in text
 
 
-def test_build_slack_payload_reg_fee_tier_emoji():
+def test_reg_fee_friendly_copy():
     payload = build_slack_payload(
         kind="reg_fee_low",
-        title="[reg_fee_low] SN97 · below 0.75 τ",
-        message="Registration burn crossed below tier",
-        detail={"registration_burn_tao": 0.52, "threshold_tao": 0.75},
+        title="[reg_fee_low]",
+        message="below threshold",
+        detail={
+            "registration_burn_tao": 0.52,
+            "threshold_tao": 0.75,
+            "alpha_price_tao": 0.03,
+        },
         subnet=97,
     )
-    text = payload["blocks"][0]["text"]["text"]
-    assert ":money_with_wings:" in text
-    assert text.count(":money_with_wings:") == 1
-    assert "*Reg Fee Drop*" in text
-    assert "0.52" in text
-    assert "0.75" in text
+    text = _full_text(payload)
+    assert "Registration fee alert on Subnet 97" in text
+    assert "0.5200 τ" in text
+    assert "0.75 τ alert threshold" in text
+    assert "good time to register" in text
+    assert taostats_subnet_url(97) in text
 
 
-def test_build_slack_payload_commit_compact():
+def test_commit_new_reads_as_sentence():
     payload = build_slack_payload(
         kind="commit_new",
-        title="[commit_new] uid 166 — foremost/albedo-qwen3.6-35b-albedo-12",
-        message="SN97 new v6 commit at block 8520068",
+        title="[commit_new]",
+        message="commit",
         detail={
             "repo": "foremost/albedo-qwen3.6-35b-albedo-12",
             "uid": 166,
@@ -128,7 +124,6 @@ def test_build_slack_payload_commit_compact():
         },
         subnet=97,
     )
-    text = payload["blocks"][0]["text"]["text"]
-    assert "UID 166" in text
-    assert "foremost/albedo" in payload["text"]
-    assert not re.search(r"UID\s*\n\s*166", text)  # no broken field grid
+    text = _full_text(payload)
+    assert "published a new on-chain model commitment at block 8520068" in text
+    assert "Commit digest:" in text
