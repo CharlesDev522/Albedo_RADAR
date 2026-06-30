@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     Enum,
     Float,
@@ -436,3 +437,26 @@ class RepoActivityEvent(Base):
     source_key: Mapped[str] = mapped_column(String(256), nullable=False)
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+
+class AlertNotification(Base):
+    """Persisted alerts for Slack + Windows desktop notifier."""
+
+    __tablename__ = "alert_notifications"
+    __table_args__ = (
+        UniqueConstraint("source_key", name="uq_alert_notification_source_key"),
+        Index("ix_alert_notifications_created", "created_at"),
+        Index("ix_alert_notifications_kind", "kind", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), default="medium")
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    message: Mapped[str] = mapped_column(String(1024), nullable=False)
+    detail: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    source_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    subnet: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    slack_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    windows_ack_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

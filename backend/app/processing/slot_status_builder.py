@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chain_reader.slot_commitment_scanner import SlotStatus
 from app.db.models import MinerSlotStatus
+from app.notifications.dispatcher import NotificationDispatcher
+from app.notifications.formatters import slot_alert_detail
 
 
 class SlotStatusBuilder:
+    def __init__(self, notifier: NotificationDispatcher | None = None) -> None:
+        self.notifier = notifier
+
     async def process_slots(
         self,
         session: AsyncSession,
@@ -50,14 +56,33 @@ class SlotStatusBuilder:
                         last_updated=now,
                     )
                 )
+                if self.notifier:
+                    await self.notifier.notify(
+                        session,
+                        kind="slot_new",
+                        title=f"New slot uid {slot.uid} — {ctype}",
+                        message=f"SN{netuid} slot commitment at block {slot.commit_block}",
+                        source_key=f"slot_new:{netuid}:{slot.uid}:{slot.payload_hash or ctype}",
+                        detail=slot_alert_detail(slot),
+                        subnet=netuid,
+                    )
                 stats["updated"] += 1
             else:
+                previous: dict[str, Any] | None = None
                 changed = (
                     row.hotkey != slot.hotkey
                     or row.commitment_type != ctype
                     or row.payload_hash != slot.payload_hash
                     or row.commit_block != slot.commit_block
                 )
+                if changed:
+                    previous = {
+                        "hotkey": row.hotkey,
+                        "commitment_type": row.commitment_type,
+                        "commit_block": row.commit_block,
+                        "payload_hash": row.payload_hash,
+                        "detail": row.detail,
+                    }
                 row.hotkey = slot.hotkey
                 row.coldkey = slot.coldkey
                 row.registered_at_block = slot.registered_at_block
@@ -71,6 +96,16 @@ class SlotStatusBuilder:
                 row.encrypted_hash = slot.encrypted_hash
                 row.last_updated = now
                 if changed:
+                    if self.notifier:
+                        await self.notifier.notify(
+                            session,
+                            kind="slot_changed",
+                            title=f"Slot changed uid {slot.uid} — {ctype}",
+                            message=f"SN{netuid} slot updated at block {slot.commit_block}",
+                            source_key=f"slot_changed:{netuid}:{slot.uid}:{slot.payload_hash or slot.commit_block}",
+                            detail=slot_alert_detail(slot, previous=previous),
+                            subnet=netuid,
+                        )
                     stats["updated"] += 1
                 else:
                     stats["unchanged"] += 1

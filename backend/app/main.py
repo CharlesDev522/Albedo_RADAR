@@ -21,6 +21,7 @@ from app.api.routes import (
     live,
     market,
     miners,
+    notifications,
     repo_activity,
     slot_status,
 )
@@ -76,6 +77,7 @@ app.include_router(incentives.router, prefix=api_prefix)
 app.include_router(market.router, prefix=api_prefix)
 app.include_router(repo_activity.router, prefix=api_prefix)
 app.include_router(albedo_analysis.router, prefix=api_prefix)
+app.include_router(notifications.router, prefix=api_prefix)
 
 
 @app.get("/health", response_model=HealthResponse)

@@ -42,6 +42,8 @@ from app.processing.repo_watch_targets import (
     is_hub_watch_hotkey,
     parse_hub_watch_hotkey,
 )
+from app.notifications.dispatcher import NotificationDispatcher
+from app.notifications.formatters import repo_alert_detail
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +53,15 @@ HF_DISCOVERY_QUERIES = ("albedo-qwen3.6-35b", "albedo-qwen3-4b")
 class RepoTrackBuilder:
     """Poll Hippius + Hugging Face for every watched Albedo model repo."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        notifier: NotificationDispatcher | None = None,
+    ) -> None:
         self.settings = settings or get_settings()
         self.registry = ModelRegistryClient(self.settings)
         self.hippius_hub = HippiusHubClient(self.settings)
+        self.notifier = notifier
 
     async def sync_subnet(self, session: AsyncSession, netuid: int) -> dict[str, int]:
         stats = {
@@ -596,6 +603,40 @@ class RepoTrackBuilder:
                 meta=meta or {},
             )
         )
+        if self.notifier and event_type in ("hub_repo_added", "hub_manifest_update"):
+            kind = "repo_new" if event_type == "hub_repo_added" else "repo_updated"
+            detail = repo_alert_detail(
+                repo=repo,
+                event_type=event_type,
+                uid=uid,
+                hotkey=hotkey,
+                coldkey=coldkey,
+                model_family=model_family,
+                hub_digest=hub_digest,
+                previous_digest=previous_digest,
+                revision=revision,
+                commit_message=commit_message,
+                meta=meta,
+            )
+            title = (
+                f"New repo — {repo}"
+                if kind == "repo_new"
+                else f"Repo updated — {repo}"
+            )
+            msg = (
+                f"SN{netuid} hub digest {hub_digest}"
+                if hub_digest
+                else f"SN{netuid} {event_type}"
+            )
+            await self.notifier.notify(
+                session,
+                kind=kind,
+                title=title,
+                message=msg,
+                source_key=f"alert:{source_key}",
+                detail=detail,
+                subnet=netuid,
+            )
         return True
 
     async def prune_stale_tracks(self, session: AsyncSession, netuid: int) -> int:

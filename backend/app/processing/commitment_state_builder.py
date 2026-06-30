@@ -16,6 +16,8 @@ from app.chain_reader.subnet_commit_rules import (
     normalize_stored_version,
 )
 from app.collectors.event_publisher import EventPublisher
+from app.notifications.dispatcher import NotificationDispatcher
+from app.notifications.formatters import commit_alert_detail
 from app.collectors.subtensor_client import MetagraphSnapshot, SubtensorClient
 from app.db.models import (
     CommitmentHistory,
@@ -32,8 +34,13 @@ logger = logging.getLogger(__name__)
 class CommitmentStateBuilder:
     """Upserts latest model commitments and records history on changes."""
 
-    def __init__(self, publisher: EventPublisher | None = None) -> None:
+    def __init__(
+        self,
+        publisher: EventPublisher | None = None,
+        notifier: NotificationDispatcher | None = None,
+    ) -> None:
         self.publisher = publisher
+        self.notifier = notifier
 
     async def process_commits(
         self,
@@ -70,6 +77,16 @@ class CommitmentStateBuilder:
                     {"model_uri": commit.model_uri, "commit_block": commit.block_number},
                     stats,
                 )
+                if self.notifier:
+                    await self.notifier.notify(
+                        session,
+                        kind="commit_new",
+                        title=f"New commit uid {commit.uid} — {commit.commit_payload.get('repo', '?')}",
+                        message=f"SN{commit.netuid} v6 commit block {commit.block_number}",
+                        source_key=f"commit_new:{commit.netuid}:{commit.hotkey}:{commit.payload_hash}",
+                        detail=commit_alert_detail(commit),
+                        subnet=commit.netuid,
+                    )
                 stats["new"] += 1
             elif existing.payload_hash != commit.payload_hash:
                 previous_hash = existing.payload_hash
@@ -102,6 +119,16 @@ class CommitmentStateBuilder:
                     },
                     stats,
                 )
+                if self.notifier:
+                    await self.notifier.notify(
+                        session,
+                        kind="commit_updated",
+                        title=f"Commit updated uid {commit.uid} — {commit.commit_payload.get('repo', '?')}",
+                        message=f"SN{commit.netuid} digest changed at block {existing.commit_block}",
+                        source_key=f"commit_updated:{commit.netuid}:{commit.hotkey}:{commit.payload_hash}",
+                        detail=commit_alert_detail(commit, previous_hash=previous_hash),
+                        subnet=commit.netuid,
+                    )
                 stats["updated"] += 1
             else:
                 existing.uid = commit.uid

@@ -43,6 +43,10 @@ services:
       METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
       FULL_SCAN_INTERVAL_SECONDS: "300"
       CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000"]'
+      NOTIFICATIONS_ENABLED: "true"
+      # SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+      NOTIFICATION_REG_FEE_THRESHOLD_TAO: "0.75"
+      ALBEDO_NOTIFICATION_POLL_SECONDS: "15"
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,6 +78,10 @@ services:
       POLL_INTERVAL_SECONDS: "3"
       METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
       FULL_SCAN_INTERVAL_SECONDS: "300"
+      NOTIFICATIONS_ENABLED: "true"
+      # SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+      NOTIFICATION_REG_FEE_THRESHOLD_TAO: "0.75"
+      ALBEDO_NOTIFICATION_POLL_SECONDS: "15"
     depends_on:
       postgres:
         condition: service_healthy

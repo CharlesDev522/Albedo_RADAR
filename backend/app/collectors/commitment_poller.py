@@ -25,6 +25,8 @@ from app.config import get_settings
 from app.db.init_db import init_db
 from app.db.models import Miner, MinerCommitment, MinerStatus
 from app.db.session import AsyncSessionLocal, engine
+from app.notifications.dispatcher import NotificationDispatcher
+from app.notifications.watcher import NotificationWatcher
 from app.processing.commitment_state_builder import CommitmentStateBuilder
 from app.processing.encrypted_commitment_state_builder import EncryptedCommitmentStateBuilder
 from app.processing.incentive_sync import sync_metagraph_incentives
@@ -43,10 +45,21 @@ class CommitmentPoller:
         self.subtensor_client = SubtensorClient(self.settings)
         self._subtensor: AsyncSubtensor | None = None
         self.publisher = EventPublisher(self.settings)
-        self.state_builder = CommitmentStateBuilder(publisher=self.publisher)
+        self.notifier = NotificationDispatcher(self.settings)
+        self.notification_watcher = NotificationWatcher(
+            dispatcher=self.notifier,
+            settings=self.settings,
+        )
+        self.state_builder = CommitmentStateBuilder(
+            publisher=self.publisher,
+            notifier=self.notifier,
+        )
         self.encrypted_state_builder = EncryptedCommitmentStateBuilder()
-        self.slot_status_builder = SlotStatusBuilder()
-        self.repo_track_builder = RepoTrackBuilder()
+        self.slot_status_builder = SlotStatusBuilder(notifier=self.notifier)
+        self.repo_track_builder = RepoTrackBuilder(
+            settings=self.settings,
+            notifier=self.notifier,
+        )
         self._running = False
         self._neurons: dict[int, dict[str, dict]] = {}
         self._last_full_scan: dict[int, float] = {}
@@ -54,6 +67,7 @@ class CommitmentPoller:
         self._last_metagraph_sync: dict[int, float] = {}
         self._last_incentive_sync: dict[int, float] = {}
         self._last_repo_track: dict[int, float] = {}
+        self._last_notification_poll: dict[int, float] = {}
         self._poll_lock = asyncio.Lock()
         self._seen_hotkeys: dict[int, set[str]] = {}
 
@@ -62,6 +76,8 @@ class CommitmentPoller:
         await self.subtensor_client.connect()
         self._subtensor = self.subtensor_client._subtensor
         await self.publisher.connect()
+        async with AsyncSessionLocal() as session:
+            await self.notification_watcher.hydrate_seen_keys(session)
         for netuid in self.settings.dashboard_subnets:
             assert self._subtensor is not None
             self._neurons[netuid] = await _neuron_index(self._subtensor, netuid)
@@ -358,6 +374,20 @@ class CommitmentPoller:
                 except Exception:
                     logger.exception("Repo track poll failed netuid=%d", netuid)
                 self._last_repo_track[netuid] = now
+
+            if (
+                now - self._last_notification_poll.get(netuid, 0.0)
+                >= self.settings.albedo_notification_poll_seconds
+            ):
+                try:
+                    async with AsyncSessionLocal() as session:
+                        sent = await self.notification_watcher.poll_subnet(session, netuid)
+                        await session.commit()
+                    if sent:
+                        logger.info("NOTIFICATIONS netuid=%d sent=%d", netuid, sent)
+                except Exception:
+                    logger.exception("Notification poll failed netuid=%d", netuid)
+                self._last_notification_poll[netuid] = now
 
             return stats
 
