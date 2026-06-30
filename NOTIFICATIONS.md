@@ -48,6 +48,8 @@ docker compose up -d
 
 The **collector** sends Slack alerts and persists them to PostgreSQL.
 
+**Startup behavior:** on first `docker compose up` (empty alert history), the collector completes one full sync (commits, slots, repos, crown bootstrap) **without** posting to Slack, then arms notifications. Only events detected **after** that point are sent. Restarts with existing alert history arm immediately.
+
 ---
 
 ## Alert history API (optional)
@@ -63,6 +65,7 @@ collector (Docker)
   ├─ commits / slots / repos → NotificationDispatcher
   ├─ crown + reg fee poll    → NotificationWatcher
   ├─ dedupe (memory + DB)    → alert_notifications table
+  ├─ startup gate            → suppress until first sync done
   └─ Slack webhook           → #albedo
 ```
 

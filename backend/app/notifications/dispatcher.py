@@ -26,6 +26,22 @@ class NotificationDispatcher:
         self.settings = settings or get_settings()
         self._seen_keys: set[str] = set()
         self._http: httpx.AsyncClient | None = None
+        self._armed = False
+        self._armed_at: datetime | None = None
+
+    @property
+    def armed(self) -> bool:
+        return self._armed
+
+    @property
+    def armed_at(self) -> datetime | None:
+        return self._armed_at
+
+    def arm(self) -> datetime:
+        """Enable Slack delivery — call after initial startup sync completes."""
+        self._armed = True
+        self._armed_at = datetime.now(timezone.utc)
+        return self._armed_at
 
     @property
     def enabled(self) -> bool:
@@ -79,6 +95,9 @@ class NotificationDispatcher:
         severity: str | None = None,
     ) -> bool:
         if not self.enabled:
+            return False
+
+        if not self._armed:
             return False
 
         if source_key in self._seen_keys:

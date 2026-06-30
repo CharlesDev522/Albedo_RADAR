@@ -59,9 +59,48 @@ async def test_dispatcher_skips_when_disabled():
 
 
 @pytest.mark.asyncio
+async def test_dispatcher_suppressed_until_armed():
+    settings = Settings(notifications_enabled=True, slack_webhook_url=None)
+    dispatcher = NotificationDispatcher(settings)
+    session = _mock_session_no_existing()
+
+    sent = await dispatcher.notify(
+        session,
+        kind="repo_new",
+        title="[repo_new] test/repo",
+        message="should not send",
+        source_key="alert:hub:hippius:test/repo:digest",
+    )
+
+    assert sent is False
+    session.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_sends_after_armed():
+    settings = Settings(notifications_enabled=True, slack_webhook_url=None)
+    dispatcher = NotificationDispatcher(settings)
+    dispatcher.arm()
+    session = _mock_session_no_existing()
+
+    with patch("app.notifications.dispatcher.send_slack_alert", new_callable=AsyncMock):
+        sent = await dispatcher.notify(
+            session,
+            kind="repo_new",
+            title="[repo_new] test/repo",
+            message="live event",
+            source_key="alert:hub:hippius:test/repo:digest2",
+        )
+
+    assert sent is True
+    session.add.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_dispatcher_memory_dedupe():
     settings = Settings(notifications_enabled=True, slack_webhook_url=None)
     dispatcher = NotificationDispatcher(settings)
+    dispatcher.arm()
     dispatcher.mark_seen("commit_new:97:hk:hash")
     session = _mock_session_no_existing()
 
@@ -82,6 +121,7 @@ async def test_dispatcher_memory_dedupe():
 async def test_dispatcher_persists_without_slack():
     settings = Settings(notifications_enabled=True, slack_webhook_url=None)
     dispatcher = NotificationDispatcher(settings)
+    dispatcher.arm()
     session = _mock_session_no_existing()
 
     with patch("app.notifications.dispatcher.send_slack_alert", new_callable=AsyncMock) as slack:

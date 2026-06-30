@@ -79,6 +79,13 @@ class CommitmentPoller:
         async with AsyncSessionLocal() as session:
             loaded = await self.notifier.hydrate(session)
             await self.notification_watcher.bootstrap(session)
+            if loaded > 0:
+                armed_at = self.notifier.arm()
+                logger.info(
+                    "notifications armed immediately (resumed, %d prior alerts) at %s",
+                    loaded,
+                    armed_at.isoformat(),
+                )
         logger.info("notification cache hydrated (%d source keys)", loaded)
         for netuid in self.settings.dashboard_subnets:
             assert self._subtensor is not None
@@ -107,6 +114,13 @@ class CommitmentPoller:
                 self._last_repo_track[netuid] = time.monotonic()
             except Exception:
                 logger.exception("Initial repo track failed netuid=%d", netuid)
+
+        if not self.notifier.armed:
+            armed_at = self.notifier.arm()
+            logger.info(
+                "notifications armed after startup sync — only new events from %s will post to Slack",
+                armed_at.isoformat(),
+            )
 
     async def _slot_poll(self, netuid: int, snapshot: ChainSnapshot) -> dict[str, int]:
         assert self._subtensor is not None
