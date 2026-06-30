@@ -1,9 +1,18 @@
 """Application configuration loaded from environment variables."""
 
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic import field_validator
+from pydantic import BeforeValidator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _coerce_reg_fee_thresholds_env(v: object) -> str:
+    if isinstance(v, (list, tuple)):
+        return ",".join(str(x) for x in v)
+    if v is None:
+        return "1.0,0.75,0.6"
+    return str(v)
 
 
 class Settings(BaseSettings):
@@ -66,7 +75,10 @@ class Settings(BaseSettings):
     slack_webhook_url: str | None = None
     slack_channel: str | None = None
     slack_app_name: str = "Albedo_Notification"
-    notification_reg_fee_thresholds_tao: list[float] = [1.0, 0.75, 0.6]
+    # Comma-separated in .env e.g. 1.0,0.75,0.6 (must be str — list type breaks pydantic env JSON parse).
+    notification_reg_fee_thresholds_tao: Annotated[
+        str, BeforeValidator(_coerce_reg_fee_thresholds_env)
+    ] = "1.0,0.75,0.6"
     albedo_notification_poll_seconds: int = 8
     # Silence Slack after fresh docker up until grace elapses AND initial sync completes.
     notification_grace_seconds: int = 300
@@ -91,12 +103,10 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8000"]
 
-    @field_validator("notification_reg_fee_thresholds_tao", mode="before")
-    @classmethod
-    def _parse_reg_fee_thresholds(cls, v: object) -> list[float]:
+    def reg_fee_thresholds_list(self) -> list[float]:
         from app.notifications.reg_fee_tiers import normalize_reg_fee_thresholds
 
-        return normalize_reg_fee_thresholds(v)
+        return normalize_reg_fee_thresholds(self.notification_reg_fee_thresholds_tao)
 
 
 @lru_cache
