@@ -71,7 +71,7 @@ class NotificationWatcher:
         self._bootstrapped: bool = False
         self._last_live_eval_id: str | None = None
 
-    async def bootstrap(self, session: AsyncSession) -> None:
+    async def bootstrap(self, session: AsyncSession | None = None) -> None:
         """Seed dashboard state so only post-startup changes notify Slack."""
         if self._bootstrapped or not self.dispatcher.enabled:
             return
@@ -124,6 +124,19 @@ class NotificationWatcher:
             self._reg_fee_below,
         )
 
+    async def probe_hub_index(self) -> int:
+        """Fetch Hippius hub index over HTTP only (no DB). Returns albedo repo count."""
+        hub = HippiusHubClient(self.settings)
+        timeout = self.settings.market_http_timeout_seconds
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            index = await hub.fetch_albedo_index(client=client)
+        count = 0
+        for repo in index:
+            family = infer_albedo_model_family(repo)
+            if family in (FAMILY_QWEN36_35B, FAMILY_QWEN3_4B):
+                count += 1
+        return count
+
     async def _seed_hub_index_keys(self) -> int:
         """Mark current Hippius hub albedo repos as seen (anti-bulk when repo track sync fails)."""
         marked = 0
@@ -148,38 +161,61 @@ class NotificationWatcher:
             logger.info("notification hub index seed — marked %d repos from Hippius hub", marked)
         return marked
 
-    async def finalize_startup_seed(self, session: AsyncSession) -> int:
-        """After grace period, mark all ingested DB/dashboard state as already seen."""
+    async def _seed_db_keys(self, session: AsyncSession) -> int:
+        """Best-effort DB seed — failures must not block going LIVE."""
         marked = 0
-
-        repo_keys = (
-            await session.execute(select(RepoActivityEvent.source_key))
-        ).scalars().all()
-        for key in repo_keys:
-            sk = f"alert:{key}"
-            if not self.dispatcher.is_seen(sk):
-                self.dispatcher.mark_seen(sk)
-                marked += 1
-
-        for row in (await session.execute(select(MinerCommitment))).scalars().all():
-            for prefix in ("commit_new", "commit_updated"):
-                sk = f"{prefix}:{row.subnet}:{row.hotkey}:{row.payload_hash}"
+        try:
+            repo_keys = (
+                await session.execute(select(RepoActivityEvent.source_key))
+            ).scalars().all()
+            for key in repo_keys:
+                sk = f"alert:{key}"
                 if not self.dispatcher.is_seen(sk):
                     self.dispatcher.mark_seen(sk)
                     marked += 1
 
-        for row in (await session.execute(select(MinerSlotStatus))).scalars().all():
-            sk_new = f"slot_new:{row.subnet}:{row.uid}:{row.payload_hash or row.commitment_type}"
-            sk_chg = f"slot_changed:{row.subnet}:{row.uid}:{row.payload_hash or row.commit_block}"
-            for sk in (sk_new, sk_chg):
-                if not self.dispatcher.is_seen(sk):
-                    self.dispatcher.mark_seen(sk)
-                    marked += 1
+            for row in (await session.execute(select(MinerCommitment))).scalars().all():
+                for prefix in ("commit_new", "commit_updated"):
+                    sk = f"{prefix}:{row.subnet}:{row.hotkey}:{row.payload_hash}"
+                    if not self.dispatcher.is_seen(sk):
+                        self.dispatcher.mark_seen(sk)
+                        marked += 1
+
+            for row in (await session.execute(select(MinerSlotStatus))).scalars().all():
+                sk_new = f"slot_new:{row.subnet}:{row.uid}:{row.payload_hash or row.commitment_type}"
+                sk_chg = f"slot_changed:{row.subnet}:{row.uid}:{row.payload_hash or row.commit_block}"
+                for sk in (sk_new, sk_chg):
+                    if not self.dispatcher.is_seen(sk):
+                        self.dispatcher.mark_seen(sk)
+                        marked += 1
+        except Exception:
+            logger.warning("notification DB seed failed (continuing with HTTP seed)", exc_info=True)
+        return marked
+
+    async def finalize_startup_seed(self, session: AsyncSession) -> int:
+        """Mark ingested state as seen. DB is best-effort; hub + dashboard use HTTP."""
+        marked = await self._seed_db_keys(session)
 
         self._bootstrapped = False
-        await self.bootstrap(session)
+        try:
+            await self.bootstrap(session)
+        except Exception:
+            logger.warning("notification dashboard bootstrap failed during finalize", exc_info=True)
+
         marked += await self._seed_hub_index_keys()
         logger.info("notification startup seed complete — marked %d keys", marked)
+        return marked
+
+    async def finalize_startup_seed_http_only(self) -> int:
+        """Seed without DB when the session is unavailable."""
+        marked = 0
+        self._bootstrapped = False
+        try:
+            await self.bootstrap(session)
+        except Exception:
+            logger.warning("notification dashboard bootstrap failed (HTTP-only)", exc_info=True)
+        marked += await self._seed_hub_index_keys()
+        logger.info("notification HTTP-only seed complete — marked %d keys", marked)
         return marked
 
     async def poll_subnet(self, session: AsyncSession, netuid: int) -> int:

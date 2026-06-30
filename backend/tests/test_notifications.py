@@ -398,41 +398,59 @@ async def test_watcher_hub_index_seed_marks_albedo_repos():
     )
 
 
-def test_poller_repo_track_gate_falls_back_after_max_wait():
+def test_poller_hub_probe_gate_falls_back_after_max_wait():
     from datetime import timedelta
 
     from app.collectors.commitment_poller import CommitmentPoller
 
     poller = CommitmentPoller()
     poller.settings = Settings(
-        notification_min_repo_track_passes=2,
+        notification_min_hub_index_probes=2,
         notification_startup_max_seconds=600,
         dashboard_subnets=[97],
     )
     poller._collector_started_at = datetime.now(timezone.utc) - timedelta(seconds=700)
     poller._startup_full_scan_done.add(97)
-    poller._startup_repo_track_passes[97] = 0
+    poller._startup_hub_probes[97] = 0
 
-    assert poller._repo_track_gate_satisfied(97) is True
+    assert poller._startup_ready_for_live() is True
 
 
-def test_poller_repo_track_gate_requires_passes_before_max_wait():
+def test_poller_hub_probe_gate_requires_probe_before_max_wait():
     from app.collectors.commitment_poller import CommitmentPoller
 
     poller = CommitmentPoller()
     poller.settings = Settings(
-        notification_min_repo_track_passes=2,
+        notification_min_hub_index_probes=2,
         notification_startup_max_seconds=600,
         dashboard_subnets=[97],
     )
     poller._collector_started_at = datetime.now(timezone.utc)
     poller._startup_full_scan_done.add(97)
-    poller._startup_repo_track_passes[97] = 1
+    poller._startup_hub_probes[97] = 1
 
-    assert poller._repo_track_gate_satisfied(97) is False
+    assert poller._startup_ready_for_live() is False
 
-    poller._startup_repo_track_passes[97] = 2
-    assert poller._repo_track_gate_satisfied(97) is True
+    poller._startup_hub_probes[97] = 2
+    poller.notifier.begin_startup_grace(0)
+    assert poller._startup_ready_for_live() is True
+
+
+@pytest.mark.asyncio
+async def test_watcher_probe_hub_index_counts_albedo_repos():
+    settings = Settings(notifications_enabled=True)
+    watcher = NotificationWatcher(dispatcher=NotificationDispatcher(settings), settings=settings)
+    hub_index = {
+        "cyantest/albedo-qwen3-4b-test": type("M", (), {"digest": "sha256:abc"})(),
+        "other/random-model": type("M", (), {"digest": "sha256:dead"})(),
+    }
+    with patch(
+        "app.notifications.watcher.HippiusHubClient.fetch_albedo_index",
+        new_callable=AsyncMock,
+        return_value=hub_index,
+    ):
+        count = await watcher.probe_hub_index()
+    assert count == 1
 
 
 @pytest.mark.asyncio

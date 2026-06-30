@@ -12,13 +12,13 @@ Notifications go live only when **all** of these are true:
 |------|---------|---------|
 | `NOTIFICATION_GRACE_SECONDS` | **300** (5 min) | Minimum wait after collector start |
 | Full chain scan | automatic | All on-chain commits loaded once |
-| `NOTIFICATION_MIN_REPO_TRACK_PASSES` | **2** | Hub/repo index scanned twice (when sync succeeds) |
-| `NOTIFICATION_STARTUP_MAX_SECONDS` | **600** (10 min) | Go LIVE anyway if repo track keeps failing |
-| Startup seed | automatic | Mark DB + dashboard + Hippius hub index as "already seen" |
+| `NOTIFICATION_MIN_HUB_INDEX_PROBES` | **1** | Lightweight Hippius hub HTTP fetch (no DB) |
+| `NOTIFICATION_STARTUP_MAX_SECONDS` | **600** (10 min) | Go LIVE anyway if hub probe cannot run |
+| Startup seed | automatic | Mark DB (best-effort) + dashboard + hub index as "already seen" |
 
-**Live time** = `max(5 min, full scan done, 2× repo track OR 10 min cap)` — then only **new** deltas post to `#albedo`.
+**Live time** ≈ `max(5 min, full scan done, 1× hub probe OR 10 min cap)` — then only **new** deltas post to `#albedo`.
 
-If repo track sync fails (check `REPO_TRACK failed` in logs), notifications still go LIVE after the startup max wait. The hub index is seeded at LIVE to prevent repo bulk floods.
+Repo track (`REPO_TRACK` in logs) is for **dashboard DB sync only** — it does **not** gate Slack. If your DB is flaky, notifications still go LIVE via HTTP hub probes.
 
 Grace runs on **every** collector start (including restarts with Postgres data). Prior alerts in the DB are only used for dedupe — they do **not** skip grace. Set `NOTIFICATION_SKIP_STARTUP_GRACE=true` only if you explicitly want instant live mode.
 
@@ -30,21 +30,20 @@ SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 SLACK_CHANNEL=#albedo
 SLACK_APP_NAME=Albedo_Notification
 
-# Tune if you still see bulk after docker up:
-NOTIFICATION_GRACE_SECONDS=300          # 5 min (try 600 for slow machines)
-NOTIFICATION_MIN_REPO_TRACK_PASSES=2   # try 3 if hub index is slow
-NOTIFICATION_STARTUP_MAX_SECONDS=600   # go LIVE after 10 min even if repo track fails
+NOTIFICATION_GRACE_SECONDS=300
+NOTIFICATION_MIN_HUB_INDEX_PROBES=1    # HTTP only; 0 = skip hub gate
+NOTIFICATION_STARTUP_MAX_SECONDS=600   # fallback LIVE cap
 ```
 
 ### Tuning guide
 
 | Situation | Try |
 |-----------|-----|
-| Still bulk flood at ~2 min | Check logs for `skip-startup-grace` — grace may be bypassed. Otherwise try `NOTIFICATION_GRACE_SECONDS=600` |
-| Repos trickle in slowly | `NOTIFICATION_MIN_REPO_TRACK_PASSES=3` |
-| Stuck on repo track passes (`REPO_TRACK failed`) | Fix network/DB; or wait for `NOTIFICATION_STARTUP_MAX_SECONDS` fallback LIVE |
-| Want faster alerts on restart | `NOTIFICATION_SKIP_STARTUP_GRACE=true` (not recommended — can re-flood Slack) |
-| Fresh empty DB every build | Grace + seed always runs — this is correct |
+| Still bulk flood at ~2 min | Check logs for `skip-startup-grace` — grace may be bypassed |
+| Want fastest LIVE (DB unreliable) | `NOTIFICATION_MIN_HUB_INDEX_PROBES=0` (grace + full scan only) |
+| Hub API slow | Wait for fallback or lower grace; check `HUB_PROBE` logs |
+| `REPO_TRACK failed` in logs | Dashboard repo sync issue — **does not block Slack** anymore |
+| Want faster alerts on restart | `NOTIFICATION_SKIP_STARTUP_GRACE=true` (not recommended) |
 
 ## Deploy
 
@@ -58,14 +57,14 @@ docker compose up -d --force-recreate collector api
 
 ```bash
 curl http://localhost:8000/api/v1/notifications/status
-docker compose logs collector | grep -i notification
+docker compose logs collector | grep -iE 'notification|HUB_PROBE|LIVE'
 ```
 
 Expected sequence:
 
 ```
 notifications grace period until ... (300s) — initial fetch will NOT post to Slack
-notifications not live yet — grace 240s remaining; SN97 waiting for 1 more repo track pass(es)
+HUB_PROBE netuid=97 albedo_repos=142 ... startup_probe=1/1
 notifications LIVE from ... — only changes after docker startup are sent
 ```
 

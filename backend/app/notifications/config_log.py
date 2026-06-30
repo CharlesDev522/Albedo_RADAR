@@ -26,7 +26,9 @@ def log_notification_config(settings: Settings, *, live: bool | None = None) -> 
         )
         return False
 
-    live_s = "unknown" if live is None else ("yes" if live else f"no (grace {settings.notification_grace_seconds}s + sync gates)")
+    live_s = "unknown" if live is None else (
+        "yes" if live else f"no (grace {settings.notification_grace_seconds}s + full scan + hub probes)"
+    )
     logger.info(
         "notifications: enabled webhook=set channel=%s app=%s live=%s",
         settings.slack_channel or "(webhook default)",
