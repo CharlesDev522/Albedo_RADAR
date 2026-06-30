@@ -31,6 +31,7 @@ async def notification_status(db: AsyncSession = Depends(get_db)) -> dict:
         "slack_app_name": settings.slack_app_name,
         "reg_fee_threshold_tao": settings.notification_reg_fee_threshold_tao,
         "grace_seconds": settings.notification_grace_seconds,
+        "min_repo_track_passes": settings.notification_min_repo_track_passes,
         "alerts_in_db": total,
         "alerts_slack_sent": sent,
         "hint": (

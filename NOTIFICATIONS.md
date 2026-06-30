@@ -1,45 +1,50 @@
 # Notifications — Slack
 
-MinerWatch sends **Slack-only** alerts for **genuinely new** changes after `docker compose up`.
+## Problem
 
-## 60-second grace period (fixes bulk flood)
+After `docker compose build && up`, the collector **fresh-fetches everything** (repos, commits, duels). That looks like "new" data but isn't — you only want Slack for **real changes after the dashboard is warm**.
 
-On fresh `docker compose up`:
+## Solution: grace + sync gates + seed
 
-1. **0–60s grace** — collector ingests all repos, commits, slots, duels silently (no Slack)
-2. **After 60s** — seeds everything already in DB + dashboard as "seen"
-3. **Live** — only real new changes post to `#albedo`
+Notifications go live only when **all** of these are true:
 
-```env
-NOTIFICATION_GRACE_SECONDS=60
-```
+| Gate | Default | Purpose |
+|------|---------|---------|
+| `NOTIFICATION_GRACE_SECONDS` | **300** (5 min) | Minimum wait after collector start |
+| Full chain scan | automatic | All on-chain commits loaded once |
+| `NOTIFICATION_MIN_REPO_TRACK_PASSES` | **2** | Hub/repo index scanned twice (catches slow discovery) |
+| Startup seed | automatic | Mark all ingested DB + dashboard state as "already seen" |
 
-Collector logs:
-
-```
-notifications grace period until 2026-... (60s) — initial fetch will NOT post to Slack
-notifications LIVE from 2026-... — only changes after docker grace are sent
-```
+**Live time** = `max(5 min, full scan done, 2× repo track)` — then only **new** deltas post to `#albedo`.
 
 Restarts with existing alert history skip grace (resume mode).
 
-## What notifies
+## Config (`.env`)
 
-| Your event | Alert kind | When it fires |
-|------------|------------|---------------|
-| New repo on hub | `repo_new` | Hub discovers a repo not seen before |
-| New duel started | `duel_new` | New `current_eval.eval_run_id` |
-| New on-chain commit | `commit_new` | New v6 commitment for a hotkey |
-| Reg fee drops below threshold | `reg_fee_low` | Burn crosses below 0.75 τ |
-| Duel finish — crowned | `crown_won` | `coronated: true` |
-| Duel finish — king defended | `king_defended` | Finished duel, challenger lost |
-| King reign ended | `crown_lost` | `king_version` changes |
+```env
+NOTIFICATIONS_ENABLED=true
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+SLACK_CHANNEL=#albedo
+SLACK_APP_NAME=Albedo_Notification
 
-## Setup
+# Tune if you still see bulk after docker up:
+NOTIFICATION_GRACE_SECONDS=300          # 5 min (try 600 for slow machines)
+NOTIFICATION_MIN_REPO_TRACK_PASSES=2   # try 3 if hub index is slow
+```
+
+### Tuning guide
+
+| Situation | Try |
+|-----------|-----|
+| Still bulk flood at ~2 min | `NOTIFICATION_GRACE_SECONDS=600` (10 min) |
+| Repos trickle in slowly | `NOTIFICATION_MIN_REPO_TRACK_PASSES=3` |
+| Want faster alerts on restart | Already instant if `alerts_in_db > 0` (resume mode) |
+| Fresh empty DB every build | Grace + seed always runs — this is correct |
+
+## Deploy
 
 ```bash
 cp .env.example .env
-# set SLACK_WEBHOOK_URL, SLACK_CHANNEL=#albedo, SLACK_APP_NAME=Albedo_Notification
 docker compose build --no-cache collector api
 docker compose up -d --force-recreate collector api
 ```
@@ -48,15 +53,29 @@ docker compose up -d --force-recreate collector api
 
 ```bash
 curl http://localhost:8000/api/v1/notifications/status
-curl -X POST http://localhost:8000/api/v1/notifications/test-slack
 docker compose logs collector | grep -i notification
 ```
 
-## How it works
+Expected sequence:
 
 ```
-docker compose up
-  → 60s grace (silent ingest)
-  → seed all DB + dashboard state as seen
-  → LIVE — only new deltas → Slack #albedo
+notifications grace period until ... (300s) — initial fetch will NOT post to Slack
+notifications not live yet — grace 240s remaining; SN97 waiting for 1 more repo track pass(es)
+notifications LIVE from ... — only changes after docker startup are sent
 ```
+
+```bash
+curl -X POST http://localhost:8000/api/v1/notifications/test-slack
+```
+
+## What notifies after live
+
+| Event | Kind |
+|-------|------|
+| New repo | `repo_new` |
+| New duel | `duel_new` |
+| New on-chain commit | `commit_new` |
+| Reg fee drops below 0.75 τ | `reg_fee_low` |
+| Crowned | `crown_won` |
+| King defended | `king_defended` |
+| Crown lost | `crown_lost` |

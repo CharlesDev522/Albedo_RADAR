@@ -72,6 +72,9 @@ class CommitmentPoller:
         self._last_notification_poll: dict[int, float] = {}
         self._poll_lock = asyncio.Lock()
         self._seen_hotkeys: dict[int, set[str]] = {}
+        self._startup_full_scan_done: set[int] = set()
+        self._startup_repo_track_passes: dict[int, int] = {}
+        self._last_startup_wait_log: float = 0.0
 
     async def setup(self) -> None:
         await init_db(engine)
@@ -128,15 +131,61 @@ class CommitmentPoller:
 
         await self._maybe_finalize_notifications()
 
+    def _startup_ready_for_live(self) -> bool:
+        if self.notifier.is_live or not self.notifier.grace_elapsed():
+            return False
+        required_passes = max(self.settings.notification_min_repo_track_passes, 1)
+        for netuid in self.settings.dashboard_subnets:
+            if netuid not in self._startup_full_scan_done:
+                return False
+            if self._startup_repo_track_passes.get(netuid, 0) < required_passes:
+                return False
+        return True
+
+    def _startup_blockers(self) -> list[str]:
+        if self.notifier.is_live:
+            return []
+        blockers: list[str] = []
+        if not self.notifier.grace_elapsed():
+            remaining = int(
+                (self.notifier.live_after - datetime.now(timezone.utc)).total_seconds()
+            )
+            blockers.append(f"grace {max(remaining, 0)}s remaining")
+        required_passes = max(self.settings.notification_min_repo_track_passes, 1)
+        for netuid in self.settings.dashboard_subnets:
+            if netuid not in self._startup_full_scan_done:
+                blockers.append(f"SN{netuid} waiting for full chain scan")
+            need = required_passes - self._startup_repo_track_passes.get(netuid, 0)
+            if need > 0:
+                blockers.append(f"SN{netuid} waiting for {need} more repo track pass(es)")
+        return blockers
+
+    def _log_startup_wait(self) -> None:
+        blockers = self._startup_blockers()
+        if not blockers:
+            return
+        now = time.monotonic()
+        if now - self._last_startup_wait_log < 30:
+            return
+        self._last_startup_wait_log = now
+        logger.info(
+            "notifications not live yet — %s (live after: %s)",
+            "; ".join(blockers),
+            self.notifier.live_after.isoformat(),
+        )
+
     async def _maybe_finalize_notifications(self) -> None:
-        if not self.notifier.should_finalize_startup():
+        if self.notifier.is_live:
+            return
+        if not self._startup_ready_for_live():
+            self._log_startup_wait()
             return
         async with AsyncSessionLocal() as session:
             marked = await self.notification_watcher.finalize_startup_seed(session)
             await session.commit()
         self.notifier.mark_startup_finalized()
         logger.info(
-            "notifications LIVE from %s — only changes after docker grace are sent (%d keys seeded)",
+            "notifications LIVE from %s — only changes after docker startup are sent (%d keys seeded)",
             datetime.now(timezone.utc).isoformat(),
             marked,
         )
@@ -337,6 +386,8 @@ class CommitmentPoller:
             sorted({c.uid for c in commits if c.uid is not None}),
         )
         self._last_full_scan[netuid] = time.monotonic()
+        if not self.notifier.is_live:
+            self._startup_full_scan_done.add(netuid)
         return stats
 
     async def _incentive_sync(self, netuid: int) -> None:
@@ -353,6 +404,10 @@ class CommitmentPoller:
             stats = await self.repo_track_builder.sync_subnet(session, netuid)
             await self.repo_track_builder.prune_stale_tracks(session, netuid)
             await session.commit()
+        if not self.notifier.is_live:
+            self._startup_repo_track_passes[netuid] = (
+                self._startup_repo_track_passes.get(netuid, 0) + 1
+            )
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         logger.info(
             "REPO_TRACK netuid=%d miners=%d repos=%d hub_updates=%d on_chain=%d mismatches=%d errors=%d %dms",

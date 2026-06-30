@@ -58,8 +58,11 @@ class NotificationDispatcher:
         self._live_after = datetime.now(timezone.utc)
         self._startup_finalized = True
 
+    def grace_elapsed(self) -> bool:
+        return datetime.now(timezone.utc) >= self._live_after
+
     def should_finalize_startup(self) -> bool:
-        return not self._startup_finalized and datetime.now(timezone.utc) >= self._live_after
+        return not self._startup_finalized and self.grace_elapsed()
 
     def mark_startup_finalized(self) -> None:
         self._startup_finalized = True

@@ -67,7 +67,9 @@ class Settings(BaseSettings):
     slack_app_name: str = "Albedo_Notification"
     notification_reg_fee_threshold_tao: float = 0.75
     albedo_notification_poll_seconds: int = 15
-    notification_grace_seconds: int = 60
+    # Silence Slack after fresh docker up until grace elapses AND initial sync completes.
+    notification_grace_seconds: int = 300
+    notification_min_repo_track_passes: int = 2
 
     # Database
     database_url: str = "postgresql+asyncpg://minerwatch:minerwatch@localhost:5432/minerwatch"
