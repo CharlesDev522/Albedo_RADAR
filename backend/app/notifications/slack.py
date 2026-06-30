@@ -14,6 +14,15 @@ from app.notifications.messages import format_alert_body
 logger = logging.getLogger(__name__)
 
 
+def _slack_channel(channel: str | None) -> str | None:
+    if not channel:
+        return None
+    c = channel.strip()
+    if c.startswith("#") or c.startswith("C"):
+        return c
+    return f"#{c}"
+
+
 async def send_slack_alert(
     *,
     settings: Settings,
@@ -44,8 +53,11 @@ async def send_slack_alert(
             },
         ],
     }
-    if settings.slack_channel:
-        payload["channel"] = settings.slack_channel
+    channel = _slack_channel(settings.slack_channel)
+    if channel:
+        payload["channel"] = channel
+    if settings.slack_app_name:
+        payload["username"] = settings.slack_app_name
 
     owns_client = client is None
     http = client or httpx.AsyncClient(timeout=settings.market_http_timeout_seconds)

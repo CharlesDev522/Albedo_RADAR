@@ -144,7 +144,13 @@ async def test_watcher_emits_crown_won():
     }
 
     session = _mock_session_no_existing()
-    with patch("app.notifications.watcher.fetch_dashboard", return_value=dashboard):
+    with (
+        patch("app.notifications.watcher.fetch_dashboard", return_value=dashboard),
+        patch(
+            "app.notifications.watcher.fetch_subnet_economics",
+            return_value={"registration_burn_tao": 1.5},
+        ),
+    ):
         sent = await watcher.poll_subnet(session, 97)
 
     assert sent >= 1

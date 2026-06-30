@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     notifications_enabled: bool = True
     slack_webhook_url: str | None = None
     slack_channel: str | None = None
+    slack_app_name: str = "Albedo_Notification"
     notification_reg_fee_threshold_tao: float = 0.75
     albedo_notification_poll_seconds: int = 15
 

@@ -19,6 +19,8 @@ POLL_SECONDS = float(os.environ.get("NOTIFIER_POLL_SECONDS", "10"))
 ACK = os.environ.get("NOTIFIER_ACK", "true").lower() in ("1", "true", "yes")
 KINDS = os.environ.get("NOTIFIER_KINDS", "").strip()
 
+NOTIFIER_APP_NAME = os.environ.get("NOTIFIER_APP_NAME", "Albedo_Notification")
+
 SEVERITY_DURATION: dict[str, str] = {
     "critical": "long",
     "high": "long",
@@ -48,7 +50,7 @@ def show_alert(alert: dict[str, Any]) -> None:
             from winotify import Notification, audio
 
             toast = Notification(
-                app_id="MinerWatch",
+                app_id=NOTIFIER_APP_NAME,
                 title=title[:64],
                 msg=body[:500],
                 duration=duration,

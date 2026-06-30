@@ -33,7 +33,8 @@ cp .env.example .env
 ```env
 NOTIFICATIONS_ENABLED=true
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
-SLACK_CHANNEL=#albedo-alerts
+SLACK_CHANNEL=#albedo
+SLACK_APP_NAME=Albedo_Notification
 NOTIFICATION_REG_FEE_THRESHOLD_TAO=0.75
 ALBEDO_NOTIFICATION_POLL_SECONDS=15
 ```
