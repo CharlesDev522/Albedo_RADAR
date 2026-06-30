@@ -63,7 +63,14 @@ async def send_slack_alert(
     http = client or httpx.AsyncClient(timeout=settings.market_http_timeout_seconds)
     try:
         resp = await http.post(webhook, json=payload)
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            logger.error(
+                "slack webhook HTTP %s kind=%s body=%s",
+                resp.status_code,
+                kind,
+                resp.text[:500],
+            )
+            return False
         return True
     except Exception:
         logger.exception("slack webhook failed kind=%s", kind)

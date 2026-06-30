@@ -1,14 +1,6 @@
 # Docker Compose — MinerWatch stack
-# Copy .env.example → .env and set SLACK_WEBHOOK_URL for Slack alerts.
-# Full stack: docker compose up -d
-
-x-notification-env: &notification-env
-  NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-true}
-  SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
-  SLACK_CHANNEL: ${SLACK_CHANNEL:-#albedo}
-  SLACK_APP_NAME: ${SLACK_APP_NAME:-Albedo_Notification}
-  NOTIFICATION_REG_FEE_THRESHOLD_TAO: ${NOTIFICATION_REG_FEE_THRESHOLD_TAO:-0.75}
-  ALBEDO_NOTIFICATION_POLL_SECONDS: ${ALBEDO_NOTIFICATION_POLL_SECONDS:-15}
+# REQUIRED: cp .env.example .env and set SLACK_WEBHOOK_URL (see NOTIFICATIONS.md)
+# Notification secrets are loaded from .env via env_file only (not overridden below).
 
 services:
   postgres:
@@ -50,7 +42,6 @@ services:
       METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
       FULL_SCAN_INTERVAL_SECONDS: "300"
       CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000"]'
-      <<: *notification-env
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,7 +75,6 @@ services:
       POLL_INTERVAL_SECONDS: "3"
       METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
       FULL_SCAN_INTERVAL_SECONDS: "300"
-      <<: *notification-env
     depends_on:
       postgres:
         condition: service_healthy

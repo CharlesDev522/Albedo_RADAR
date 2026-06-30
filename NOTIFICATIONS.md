@@ -22,7 +22,61 @@ MinerWatch sends **Slack-only** alerts for live changes detected **after** colle
 | `repo_updated` | Hub manifest digest changes |
 | `slot_new` / `slot_changed` | Slot commitment changes |
 
-## Docker setup
+## Troubleshooting — no Slack messages
+
+### 1. Create `.env` (required)
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set your real webhook:
+
+```env
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T07UP6DQ519/...
+SLACK_CHANNEL=#albedo
+SLACK_APP_NAME=Albedo_Notification
+NOTIFICATIONS_ENABLED=true
+```
+
+### 2. Recreate collector (loads new env)
+
+```bash
+docker compose up -d --force-recreate collector
+```
+
+### 3. Check status
+
+```bash
+curl http://localhost:8000/api/v1/notifications/status
+```
+
+`webhook_configured` must be `true`.
+
+### 4. Send test message
+
+```bash
+curl -X POST http://localhost:8000/api/v1/notifications/test-slack
+```
+
+You should see a test message in `#albedo` immediately.
+
+### 5. Check collector logs
+
+```bash
+docker compose logs collector | grep -i notification
+```
+
+Look for:
+
+```
+notifications: enabled webhook=set channel=#albedo ...
+notifications armed after startup sync ...
+```
+
+If you see `SLACK_WEBHOOK_URL is missing` — `.env` is not loaded; fix step 1–2.
+
+---
 
 ```bash
 cp .env.example .env

@@ -26,6 +26,7 @@ from app.db.init_db import init_db
 from app.db.models import Miner, MinerCommitment, MinerStatus
 from app.db.session import AsyncSessionLocal, engine
 from app.notifications.dispatcher import NotificationDispatcher
+from app.notifications.config_log import log_notification_config
 from app.notifications.watcher import NotificationWatcher
 from app.processing.commitment_state_builder import CommitmentStateBuilder
 from app.processing.encrypted_commitment_state_builder import EncryptedCommitmentStateBuilder
@@ -76,6 +77,7 @@ class CommitmentPoller:
         await self.subtensor_client.connect()
         self._subtensor = self.subtensor_client._subtensor
         await self.publisher.connect()
+        log_notification_config(self.settings, armed=False)
         async with AsyncSessionLocal() as session:
             loaded = await self.notifier.hydrate(session)
             await self.notification_watcher.bootstrap(session)
@@ -121,6 +123,7 @@ class CommitmentPoller:
                 "notifications armed after startup sync — only new events from %s will post to Slack",
                 armed_at.isoformat(),
             )
+        log_notification_config(self.settings, armed=self.notifier.armed)
 
     async def _slot_poll(self, netuid: int, snapshot: ChainSnapshot) -> dict[str, int]:
         assert self._subtensor is not None

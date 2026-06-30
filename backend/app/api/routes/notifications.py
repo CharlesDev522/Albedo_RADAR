@@ -1,14 +1,65 @@
 """Alert notification history API."""
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db.models import AlertNotification
 from app.db.session import get_db
+from app.notifications.slack import send_slack_alert
 from app.schemas.notifications import AlertNotificationList, AlertNotificationResponse
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
+
+
+@router.get("/status")
+async def notification_status(db: AsyncSession = Depends(get_db)) -> dict:
+    """Check whether Slack notifications are configured (for debugging)."""
+    settings = get_settings()
+    webhook = (settings.slack_webhook_url or "").strip()
+    total = (await db.execute(select(func.count()).select_from(AlertNotification))).scalar() or 0
+    sent = (
+        await db.execute(
+            select(func.count()).select_from(AlertNotification).where(AlertNotification.slack_sent.is_(True))
+        )
+    ).scalar() or 0
+    return {
+        "enabled": settings.notifications_enabled,
+        "webhook_configured": bool(webhook),
+        "slack_channel": settings.slack_channel,
+        "slack_app_name": settings.slack_app_name,
+        "reg_fee_threshold_tao": settings.notification_reg_fee_threshold_tao,
+        "alerts_in_db": total,
+        "alerts_slack_sent": sent,
+        "hint": (
+            "OK — collector will post new events to Slack after startup sync"
+            if webhook and settings.notifications_enabled
+            else "Set SLACK_WEBHOOK_URL in .env and restart: docker compose up -d --force-recreate collector"
+        ),
+    }
+
+
+@router.post("/test-slack")
+async def test_slack_notification() -> dict:
+    """Send a test message to Slack (verifies webhook + channel)."""
+    settings = get_settings()
+    if not (settings.slack_webhook_url or "").strip():
+        return {"status": "error", "detail": "SLACK_WEBHOOK_URL is not set in .env"}
+    ok = await send_slack_alert(
+        settings=settings,
+        kind="reg_fee_low",
+        title="[test] Albedo_Notification",
+        message="MinerWatch Slack test — if you see this, notifications are working.",
+        detail={"note": "Triggered manually via POST /api/v1/notifications/test-slack"},
+        subnet=settings.default_subnet,
+    )
+    return {
+        "status": "ok" if ok else "failed",
+        "webhook_configured": True,
+        "channel": settings.slack_channel,
+        "app_name": settings.slack_app_name,
+    }
 
 
 @router.get("", response_model=AlertNotificationList)

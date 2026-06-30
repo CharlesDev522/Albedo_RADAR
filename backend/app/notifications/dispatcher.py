@@ -131,6 +131,13 @@ class NotificationDispatcher:
                 client=self._http_client(),
             )
             row.slack_sent = sent
+            if not sent:
+                logger.error("ALERT %s saved to DB but Slack delivery FAILED", kind)
+        else:
+            logger.error(
+                "ALERT %s saved to DB but SLACK_WEBHOOK_URL not set — message not sent",
+                kind,
+            )
 
-        logger.info("ALERT %s %s — %s", kind, source_key, title)
+        logger.info("ALERT %s %s — %s (slack=%s)", kind, source_key, title, row.slack_sent)
         return True
