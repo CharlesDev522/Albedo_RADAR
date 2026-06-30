@@ -43,7 +43,7 @@ from app.processing.repo_watch_targets import (
     parse_hub_watch_hotkey,
 )
 from app.notifications.dispatcher import NotificationDispatcher
-from app.notifications.formatters import repo_alert_detail
+from app.notifications.messages import build_repo_new_alert, build_repo_updated_alert
 
 logger = logging.getLogger(__name__)
 
@@ -604,39 +604,38 @@ class RepoTrackBuilder:
             )
         )
         if self.notifier and event_type in ("hub_repo_added", "hub_manifest_update"):
-            kind = "repo_new" if event_type == "hub_repo_added" else "repo_updated"
-            detail = repo_alert_detail(
-                repo=repo,
-                event_type=event_type,
-                uid=uid,
-                hotkey=hotkey,
-                coldkey=coldkey,
-                model_family=model_family,
-                hub_digest=hub_digest,
-                previous_digest=previous_digest,
-                revision=revision,
-                commit_message=commit_message,
-                meta=meta,
-            )
-            title = (
-                f"New repo — {repo}"
-                if kind == "repo_new"
-                else f"Repo updated — {repo}"
-            )
-            msg = (
-                f"SN{netuid} hub digest {hub_digest}"
-                if hub_digest
-                else f"SN{netuid} {event_type}"
-            )
-            await self.notifier.notify(
-                session,
-                kind=kind,
-                title=title,
-                message=msg,
-                source_key=f"alert:{source_key}",
-                detail=detail,
-                subnet=netuid,
-            )
+            if event_type == "hub_repo_added":
+                alert = build_repo_new_alert(
+                    netuid=netuid,
+                    repo=repo,
+                    event_type=event_type,
+                    source_key=source_key,
+                    uid=uid,
+                    hotkey=hotkey,
+                    coldkey=coldkey,
+                    model_family=model_family,
+                    hub_digest=hub_digest,
+                    revision=revision,
+                    commit_message=commit_message,
+                    meta=meta,
+                )
+            else:
+                alert = build_repo_updated_alert(
+                    netuid=netuid,
+                    repo=repo,
+                    event_type=event_type,
+                    source_key=source_key,
+                    uid=uid,
+                    hotkey=hotkey,
+                    coldkey=coldkey,
+                    model_family=model_family,
+                    hub_digest=hub_digest,
+                    previous_digest=previous_digest,
+                    revision=revision,
+                    commit_message=commit_message,
+                    meta=meta,
+                )
+            await self.notifier.notify_content(session, alert)
         return True
 
     async def prune_stale_tracks(self, session: AsyncSession, netuid: int) -> int:

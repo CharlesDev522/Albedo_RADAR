@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chain_reader.slot_commitment_scanner import SlotStatus
 from app.db.models import MinerSlotStatus
 from app.notifications.dispatcher import NotificationDispatcher
-from app.notifications.formatters import slot_alert_detail
+from app.notifications.messages import build_slot_changed_alert, build_slot_new_alert
 
 
 class SlotStatusBuilder:
@@ -57,14 +57,8 @@ class SlotStatusBuilder:
                     )
                 )
                 if self.notifier:
-                    await self.notifier.notify(
-                        session,
-                        kind="slot_new",
-                        title=f"New slot uid {slot.uid} — {ctype}",
-                        message=f"SN{netuid} slot commitment at block {slot.commit_block}",
-                        source_key=f"slot_new:{netuid}:{slot.uid}:{slot.payload_hash or ctype}",
-                        detail=slot_alert_detail(slot),
-                        subnet=netuid,
+                    await self.notifier.notify_content(
+                        session, build_slot_new_alert(slot, netuid)
                     )
                 stats["updated"] += 1
             else:
@@ -96,15 +90,10 @@ class SlotStatusBuilder:
                 row.encrypted_hash = slot.encrypted_hash
                 row.last_updated = now
                 if changed:
-                    if self.notifier:
-                        await self.notifier.notify(
+                    if self.notifier and previous is not None:
+                        await self.notifier.notify_content(
                             session,
-                            kind="slot_changed",
-                            title=f"Slot changed uid {slot.uid} — {ctype}",
-                            message=f"SN{netuid} slot updated at block {slot.commit_block}",
-                            source_key=f"slot_changed:{netuid}:{slot.uid}:{slot.payload_hash or slot.commit_block}",
-                            detail=slot_alert_detail(slot, previous=previous),
-                            subnet=netuid,
+                            build_slot_changed_alert(slot, netuid, previous=previous),
                         )
                     stats["updated"] += 1
                 else:

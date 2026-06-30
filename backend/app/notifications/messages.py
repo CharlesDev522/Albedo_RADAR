@@ -1,0 +1,332 @@
+"""Kind-specific alert titles, messages, and display formatting."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from app.chain_reader.commitment_scanner import Commit
+from app.chain_reader.slot_commitment_scanner import SlotStatus
+from app.notifications.formatters import commit_alert_detail, repo_alert_detail, slot_alert_detail
+from app.notifications.kinds import AlertKind
+
+KIND_LABELS: dict[AlertKind, str] = {
+    "crown_won": "Crowned",
+    "crown_lost": "Crown Lost",
+    "slot_new": "New Slot",
+    "slot_changed": "Slot Changed",
+    "commit_new": "New Commit",
+    "commit_updated": "Commit Updated",
+    "repo_new": "New Repo",
+    "repo_updated": "Repo Updated",
+    "reg_fee_low": "Low Reg Fee",
+}
+
+# Ordered keys per kind for Slack / desktop detail lines (most important first).
+DETAIL_ORDER: dict[AlertKind, tuple[str, ...]] = {
+    "crown_won": (
+        "repo",
+        "namespace",
+        "uid",
+        "hotkey",
+        "king_version",
+        "defeated_king_version",
+        "win_margin",
+        "model_uri",
+        "finished_at",
+        "eval_run_id",
+    ),
+    "crown_lost": (
+        "previous_king_version",
+        "new_king_version",
+        "previous_model_uri",
+        "new_model_uri",
+        "new_repo",
+    ),
+    "commit_new": ("repo", "uid", "hotkey", "digest", "model_uri", "commit_block", "version"),
+    "commit_updated": (
+        "repo",
+        "uid",
+        "hotkey",
+        "digest",
+        "previous_payload_hash",
+        "commit_block",
+        "model_uri",
+    ),
+    "slot_new": ("uid", "hotkey", "commitment_type", "commit_block", "detail"),
+    "slot_changed": ("uid", "hotkey", "commitment_type", "commit_block", "detail", "previous"),
+    "repo_new": ("repo", "model_family", "hub_digest", "revision", "uid", "hotkey"),
+    "repo_updated": (
+        "repo",
+        "hub_digest",
+        "previous_digest",
+        "revision",
+        "commit_message",
+        "uid",
+        "hotkey",
+    ),
+    "reg_fee_low": (
+        "registration_burn_tao",
+        "threshold_tao",
+        "alpha_price_tao",
+        "chain_block",
+        "network",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class AlertContent:
+    kind: AlertKind
+    title: str
+    message: str
+    source_key: str
+    detail: dict[str, Any]
+    subnet: int | None = None
+    severity: str | None = None
+
+
+def _short_digest(digest: str | None, n: int = 12) -> str:
+    if not digest:
+        return "?"
+    d = str(digest)
+    return d if len(d) <= n else f"{d[:n]}…"
+
+
+def build_commit_new_alert(commit: Commit) -> AlertContent:
+    repo = commit.commit_payload.get("repo", "?")
+    detail = commit_alert_detail(commit)
+    return AlertContent(
+        kind="commit_new",
+        title=f"[commit_new] uid {commit.uid} — {repo}",
+        message=(
+            f"SN{commit.netuid} new v6 commit at block {commit.block_number} "
+            f"| digest {_short_digest(commit.commit_payload.get('digest'))}"
+        ),
+        source_key=f"commit_new:{commit.netuid}:{commit.hotkey}:{commit.payload_hash}",
+        detail=detail,
+        subnet=commit.netuid,
+    )
+
+
+def build_commit_updated_alert(commit: Commit, *, previous_hash: str) -> AlertContent:
+    repo = commit.commit_payload.get("repo", "?")
+    detail = commit_alert_detail(commit, previous_hash=previous_hash)
+    return AlertContent(
+        kind="commit_updated",
+        title=f"[commit_updated] uid {commit.uid} — {repo}",
+        message=(
+            f"SN{commit.netuid} digest changed at block {commit.block_number} "
+            f"| {_short_digest(previous_hash)} → {_short_digest(commit.commit_payload.get('digest'))}"
+        ),
+        source_key=f"commit_updated:{commit.netuid}:{commit.hotkey}:{commit.payload_hash}",
+        detail=detail,
+        subnet=commit.netuid,
+    )
+
+
+def build_slot_new_alert(slot: SlotStatus, netuid: int) -> AlertContent:
+    detail = slot_alert_detail(slot)
+    ctype = slot.commitment_type.value
+    return AlertContent(
+        kind="slot_new",
+        title=f"[slot_new] uid {slot.uid} — {ctype}",
+        message=f"SN{netuid} new slot commitment at block {slot.commit_block}",
+        source_key=f"slot_new:{netuid}:{slot.uid}:{slot.payload_hash or ctype}",
+        detail=detail,
+        subnet=netuid,
+    )
+
+
+def build_slot_changed_alert(
+    slot: SlotStatus,
+    netuid: int,
+    *,
+    previous: dict[str, Any],
+) -> AlertContent:
+    detail = slot_alert_detail(slot, previous=previous)
+    ctype = slot.commitment_type.value
+    return AlertContent(
+        kind="slot_changed",
+        title=f"[slot_changed] uid {slot.uid} — {ctype}",
+        message=(
+            f"SN{netuid} slot updated block {previous.get('commit_block')} → {slot.commit_block}"
+        ),
+        source_key=f"slot_changed:{netuid}:{slot.uid}:{slot.payload_hash or slot.commit_block}",
+        detail=detail,
+        subnet=netuid,
+    )
+
+
+def build_repo_new_alert(
+    *,
+    netuid: int,
+    repo: str,
+    event_type: str,
+    source_key: str,
+    uid: int | None = None,
+    hotkey: str | None = None,
+    coldkey: str | None = None,
+    model_family: str | None = None,
+    hub_digest: str | None = None,
+    revision: str | None = None,
+    commit_message: str | None = None,
+    meta: dict[str, Any] | None = None,
+) -> AlertContent:
+    detail = repo_alert_detail(
+        repo=repo,
+        event_type=event_type,
+        uid=uid,
+        hotkey=hotkey,
+        coldkey=coldkey,
+        model_family=model_family,
+        hub_digest=hub_digest,
+        revision=revision,
+        commit_message=commit_message,
+        meta=meta,
+    )
+    return AlertContent(
+        kind="repo_new",
+        title=f"[repo_new] {repo}",
+        message=(
+            f"SN{netuid} new hub repo"
+            + (f" | digest {_short_digest(hub_digest)}" if hub_digest else "")
+            + (f" | {revision}" if revision else "")
+        ),
+        source_key=f"alert:{source_key}",
+        detail=detail,
+        subnet=netuid,
+    )
+
+
+def build_repo_updated_alert(
+    *,
+    netuid: int,
+    repo: str,
+    event_type: str,
+    source_key: str,
+    uid: int | None = None,
+    hotkey: str | None = None,
+    coldkey: str | None = None,
+    model_family: str | None = None,
+    hub_digest: str | None = None,
+    previous_digest: str | None = None,
+    revision: str | None = None,
+    commit_message: str | None = None,
+    meta: dict[str, Any] | None = None,
+) -> AlertContent:
+    detail = repo_alert_detail(
+        repo=repo,
+        event_type=event_type,
+        uid=uid,
+        hotkey=hotkey,
+        coldkey=coldkey,
+        model_family=model_family,
+        hub_digest=hub_digest,
+        previous_digest=previous_digest,
+        revision=revision,
+        commit_message=commit_message,
+        meta=meta,
+    )
+    return AlertContent(
+        kind="repo_updated",
+        title=f"[repo_updated] {repo}",
+        message=(
+            f"SN{netuid} hub manifest updated"
+            + (f" | {_short_digest(previous_digest)} → {_short_digest(hub_digest)}" if hub_digest else "")
+        ),
+        source_key=f"alert:{source_key}",
+        detail=detail,
+        subnet=netuid,
+    )
+
+
+def build_crown_won_alert(
+    *,
+    netuid: int,
+    source_key: str,
+    detail: dict[str, Any],
+    repo: str | None,
+    model_uri: str | None,
+    king_version: Any,
+    defeated_king_version: Any,
+) -> AlertContent:
+    label = repo or model_uri or "unknown"
+    return AlertContent(
+        kind="crown_won",
+        title=f"[crown_won] {label}",
+        message=(
+            f"SN{netuid} crowned king v{king_version or '?'} "
+            f"(defeated v{defeated_king_version or '?'})"
+        ),
+        source_key=source_key,
+        detail=detail,
+        subnet=netuid,
+    )
+
+
+def build_crown_lost_alert(
+    *,
+    netuid: int,
+    source_key: str,
+    detail: dict[str, Any],
+    previous_king_version: int,
+    current_version: Any,
+) -> AlertContent:
+    return AlertContent(
+        kind="crown_lost",
+        title=f"[crown_lost] king v{previous_king_version}",
+        message=f"SN{netuid} reign ended — current king is v{current_version}",
+        source_key=source_key,
+        detail=detail,
+        subnet=netuid,
+    )
+
+
+def build_reg_fee_low_alert(
+    *,
+    netuid: int,
+    source_key: str,
+    detail: dict[str, Any],
+    burn: float,
+    threshold: float,
+) -> AlertContent:
+    return AlertContent(
+        kind="reg_fee_low",
+        title=f"[reg_fee_low] SN{netuid} — {burn:.4f} τ",
+        message=f"Registration burn {burn:.4f} τ is below {threshold} τ threshold",
+        source_key=source_key,
+        detail=detail,
+        subnet=netuid,
+    )
+
+
+def format_detail_lines(kind: AlertKind, detail: dict[str, Any]) -> list[str]:
+    """Ordered, human-readable detail lines for Slack and desktop toasts."""
+    order = DETAIL_ORDER.get(kind, ())
+    lines: list[str] = []
+    seen: set[str] = set()
+
+    def append(key: str) -> None:
+        if key in seen:
+            return
+        value = detail.get(key)
+        if value is None or value == "":
+            return
+        seen.add(key)
+        label = key.replace("_", " ").title()
+        if isinstance(value, (dict, list)):
+            lines.append(f"*{label}:* `{value}`")
+        else:
+            lines.append(f"*{label}:* {value}")
+
+    for key in order:
+        append(key)
+    for key in sorted(detail):
+        append(key)
+    return lines
+
+
+def format_alert_body(kind: AlertKind, message: str, detail: dict[str, Any]) -> str:
+    lines = [message, *format_detail_lines(kind, detail)]
+    return "\n".join(lines)

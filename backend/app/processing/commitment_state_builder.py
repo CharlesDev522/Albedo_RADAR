@@ -17,7 +17,7 @@ from app.chain_reader.subnet_commit_rules import (
 )
 from app.collectors.event_publisher import EventPublisher
 from app.notifications.dispatcher import NotificationDispatcher
-from app.notifications.formatters import commit_alert_detail
+from app.notifications.messages import build_commit_new_alert, build_commit_updated_alert
 from app.collectors.subtensor_client import MetagraphSnapshot, SubtensorClient
 from app.db.models import (
     CommitmentHistory,
@@ -78,14 +78,8 @@ class CommitmentStateBuilder:
                     stats,
                 )
                 if self.notifier:
-                    await self.notifier.notify(
-                        session,
-                        kind="commit_new",
-                        title=f"New commit uid {commit.uid} — {commit.commit_payload.get('repo', '?')}",
-                        message=f"SN{commit.netuid} v6 commit block {commit.block_number}",
-                        source_key=f"commit_new:{commit.netuid}:{commit.hotkey}:{commit.payload_hash}",
-                        detail=commit_alert_detail(commit),
-                        subnet=commit.netuid,
+                    await self.notifier.notify_content(
+                        session, build_commit_new_alert(commit)
                     )
                 stats["new"] += 1
             elif existing.payload_hash != commit.payload_hash:
@@ -120,14 +114,9 @@ class CommitmentStateBuilder:
                     stats,
                 )
                 if self.notifier:
-                    await self.notifier.notify(
+                    await self.notifier.notify_content(
                         session,
-                        kind="commit_updated",
-                        title=f"Commit updated uid {commit.uid} — {commit.commit_payload.get('repo', '?')}",
-                        message=f"SN{commit.netuid} digest changed at block {existing.commit_block}",
-                        source_key=f"commit_updated:{commit.netuid}:{commit.hotkey}:{commit.payload_hash}",
-                        detail=commit_alert_detail(commit, previous_hash=previous_hash),
-                        subnet=commit.netuid,
+                        build_commit_updated_alert(commit, previous_hash=previous_hash),
                     )
                 stats["updated"] += 1
             else:

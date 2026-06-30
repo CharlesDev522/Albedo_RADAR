@@ -77,7 +77,9 @@ class CommitmentPoller:
         self._subtensor = self.subtensor_client._subtensor
         await self.publisher.connect()
         async with AsyncSessionLocal() as session:
-            await self.notification_watcher.hydrate_seen_keys(session)
+            loaded = await self.notifier.hydrate(session)
+            await self.notification_watcher.bootstrap(session)
+        logger.info("notification cache hydrated (%d source keys)", loaded)
         for netuid in self.settings.dashboard_subnets:
             assert self._subtensor is not None
             self._neurons[netuid] = await _neuron_index(self._subtensor, netuid)
@@ -132,6 +134,7 @@ class CommitmentPoller:
         return stats
 
     async def teardown(self) -> None:
+        await self.notifier.close()
         await self.subtensor_client.disconnect()
         await self.publisher.disconnect()
         await engine.dispose()

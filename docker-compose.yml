@@ -1,3 +1,17 @@
+# Docker Compose — MinerWatch stack
+# Copy .env.example → .env and set SLACK_WEBHOOK_URL for Slack alerts.
+#
+# Full stack:        docker compose up -d
+# With desktop feed: docker compose --profile notifier up -d
+# Win11 toasts:      run poll client on Windows host (see NOTIFICATIONS.md)
+
+x-notification-env: &notification-env
+  NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-true}
+  SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+  SLACK_CHANNEL: ${SLACK_CHANNEL:-}
+  NOTIFICATION_REG_FEE_THRESHOLD_TAO: ${NOTIFICATION_REG_FEE_THRESHOLD_TAO:-0.75}
+  ALBEDO_NOTIFICATION_POLL_SECONDS: ${ALBEDO_NOTIFICATION_POLL_SECONDS:-15}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -5,10 +19,6 @@ services:
       POSTGRES_USER: minerwatch
       POSTGRES_PASSWORD: minerwatch
       POSTGRES_DB: minerwatch
-    # No host port mapping — api/collector reach postgres via Docker network.
-    # If you need host access (psql/pgAdmin), uncomment and pick a free port:
-    # ports:
-    #   - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -19,9 +29,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    # Internal only; uncomment if you need host Redis access:
-    # ports:
-    #   - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -34,6 +41,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
       REDIS_URL: redis://redis:6379/0
@@ -43,10 +52,7 @@ services:
       METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
       FULL_SCAN_INTERVAL_SECONDS: "300"
       CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000"]'
-      NOTIFICATIONS_ENABLED: "true"
-      # SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/XXX/YYY/ZZZ"
-      NOTIFICATION_REG_FEE_THRESHOLD_TAO: "0.75"
-      ALBEDO_NOTIFICATION_POLL_SECONDS: "15"
+      <<: *notification-env
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,6 +76,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.collector
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
       REDIS_URL: redis://redis:6379/0
@@ -78,10 +86,7 @@ services:
       POLL_INTERVAL_SECONDS: "3"
       METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
       FULL_SCAN_INTERVAL_SECONDS: "300"
-      NOTIFICATIONS_ENABLED: "true"
-      # SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/XXX/YYY/ZZZ"
-      NOTIFICATION_REG_FEE_THRESHOLD_TAO: "0.75"
-      ALBEDO_NOTIFICATION_POLL_SECONDS: "15"
+      <<: *notification-env
     depends_on:
       postgres:
         condition: service_healthy
@@ -91,6 +96,23 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  notifier:
+    profiles: [notifier]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.notifier
+    env_file:
+      - .env
+    environment:
+      MINERWATCH_API_URL: http://api:8000/api/v1
+      NOTIFIER_POLL_SECONDS: ${NOTIFIER_POLL_SECONDS:-10}
+      NOTIFIER_ACK: ${NOTIFIER_ACK:-true}
+      NOTIFIER_KINDS: ${NOTIFIER_KINDS:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend
@@ -98,11 +120,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Next.js route proxy targets the api service on the Docker network
       API_URL: http://api:8000/api/v1
-      # SSR inside the frontend container uses the local Next proxy (same path as the browser)
       INTERNAL_API_PROXY: http://127.0.0.1:3000/api/v1
-      # Browser direct API (optional; default path uses /api/v1 proxy)
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
       NEXT_PUBLIC_LIVE_URL: http://localhost:8000/api/v1/live/stream
     depends_on:

@@ -1,4 +1,4 @@
-"""Tests for alert notification dispatcher and watcher."""
+"""Tests for alert notification dispatcher, messages, and watcher."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -6,7 +6,30 @@ import pytest
 
 from app.config import Settings
 from app.notifications.dispatcher import NotificationDispatcher
+from app.notifications.messages import build_commit_new_alert, format_alert_body
 from app.notifications.watcher import NotificationWatcher
+from app.chain_reader.commitment_scanner import Commit
+
+
+def _mock_commit() -> Commit:
+    return Commit(
+        netuid=97,
+        block_number=1000,
+        block_hash=None,
+        uid=12,
+        hotkey="hk1",
+        coldkey="ck1",
+        registered_at_block=900,
+        commit_payload={
+            "repo": "cyantest/model",
+            "digest": "sha256:abc123def456",
+            "version": "v6",
+        },
+        reveal_string="repo/ns@digest",
+        model_uri="cyantest/model@sha256:abc123def456",
+        payload_hash="hash1",
+        commit_source="active",
+    )
 
 
 def _mock_session_no_existing() -> AsyncMock:
@@ -36,13 +59,11 @@ async def test_dispatcher_skips_when_disabled():
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_dedupes_by_source_key():
+async def test_dispatcher_memory_dedupe():
     settings = Settings(notifications_enabled=True, slack_webhook_url=None)
     dispatcher = NotificationDispatcher(settings)
-    session = AsyncMock()
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = 42
-    session.execute.return_value = result
+    dispatcher.mark_seen("commit_new:97:hk:hash")
+    session = _mock_session_no_existing()
 
     sent = await dispatcher.notify(
         session,
@@ -53,6 +74,7 @@ async def test_dispatcher_dedupes_by_source_key():
     )
 
     assert sent is False
+    session.execute.assert_not_called()
     session.add.assert_not_called()
 
 
@@ -66,7 +88,7 @@ async def test_dispatcher_persists_without_slack():
         sent = await dispatcher.notify(
             session,
             kind="reg_fee_low",
-            title="Low reg fee",
+            title="[reg_fee_low] SN97",
             message="below threshold",
             source_key="reg_fee_low:sn97:0.5",
             detail={"registration_burn_tao": 0.5},
@@ -77,14 +99,35 @@ async def test_dispatcher_persists_without_slack():
     session.add.assert_called_once()
     session.flush.assert_awaited()
     slack.assert_not_awaited()
+    assert dispatcher.is_seen("reg_fee_low:sn97:0.5")
+
+
+def test_commit_new_alert_kind_tag():
+    alert = build_commit_new_alert(_mock_commit())
+    assert alert.kind == "commit_new"
+    assert alert.title.startswith("[commit_new]")
+    assert "uid 12" in alert.title
+    assert "digest" in alert.message.lower()
+
+
+def test_format_alert_body_orders_detail():
+    body = format_alert_body(
+        "crown_won",
+        "SN97 crowned",
+        {"repo": "cyantest/m", "uid": 5, "hotkey": "hk"},
+    )
+    assert "SN97 crowned" in body
+    assert "*Repo:* cyantest/m" in body
+    assert body.index("*Repo:*") < body.index("*Uid:*")
 
 
 @pytest.mark.asyncio
 async def test_watcher_emits_crown_won():
     settings = Settings(notifications_enabled=True, default_subnet=97)
     dispatcher = NotificationDispatcher(settings)
-    dispatcher.notify = AsyncMock(return_value=True)
+    dispatcher.notify_content = AsyncMock(return_value=True)
     watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+    watcher._bootstrapped = True
 
     dashboard = {
         "reign": {"members": [{"king_version": 2, "model_uri": "cyantest/model@v2"}]},
@@ -105,9 +148,34 @@ async def test_watcher_emits_crown_won():
         sent = await watcher.poll_subnet(session, 97)
 
     assert sent >= 1
-    dispatcher.notify.assert_awaited()
-    call_kwargs = dispatcher.notify.await_args.kwargs
-    assert call_kwargs["kind"] == "crown_won"
+    dispatcher.notify_content.assert_awaited()
+    alert = dispatcher.notify_content.await_args.args[1]
+    assert alert.kind == "crown_won"
+    assert alert.title.startswith("[crown_won]")
+
+
+@pytest.mark.asyncio
+async def test_watcher_bootstrap_marks_historical_crown():
+    settings = Settings(notifications_enabled=True, default_subnet=97)
+    dispatcher = NotificationDispatcher(settings)
+    watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+
+    dashboard = {
+        "reign": {"members": [{"king_version": 2, "model_uri": "cyantest/model@v2"}]},
+        "eval_runs": [
+            {
+                "coronated": True,
+                "eval_run_id": "ev-old",
+                "model_uri": "cyantest/model@v2",
+            }
+        ],
+    }
+    session = _mock_session_no_existing()
+    with patch("app.notifications.watcher.fetch_dashboard", return_value=dashboard):
+        await watcher.bootstrap(session)
+
+    assert watcher._bootstrapped is True
+    assert dispatcher.is_seen("crown_won:ev-old:cyantest/model@v2")
 
 
 @pytest.mark.asyncio
@@ -118,8 +186,9 @@ async def test_watcher_reg_fee_below_threshold():
         notification_reg_fee_threshold_tao=0.75,
     )
     dispatcher = NotificationDispatcher(settings)
-    dispatcher.notify = AsyncMock(return_value=True)
+    dispatcher.notify_content = AsyncMock(return_value=True)
     watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+    watcher._bootstrapped = True
     watcher._last_king_version = 1
     watcher._last_king_uri = "cyantest/model@v1"
 
@@ -138,9 +207,9 @@ async def test_watcher_reg_fee_below_threshold():
         sent = await watcher.poll_subnet(session, 97)
 
     assert sent == 1
-    reg_calls = [c for c in dispatcher.notify.await_args_list if c.kwargs.get("kind") == "reg_fee_low"]
-    assert len(reg_calls) == 1
-    assert reg_calls[0].kwargs["detail"]["registration_burn_tao"] == 0.5
+    alert = dispatcher.notify_content.await_args.args[1]
+    assert alert.kind == "reg_fee_low"
+    assert alert.title.startswith("[reg_fee_low]")
 
 
 @pytest.mark.asyncio
@@ -151,8 +220,9 @@ async def test_watcher_reg_fee_skips_above_threshold():
         notification_reg_fee_threshold_tao=0.75,
     )
     dispatcher = NotificationDispatcher(settings)
-    dispatcher.notify = AsyncMock(return_value=True)
+    dispatcher.notify_content = AsyncMock(return_value=True)
     watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+    watcher._bootstrapped = True
     watcher._last_king_version = 1
     watcher._last_king_uri = "cyantest/model@v1"
 
@@ -171,4 +241,4 @@ async def test_watcher_reg_fee_skips_above_threshold():
         sent = await watcher.poll_subnet(session, 97)
 
     assert sent == 0
-    dispatcher.notify.assert_not_awaited()
+    dispatcher.notify_content.assert_not_awaited()

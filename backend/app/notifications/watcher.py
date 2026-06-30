@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
-from app.db.models import AlertNotification
 from app.integrations.albedo_dashboard import fetch_dashboard
 from app.integrations.market_client import fetch_subnet_economics
 from app.notifications.dispatcher import NotificationDispatcher
+from app.notifications.messages import (
+    build_crown_lost_alert,
+    build_crown_won_alert,
+    build_reg_fee_low_alert,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,11 @@ def _repo_from_uri(uri: str | None) -> str | None:
         return None
     m = _URI_RE.match(uri.strip())
     return m.group(1) if m else None
+
+
+def _crown_won_source_key(run: dict[str, Any]) -> str:
+    eval_id = run.get("eval_run_id") or run.get("id")
+    return f"crown_won:{eval_id or run.get('finished_at')}:{run.get('model_uri')}"
 
 
 class NotificationWatcher:
@@ -41,20 +48,43 @@ class NotificationWatcher:
         self._last_king_version: int | None = None
         self._last_king_uri: str | None = None
         self._reg_fee_below: bool = False
-        self._seen_coronation_keys: set[str] = set()
+        self._bootstrapped: bool = False
 
-    async def hydrate_seen_keys(self, session: AsyncSession) -> None:
-        result = await session.execute(
-            select(AlertNotification.source_key).where(
-                AlertNotification.kind.in_(("crown_won", "crown_lost"))
-            )
+    async def bootstrap(self, session: AsyncSession) -> None:
+        """Seed crown state without replaying historical coronations on fresh install."""
+        if self._bootstrapped or not self.dispatcher.enabled:
+            return
+        netuid = self.settings.default_subnet
+        try:
+            dashboard = await fetch_dashboard(settings=self.settings)
+        except Exception:
+            logger.warning("notification bootstrap: dashboard fetch failed", exc_info=True)
+            return
+
+        for run in dashboard.get("eval_runs") or []:
+            if isinstance(run, dict) and run.get("coronated"):
+                self.dispatcher.mark_seen(_crown_won_source_key(run))
+
+        reign = dashboard.get("reign") or {}
+        members = reign.get("members") or []
+        current = members[0] if members else {}
+        current_version = current.get("king_version")
+        if current_version is not None:
+            self._last_king_version = int(current_version)
+            self._last_king_uri = current.get("model_uri")
+
+        self._bootstrapped = True
+        logger.info(
+            "notification bootstrap SN%d king=v%s",
+            netuid,
+            self._last_king_version,
         )
-        for key in result.scalars().all():
-            self._seen_coronation_keys.add(key)
 
     async def poll_subnet(self, session: AsyncSession, netuid: int) -> int:
         if not self.dispatcher.enabled:
             return 0
+        if not self._bootstrapped:
+            await self.bootstrap(session)
         sent = 0
         sent += await self._poll_albedo_crown(session, netuid)
         sent += await self._poll_reg_fee(session, netuid)
@@ -79,11 +109,11 @@ class NotificationWatcher:
         for run in dashboard.get("eval_runs") or []:
             if not isinstance(run, dict) or not run.get("coronated"):
                 continue
-            eval_id = run.get("eval_run_id") or run.get("id")
-            source_key = f"crown_won:{eval_id or run.get('finished_at')}:{run.get('model_uri')}"
-            if source_key in self._seen_coronation_keys:
+            source_key = _crown_won_source_key(run)
+            if self.dispatcher.is_seen(source_key):
                 continue
 
+            eval_id = run.get("eval_run_id") or run.get("id")
             repo = _repo_from_uri(run.get("model_uri"))
             king = run.get("king") or {}
             detail = {
@@ -100,21 +130,16 @@ class NotificationWatcher:
                 "finished_at": run.get("finished_at"),
                 "challenger_won": run.get("challenger_won"),
             }
-            title = f"Crowned — {repo or run.get('model_uri', 'unknown')}"
-            msg = (
-                f"New king v{run.get('king_version', '?')}"
-                f" defeated v{run.get('defeated_king_version', '?')}"
-            )
-            if await self.dispatcher.notify(
-                session,
-                kind="crown_won",
-                title=title,
-                message=msg,
+            alert = build_crown_won_alert(
+                netuid=netuid,
                 source_key=source_key,
                 detail=detail,
-                subnet=netuid,
-            ):
-                self._seen_coronation_keys.add(source_key)
+                repo=repo,
+                model_uri=run.get("model_uri"),
+                king_version=run.get("king_version"),
+                defeated_king_version=run.get("defeated_king_version"),
+            )
+            if await self.dispatcher.notify_content(session, alert):
                 sent += 1
 
         if (
@@ -123,7 +148,7 @@ class NotificationWatcher:
             and current_version != self._last_king_version
         ):
             source_key = f"crown_lost:v{self._last_king_version}->v{current_version}"
-            if source_key not in self._seen_coronation_keys:
+            if not self.dispatcher.is_seen(source_key):
                 detail = {
                     "previous_king_version": self._last_king_version,
                     "previous_model_uri": self._last_king_uri,
@@ -131,18 +156,14 @@ class NotificationWatcher:
                     "new_model_uri": current_uri,
                     "new_repo": _repo_from_uri(current_uri),
                 }
-                title = f"Crown lost — king v{self._last_king_version}"
-                msg = f"Reign ended; current king is v{current_version}"
-                if await self.dispatcher.notify(
-                    session,
-                    kind="crown_lost",
-                    title=title,
-                    message=msg,
+                alert = build_crown_lost_alert(
+                    netuid=netuid,
                     source_key=source_key,
                     detail=detail,
-                    subnet=netuid,
-                ):
-                    self._seen_coronation_keys.add(source_key)
+                    previous_king_version=self._last_king_version,
+                    current_version=current_version,
+                )
+                if await self.dispatcher.notify_content(session, alert):
                     sent += 1
 
         if current_version is not None:
@@ -171,25 +192,23 @@ class NotificationWatcher:
         if self._reg_fee_below:
             return 0
 
-        source_key = f"reg_fee_low:sn{netuid}:{burn:.4f}"
+        burn_f = float(burn)
+        source_key = f"reg_fee_low:sn{netuid}:{burn_f:.4f}"
         detail: dict[str, Any] = {
-            "registration_burn_tao": round(float(burn), 6),
+            "registration_burn_tao": round(burn_f, 6),
             "threshold_tao": threshold,
             "alpha_price_tao": econ.get("alpha_price_tao"),
             "chain_block": econ.get("chain_block"),
             "network": self.settings.bittensor_network,
         }
-        title = f"Low reg fee SN{netuid} — {burn:.4f} τ"
-        msg = f"Registration burn {burn:.4f} τ is below {threshold} τ threshold"
-        if await self.dispatcher.notify(
-            session,
-            kind="reg_fee_low",
-            title=title,
-            message=msg,
+        alert = build_reg_fee_low_alert(
+            netuid=netuid,
             source_key=source_key,
             detail=detail,
-            subnet=netuid,
-        ):
+            burn=burn_f,
+            threshold=threshold,
+        )
+        if await self.dispatcher.notify_content(session, alert):
             self._reg_fee_below = True
             return 1
         return 0
