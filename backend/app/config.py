@@ -79,7 +79,9 @@ class Settings(BaseSettings):
     notification_reg_fee_thresholds_tao: Annotated[
         str, BeforeValidator(_coerce_reg_fee_thresholds_env)
     ] = "1.0,0.75,0.6"
-    albedo_notification_poll_seconds: int = 2
+    albedo_notification_poll_seconds: int = 1
+    notification_reg_fee_poll_seconds: int = 30
+    notification_http_timeout_seconds: float = 8.0
     # Silence Slack after fresh docker up until grace elapses AND initial sync completes.
     notification_grace_seconds: int = 300
     # Lightweight Hippius hub HTTP fetches during startup (no DB). 0 = skip this gate.

@@ -324,18 +324,28 @@ class CommitmentPoller:
         return stats
 
     async def _notification_loop(self) -> None:
-        """Fast duel/crown/reg-fee poll — independent of chain snapshot cycle."""
+        """Fast duel/crown poll every ~1s; reg fee on a slower cadence."""
         interval = max(self.settings.albedo_notification_poll_seconds, 1)
+        reg_every = max(self.settings.notification_reg_fee_poll_seconds, 5)
+        last_reg_fee = 0.0
         while self._running:
+            now = time.monotonic()
+            include_reg_fee = (now - last_reg_fee) >= reg_every
             for netuid in self.settings.dashboard_subnets:
                 try:
                     async with AsyncSessionLocal() as session:
-                        sent = await self.notification_watcher.poll_subnet(session, netuid)
+                        sent = await self.notification_watcher.poll_subnet(
+                            session,
+                            netuid,
+                            include_reg_fee=include_reg_fee,
+                        )
                         await session.commit()
                     if sent:
                         logger.info("NOTIFICATIONS netuid=%d sent=%d", netuid, sent)
                 except Exception:
                     logger.exception("Notification poll failed netuid=%d", netuid)
+            if include_reg_fee:
+                last_reg_fee = now
             await asyncio.sleep(interval)
 
     async def teardown(self) -> None:
@@ -346,6 +356,7 @@ class CommitmentPoller:
             except asyncio.CancelledError:
                 pass
             self._notif_task = None
+        await self.notification_watcher.close()
         await self.notifier.close()
         await self.subtensor_client.disconnect()
         await self.publisher.disconnect()

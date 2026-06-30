@@ -75,6 +75,17 @@ class NotificationWatcher:
         self._reg_fee_alerted_tiers: set[float] = set()
         self._bootstrapped: bool = False
         self._last_live_eval_id: str | None = None
+        self._http: httpx.AsyncClient | None = None
+
+    def _http_client(self) -> httpx.AsyncClient:
+        if self._http is None:
+            self._http = httpx.AsyncClient(timeout=self.settings.notification_http_timeout_seconds)
+        return self._http
+
+    async def close(self) -> None:
+        if self._http is not None:
+            await self._http.aclose()
+            self._http = None
 
     async def bootstrap(self, session: AsyncSession | None = None) -> None:
         """Seed dashboard state so only post-startup changes notify Slack."""
@@ -233,21 +244,28 @@ class NotificationWatcher:
     def _reg_fee_thresholds(self) -> list[float]:
         return normalize_reg_fee_thresholds(self.settings.notification_reg_fee_thresholds_tao)
 
-    async def poll_subnet(self, session: AsyncSession, netuid: int) -> int:
+    async def poll_subnet(
+        self, session: AsyncSession, netuid: int, *, include_reg_fee: bool = True
+    ) -> int:
         if not self.dispatcher.enabled:
             return 0
         if not self._bootstrapped:
             await self.bootstrap(session)
         sent = 0
         sent += await self._poll_albedo_duels(session, netuid)
-        sent += await self._poll_reg_fee(session, netuid)
+        if include_reg_fee:
+            sent += await self._poll_reg_fee(session, netuid)
         return sent
 
     async def _poll_albedo_duels(self, session: AsyncSession, netuid: int) -> int:
         if netuid != self.settings.default_subnet:
             return 0
         try:
-            dashboard = await fetch_dashboard(settings=self.settings, fresh=True)
+            dashboard = await fetch_dashboard(
+                settings=self.settings,
+                fresh=True,
+                client=self._http_client(),
+            )
         except Exception:
             logger.warning("duel notification: dashboard fetch failed", exc_info=True)
             return 0
