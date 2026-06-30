@@ -1,72 +1,60 @@
 # Notifications — Slack
 
-MinerWatch emits **kind-tagged alerts** from the collector (Docker) and delivers them to **Slack** (`#albedo` via `Albedo_Notification`).
+MinerWatch sends **Slack-only** alerts for live changes detected **after** collector startup (no bulk flood on `docker compose up`).
 
-## Alert kinds
+## What notifies (your requirements)
 
-| Kind | Label | Example title |
-|------|-------|---------------|
-| `crown_won` | Crowned | `[crown_won] cyantest/model` |
-| `crown_lost` | Crown Lost | `[crown_lost] king v3` |
-| `commit_new` | New Commit | `[commit_new] uid 12 — repo/ns` |
-| `commit_updated` | Commit Updated | `[commit_updated] uid 12 — repo/ns` |
-| `slot_new` | New Slot | `[slot_new] uid 5 — timelock` |
-| `slot_changed` | Slot Changed | `[slot_changed] uid 5 — timelock` |
-| `repo_new` | New Repo | `[repo_new] namespace/repo` |
-| `repo_updated` | Repo Updated | `[repo_updated] namespace/repo` |
-| `reg_fee_low` | Low Reg Fee | `[reg_fee_low] SN97 — 0.6200 τ` |
+| Your event | Alert kind | When it fires | Post-startup only |
+|------------|------------|---------------|-------------------|
+| New repo on hub | `repo_new` | Hippius/hub index discovers a repo not seen before | Yes — startup sync is silent |
+| New duel started | `duel_new` | `current_eval` gets a new `eval_run_id` | Yes — live duel at boot is seeded |
+| New on-chain commit | `commit_new` | New v6 commitment row for a hotkey | Yes |
+| Reg fee drops below threshold | `reg_fee_low` | Burn crosses **below** 0.75 τ (edge-triggered) | Yes — already-low fee at boot is seeded |
+| Duel finish — crowned | `crown_won` | `eval_runs` entry with `coronated: true` | Yes — history bootstrapped |
+| Duel finish — king defended | `king_defended` | Finished duel, `challenger_won: false` | Yes — history bootstrapped |
+| King reign ended | `crown_lost` | `king_version` changes in reign | Yes |
 
-Each alert has a **message** line plus ordered **detail** fields (uid, hotkey, digest, margins, etc.).
+### Also sent (optional noise — on-chain/hub)
 
----
+| Alert kind | When |
+|------------|------|
+| `commit_updated` | On-chain digest changes |
+| `repo_updated` | Hub manifest digest changes |
+| `slot_new` / `slot_changed` | Slot commitment changes |
 
 ## Docker setup
 
-1. Copy env file:
-
 ```bash
 cp .env.example .env
-```
-
-2. Set Slack webhook in `.env`:
-
-```env
-NOTIFICATIONS_ENABLED=true
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
-SLACK_CHANNEL=#albedo
-SLACK_APP_NAME=Albedo_Notification
-NOTIFICATION_REG_FEE_THRESHOLD_TAO=0.75
-ALBEDO_NOTIFICATION_POLL_SECONDS=15
-```
-
-3. Build and run:
-
-```bash
-docker compose build --no-cache api collector
+# set SLACK_WEBHOOK_URL, SLACK_CHANNEL=#albedo, SLACK_APP_NAME=Albedo_Notification
+docker compose build --no-cache collector
 docker compose up -d
 ```
 
-The **collector** sends Slack alerts and persists them to PostgreSQL.
+Collector log when ready:
 
-**Startup behavior:** on first `docker compose up` (empty alert history), the collector completes one full sync (commits, slots, repos, crown bootstrap) **without** posting to Slack, then arms notifications. Only events detected **after** that point are sent. Restarts with existing alert history arm immediately.
+```
+notifications armed after startup sync — only new events from 2026-... will post to Slack
+```
 
----
+## Slack config (`.env`)
 
-## Alert history API (optional)
-
-- `GET /api/v1/notifications?since_id=0&limit=50&kinds=crown_won,commit_new`
-
----
+```env
+NOTIFICATIONS_ENABLED=true
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+SLACK_CHANNEL=#albedo
+SLACK_APP_NAME=Albedo_Notification
+NOTIFICATION_REG_FEE_THRESHOLD_TAO=0.75
+```
 
 ## How it works
 
 ```
-collector (Docker)
-  ├─ commits / slots / repos → NotificationDispatcher
-  ├─ crown + reg fee poll    → NotificationWatcher
-  ├─ dedupe (memory + DB)    → alert_notifications table
-  ├─ startup gate            → suppress until first sync done
-  └─ Slack webhook           → #albedo
+docker compose up
+  → collector DISARMED
+  → full sync (repos, commits, slots, duels) — silent
+  → notifications ARMED
+  → only deltas after this point → Slack #albedo
 ```
 
-On **fresh install**, crown history is bootstrapped (no flood of old coronations).
+Dedup: in-memory cache + `alert_notifications.source_key` in PostgreSQL.

@@ -13,6 +13,8 @@ from app.notifications.kinds import AlertKind
 KIND_LABELS: dict[AlertKind, str] = {
     "crown_won": "Crowned",
     "crown_lost": "Crown Lost",
+    "duel_new": "New Duel",
+    "king_defended": "King Defended",
     "slot_new": "New Slot",
     "slot_changed": "Slot Changed",
     "commit_new": "New Commit",
@@ -42,6 +44,30 @@ DETAIL_ORDER: dict[AlertKind, tuple[str, ...]] = {
         "previous_model_uri",
         "new_model_uri",
         "new_repo",
+    ),
+    "duel_new": (
+        "eval_run_id",
+        "repo",
+        "namespace",
+        "uid",
+        "hotkey",
+        "model_uri",
+        "state",
+        "king_version",
+        "king_repo",
+    ),
+    "king_defended": (
+        "eval_run_id",
+        "repo",
+        "namespace",
+        "uid",
+        "hotkey",
+        "king_version",
+        "king_repo",
+        "score_challenger",
+        "score_king",
+        "win_margin",
+        "finished_at",
     ),
     "commit_new": ("repo", "uid", "hotkey", "digest", "model_uri", "commit_block", "version"),
     "commit_updated": (
@@ -277,6 +303,86 @@ def build_crown_lost_alert(
         kind="crown_lost",
         title=f"[crown_lost] king v{previous_king_version}",
         message=f"SN{netuid} reign ended — current king is v{current_version}",
+        source_key=source_key,
+        detail=detail,
+        subnet=netuid,
+    )
+
+
+def _duel_participant_detail(run: dict[str, Any], *, repo_from_uri) -> dict[str, Any]:
+    king = run.get("king") or {}
+    repo = repo_from_uri(run.get("model_uri"))
+    king_repo = repo_from_uri(king.get("model_uri"))
+    return {
+        "eval_run_id": run.get("eval_run_id"),
+        "repo": repo,
+        "namespace": run.get("namespace") or (repo.split("/")[0] if repo else None),
+        "uid": run.get("uid") or king.get("uid"),
+        "hotkey": run.get("hotkey") or king.get("hotkey"),
+        "model_uri": run.get("model_uri"),
+        "king_version": run.get("king_version") or king.get("king_version"),
+        "king_repo": king_repo,
+        "score_challenger": run.get("score_challenger"),
+        "score_king": run.get("score_king"),
+        "win_margin": run.get("win_margin"),
+        "finished_at": run.get("finished_at"),
+        "challenger_won": run.get("challenger_won"),
+        "coronated": run.get("coronated"),
+    }
+
+
+def build_duel_new_alert(
+    *,
+    netuid: int,
+    source_key: str,
+    current_eval: dict[str, Any],
+    repo_from_uri,
+    reign_king: dict[str, Any] | None,
+) -> AlertContent:
+    repo = repo_from_uri(current_eval.get("model_uri"))
+    king = reign_king or {}
+    king_repo = repo_from_uri(king.get("model_uri"))
+    detail = {
+        "eval_run_id": current_eval.get("eval_run_id"),
+        "repo": repo,
+        "namespace": repo.split("/")[0] if repo and "/" in repo else None,
+        "uid": current_eval.get("uid"),
+        "hotkey": current_eval.get("hotkey"),
+        "model_uri": current_eval.get("model_uri"),
+        "state": current_eval.get("state"),
+        "king_version": king.get("king_version"),
+        "king_repo": king_repo,
+        "sample_count": current_eval.get("sample_count"),
+        "started_at": current_eval.get("started_at"),
+    }
+    label = repo or current_eval.get("model_uri", "unknown")
+    return AlertContent(
+        kind="duel_new",
+        title=f"[duel_new] {label}",
+        message=f"SN{netuid} new duel started — vs king v{king.get('king_version', '?')}",
+        source_key=source_key,
+        detail={k: v for k, v in detail.items() if v is not None},
+        subnet=netuid,
+    )
+
+
+def build_king_defended_alert(
+    *,
+    netuid: int,
+    source_key: str,
+    detail: dict[str, Any],
+    repo: str | None,
+) -> AlertContent:
+    label = repo or detail.get("model_uri", "unknown")
+    margin = detail.get("win_margin")
+    margin_s = f" margin {margin:+.3f}" if margin is not None else ""
+    return AlertContent(
+        kind="king_defended",
+        title=f"[king_defended] {label}",
+        message=(
+            f"SN{netuid} duel finished — king defended"
+            f"{margin_s} (challenger lost)"
+        ),
         source_key=source_key,
         detail=detail,
         subnet=netuid,

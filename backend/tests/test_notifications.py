@@ -162,9 +162,121 @@ def test_format_alert_body_orders_detail():
 
 
 @pytest.mark.asyncio
+async def test_watcher_emits_king_defended():
+    settings = Settings(notifications_enabled=True, default_subnet=97)
+    dispatcher = NotificationDispatcher(settings)
+    dispatcher.arm()
+    dispatcher.notify_content = AsyncMock(return_value=True)
+    watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+    watcher._bootstrapped = True
+
+    dashboard = {
+        "reign": {"members": [{"king_version": 2, "model_uri": "cyantest/king@v2"}]},
+        "current_eval": None,
+        "eval_runs": [
+            {
+                "eval_run_id": "r-defend",
+                "challenger_won": False,
+                "coronated": False,
+                "finished_at": "2026-06-14T13:00:00Z",
+                "model_uri": "other/challenger@v1",
+                "hotkey": "hk_chal",
+                "uid": 20,
+                "win_margin": -0.1,
+                "king": {"king_version": 2, "model_uri": "cyantest/king@v2"},
+            }
+        ],
+    }
+
+    session = _mock_session_no_existing()
+    with (
+        patch("app.notifications.watcher.fetch_dashboard", return_value=dashboard),
+        patch(
+            "app.notifications.watcher.fetch_subnet_economics",
+            return_value={"registration_burn_tao": 1.5},
+        ),
+    ):
+        sent = await watcher.poll_subnet(session, 97)
+
+    assert sent >= 1
+    kinds = [c.args[1].kind for c in dispatcher.notify_content.await_args_list]
+    assert "king_defended" in kinds
+
+
+@pytest.mark.asyncio
+async def test_watcher_emits_duel_new():
+    settings = Settings(notifications_enabled=True, default_subnet=97)
+    dispatcher = NotificationDispatcher(settings)
+    dispatcher.arm()
+    dispatcher.notify_content = AsyncMock(return_value=True)
+    watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+    watcher._bootstrapped = True
+
+    dashboard = {
+        "reign": {"members": [{"king_version": 2, "model_uri": "cyantest/king@v2"}]},
+        "current_eval": {
+            "eval_run_id": "eval-live-1",
+            "state": "GENERATING",
+            "model_uri": "other/challenger@v1",
+            "uid": 42,
+            "hotkey": "hk_chal",
+        },
+        "eval_runs": [],
+    }
+
+    session = _mock_session_no_existing()
+    with (
+        patch("app.notifications.watcher.fetch_dashboard", return_value=dashboard),
+        patch(
+            "app.notifications.watcher.fetch_subnet_economics",
+            return_value={"registration_burn_tao": 1.5},
+        ),
+    ):
+        sent = await watcher.poll_subnet(session, 97)
+
+    assert sent >= 1
+    alert = dispatcher.notify_content.await_args.args[1]
+    assert alert.kind == "duel_new"
+
+
+@pytest.mark.asyncio
+async def test_watcher_reg_fee_skips_already_below_at_bootstrap():
+    settings = Settings(
+        notifications_enabled=True,
+        default_subnet=97,
+        notification_reg_fee_threshold_tao=0.75,
+    )
+    dispatcher = NotificationDispatcher(settings)
+    dispatcher.arm()
+    dispatcher.notify_content = AsyncMock(return_value=True)
+    watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+
+    dashboard = {
+        "reign": {"members": [{"king_version": 1, "model_uri": "cyantest/model@v1"}]},
+        "current_eval": None,
+        "eval_runs": [],
+    }
+    session = _mock_session_no_existing()
+    with (
+        patch("app.notifications.watcher.fetch_dashboard", return_value=dashboard),
+        patch(
+            "app.notifications.watcher.fetch_subnet_economics",
+            return_value={"registration_burn_tao": 0.5},
+        ),
+    ):
+        await watcher.bootstrap(session)
+        sent = await watcher.poll_subnet(session, 97)
+
+    assert watcher._reg_fee_below is True
+    assert sent == 0
+    dispatcher.notify_content.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_watcher_emits_crown_won():
     settings = Settings(notifications_enabled=True, default_subnet=97)
     dispatcher = NotificationDispatcher(settings)
+    dispatcher.arm()
     dispatcher.notify_content = AsyncMock(return_value=True)
     watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
     watcher._bootstrapped = True
@@ -232,6 +344,7 @@ async def test_watcher_reg_fee_below_threshold():
         notification_reg_fee_threshold_tao=0.75,
     )
     dispatcher = NotificationDispatcher(settings)
+    dispatcher.arm()
     dispatcher.notify_content = AsyncMock(return_value=True)
     watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
     watcher._bootstrapped = True
@@ -266,6 +379,7 @@ async def test_watcher_reg_fee_skips_above_threshold():
         notification_reg_fee_threshold_tao=0.75,
     )
     dispatcher = NotificationDispatcher(settings)
+    dispatcher.arm()
     dispatcher.notify_content = AsyncMock(return_value=True)
     watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
     watcher._bootstrapped = True

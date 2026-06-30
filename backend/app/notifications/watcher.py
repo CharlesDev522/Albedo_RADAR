@@ -1,4 +1,4 @@
-"""Poll Albedo dashboard and subnet economics for crown / reg-fee alerts."""
+"""Poll Albedo dashboard and subnet economics for duel / crown / reg-fee alerts."""
 
 from __future__ import annotations
 
@@ -13,8 +13,11 @@ from app.integrations.albedo_dashboard import fetch_dashboard
 from app.integrations.market_client import fetch_subnet_economics
 from app.notifications.dispatcher import NotificationDispatcher
 from app.notifications.messages import (
+    _duel_participant_detail,
     build_crown_lost_alert,
     build_crown_won_alert,
+    build_duel_new_alert,
+    build_king_defended_alert,
     build_reg_fee_low_alert,
 )
 
@@ -35,8 +38,16 @@ def _crown_won_source_key(run: dict[str, Any]) -> str:
     return f"crown_won:{eval_id or run.get('finished_at')}:{run.get('model_uri')}"
 
 
+def _duel_new_source_key(eval_id: str) -> str:
+    return f"duel_new:{eval_id}"
+
+
+def _king_defended_source_key(eval_id: str) -> str:
+    return f"king_defended:{eval_id}"
+
+
 class NotificationWatcher:
-    """Stateful poller for crown transitions and registration burn threshold."""
+    """Stateful poller for duels, crown transitions, and registration burn threshold."""
 
     def __init__(
         self,
@@ -49,9 +60,10 @@ class NotificationWatcher:
         self._last_king_uri: str | None = None
         self._reg_fee_below: bool = False
         self._bootstrapped: bool = False
+        self._last_live_eval_id: str | None = None
 
     async def bootstrap(self, session: AsyncSession) -> None:
-        """Seed crown state without replaying historical coronations on fresh install."""
+        """Seed dashboard state so only post-startup changes notify Slack."""
         if self._bootstrapped or not self.dispatcher.enabled:
             return
         netuid = self.settings.default_subnet
@@ -62,8 +74,20 @@ class NotificationWatcher:
             return
 
         for run in dashboard.get("eval_runs") or []:
-            if isinstance(run, dict) and run.get("coronated"):
+            if not isinstance(run, dict):
+                continue
+            eval_id = run.get("eval_run_id") or run.get("id")
+            if run.get("coronated"):
                 self.dispatcher.mark_seen(_crown_won_source_key(run))
+            if eval_id and run.get("finished_at") and not run.get("challenger_won"):
+                self.dispatcher.mark_seen(_king_defended_source_key(str(eval_id)))
+
+        current_eval = dashboard.get("current_eval") or {}
+        if isinstance(current_eval, dict):
+            live_id = current_eval.get("eval_run_id")
+            if live_id:
+                self._last_live_eval_id = str(live_id)
+                self.dispatcher.mark_seen(_duel_new_source_key(self._last_live_eval_id))
 
         reign = dashboard.get("reign") or {}
         members = reign.get("members") or []
@@ -73,11 +97,22 @@ class NotificationWatcher:
             self._last_king_version = int(current_version)
             self._last_king_uri = current.get("model_uri")
 
+        threshold = self.settings.notification_reg_fee_threshold_tao
+        try:
+            econ = await fetch_subnet_economics(netuid, settings=self.settings)
+            burn = econ.get("registration_burn_tao")
+            if burn is not None and float(burn) < threshold:
+                self._reg_fee_below = True
+        except Exception:
+            logger.debug("notification bootstrap: reg fee seed skipped", exc_info=True)
+
         self._bootstrapped = True
         logger.info(
-            "notification bootstrap SN%d king=v%s",
+            "notification bootstrap SN%d king=v%s live_duel=%s reg_below=%s",
             netuid,
             self._last_king_version,
+            self._last_live_eval_id,
+            self._reg_fee_below,
         )
 
     async def poll_subnet(self, session: AsyncSession, netuid: int) -> int:
@@ -86,61 +121,77 @@ class NotificationWatcher:
         if not self._bootstrapped:
             await self.bootstrap(session)
         sent = 0
-        sent += await self._poll_albedo_crown(session, netuid)
+        sent += await self._poll_albedo_duels(session, netuid)
         sent += await self._poll_reg_fee(session, netuid)
         return sent
 
-    async def _poll_albedo_crown(self, session: AsyncSession, netuid: int) -> int:
+    async def _poll_albedo_duels(self, session: AsyncSession, netuid: int) -> int:
         if netuid != self.settings.default_subnet:
             return 0
         try:
             dashboard = await fetch_dashboard(settings=self.settings)
         except Exception:
-            logger.warning("crown notification: dashboard fetch failed", exc_info=True)
+            logger.warning("duel notification: dashboard fetch failed", exc_info=True)
             return 0
 
         sent = 0
         reign = dashboard.get("reign") or {}
         members = reign.get("members") or []
-        current = members[0] if members else {}
-        current_version = current.get("king_version")
-        current_uri = current.get("model_uri")
+        reign_king = members[0] if members else {}
+        current_version = reign_king.get("king_version")
+        current_uri = reign_king.get("model_uri")
+
+        sent += await self._poll_duel_new(session, netuid, dashboard, reign_king)
 
         for run in dashboard.get("eval_runs") or []:
-            if not isinstance(run, dict) or not run.get("coronated"):
+            if not isinstance(run, dict):
                 continue
-            source_key = _crown_won_source_key(run)
-            if self.dispatcher.is_seen(source_key):
+            eval_id = run.get("eval_run_id") or run.get("id")
+
+            if run.get("coronated"):
+                source_key = _crown_won_source_key(run)
+                if self.dispatcher.is_seen(source_key):
+                    continue
+                repo = _repo_from_uri(run.get("model_uri"))
+                king = run.get("king") or {}
+                detail = _duel_participant_detail(run, repo_from_uri=_repo_from_uri)
+                detail.update(
+                    {
+                        "defeated_king_version": run.get("defeated_king_version"),
+                        "challenger_won": run.get("challenger_won"),
+                    }
+                )
+                alert = build_crown_won_alert(
+                    netuid=netuid,
+                    source_key=source_key,
+                    detail=detail,
+                    repo=repo,
+                    model_uri=run.get("model_uri"),
+                    king_version=run.get("king_version"),
+                    defeated_king_version=run.get("defeated_king_version"),
+                )
+                if await self.dispatcher.notify_content(session, alert):
+                    sent += 1
                 continue
 
-            eval_id = run.get("eval_run_id") or run.get("id")
-            repo = _repo_from_uri(run.get("model_uri"))
-            king = run.get("king") or {}
-            detail = {
-                "eval_run_id": eval_id,
-                "repo": repo,
-                "namespace": run.get("namespace") or (repo.split("/")[0] if repo else None),
-                "model_uri": run.get("model_uri"),
-                "uid": run.get("uid") or king.get("uid"),
-                "hotkey": run.get("hotkey") or king.get("hotkey"),
-                "coldkey": run.get("coldkey") or king.get("coldkey"),
-                "king_version": run.get("king_version"),
-                "defeated_king_version": run.get("defeated_king_version"),
-                "win_margin": run.get("win_margin"),
-                "finished_at": run.get("finished_at"),
-                "challenger_won": run.get("challenger_won"),
-            }
-            alert = build_crown_won_alert(
-                netuid=netuid,
-                source_key=source_key,
-                detail=detail,
-                repo=repo,
-                model_uri=run.get("model_uri"),
-                king_version=run.get("king_version"),
-                defeated_king_version=run.get("defeated_king_version"),
-            )
-            if await self.dispatcher.notify_content(session, alert):
-                sent += 1
+            if (
+                eval_id
+                and run.get("finished_at")
+                and not run.get("challenger_won")
+            ):
+                source_key = _king_defended_source_key(str(eval_id))
+                if self.dispatcher.is_seen(source_key):
+                    continue
+                repo = _repo_from_uri(run.get("model_uri"))
+                detail = _duel_participant_detail(run, repo_from_uri=_repo_from_uri)
+                alert = build_king_defended_alert(
+                    netuid=netuid,
+                    source_key=source_key,
+                    detail=detail,
+                    repo=repo,
+                )
+                if await self.dispatcher.notify_content(session, alert):
+                    sent += 1
 
         if (
             self._last_king_version is not None
@@ -171,6 +222,37 @@ class NotificationWatcher:
             self._last_king_uri = current_uri
 
         return sent
+
+    async def _poll_duel_new(
+        self,
+        session: AsyncSession,
+        netuid: int,
+        dashboard: dict[str, Any],
+        reign_king: dict[str, Any],
+    ) -> int:
+        current_eval = dashboard.get("current_eval")
+        if not isinstance(current_eval, dict):
+            return 0
+        eval_id = current_eval.get("eval_run_id")
+        if not eval_id:
+            return 0
+        eval_id = str(eval_id)
+        source_key = _duel_new_source_key(eval_id)
+        if self.dispatcher.is_seen(source_key):
+            self._last_live_eval_id = eval_id
+            return 0
+
+        alert = build_duel_new_alert(
+            netuid=netuid,
+            source_key=source_key,
+            current_eval=current_eval,
+            repo_from_uri=_repo_from_uri,
+            reign_king=reign_king,
+        )
+        if await self.dispatcher.notify_content(session, alert):
+            self._last_live_eval_id = eval_id
+            return 1
+        return 0
 
     async def _poll_reg_fee(self, session: AsyncSession, netuid: int) -> int:
         threshold = self.settings.notification_reg_fee_threshold_tao
