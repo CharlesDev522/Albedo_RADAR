@@ -10,6 +10,7 @@ class MinerIdentity:
     coldkey: str | None
     repo: str | None
     uid: int | None
+    commit_block: int | None = None
 
 
 @dataclass
@@ -40,6 +41,7 @@ def build_miner_lookup(commits: list) -> MinerLookup:
             coldkey=getattr(commit, "coldkey", None),
             repo=getattr(commit, "repo", None),
             uid=getattr(commit, "uid", None),
+            commit_block=getattr(commit, "commit_block", None),
         )
         hotkey = getattr(commit, "hotkey", None)
         if hotkey:

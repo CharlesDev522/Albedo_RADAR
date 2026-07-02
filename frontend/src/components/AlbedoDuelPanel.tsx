@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import RepoCrownAnalysisPanel from "@/components/RepoCrownAnalysisPanel";
+import AlbedoEvalQueueOverviewPanel from "@/components/AlbedoEvalQueueOverview";
+import AlbedoEvalFailsPanel from "@/components/AlbedoEvalFailsPanel";
 import {
   api,
   hippiusModelUrl,
@@ -10,6 +12,7 @@ import {
   type AlbedoAnalysisOverview,
   type AlbedoDuelJudgeVote,
   type AlbedoDuelSummary,
+  type AlbedoEvalQueueOverview,
   type AlbedoJudgeDetail,
   type AlbedoKingTenure,
   type AlbedoWinRateRow,
@@ -18,7 +21,8 @@ import { useSubnet } from "@/lib/useSubnet";
 import { usePageVisibility } from "@/lib/usePageVisibility";
 
 const POLL_MS = 30_000;
-type Section = "overview" | "judges" | "kings" | "duels";
+const QUEUE_POLL_MS = 8_000;
+type Section = "overview" | "judges" | "kings" | "duels" | "dq";
 
 const JUDGE_COLORS: Record<string, string> = {
   "glm-5.1": "border-cyan-500/40 bg-cyan-500/10 text-cyan-200",
@@ -76,6 +80,7 @@ function SectionTabs({
 }) {
   const tabs: { id: Section; label: string }[] = [
     { id: "overview", label: "Overview" },
+    { id: "dq", label: "DQ" },
     { id: "judges", label: "Judges" },
     { id: "kings", label: "Kings & rewards" },
     { id: "duels", label: "Duel feed" },
@@ -337,9 +342,12 @@ export default function AlbedoDuelPanel() {
   const pageVisible = usePageVisibility();
   const panelActive = view === "duels" && pageVisible;
   const [data, setData] = useState<AlbedoAnalysisOverview | null>(null);
+  const [queueData, setQueueData] = useState<AlbedoEvalQueueOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("overview");
+
+  const queuePollActive = panelActive && (section === "overview" || section === "dq");
 
   const refresh = useCallback(async (forceRefresh = false) => {
     try {
@@ -353,12 +361,27 @@ export default function AlbedoDuelPanel() {
     }
   }, [subnet]);
 
+  const refreshQueue = useCallback(async (forceRefresh = false) => {
+    try {
+      setQueueData(await api.getAlbedoEvalQueue(subnet, forceRefresh));
+    } catch {
+      /* non-critical — overview still works */
+    }
+  }, [subnet]);
+
   useEffect(() => {
     if (!panelActive) return;
     void refresh(false);
     const id = setInterval(() => void refresh(true), POLL_MS);
     return () => clearInterval(id);
   }, [panelActive, refresh]);
+
+  useEffect(() => {
+    if (!queuePollActive) return;
+    void refreshQueue(false);
+    const id = setInterval(() => void refreshQueue(true), QUEUE_POLL_MS);
+    return () => clearInterval(id);
+  }, [queuePollActive, refreshQueue]);
 
   const judgeOrder = useMemo(() => {
     const fromApi = (data?.judge_details ?? []).map((j) => j.short_name);
@@ -413,6 +436,8 @@ export default function AlbedoDuelPanel() {
 
       {section === "overview" && (
         <>
+          {queueData && <AlbedoEvalQueueOverviewPanel data={queueData} />}
+
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {[
               { label: "Challenger wins", value: String(data.challenger_wins), accent: "text-emerald-300" },
@@ -420,7 +445,10 @@ export default function AlbedoDuelPanel() {
               { label: "Challenger win %", value: fmtPct(data.challenger_win_pct) },
               { label: "Avg margin", value: fmtMargin(data.avg_win_margin) },
               { label: "Avg ch / k score", value: `${fmtScore(data.avg_challenger_score)} / ${fmtScore(data.avg_king_score)}` },
-              { label: "Queue", value: String(data.queue_length) },
+              {
+                label: "Queue",
+                value: String(queueData?.queue_length ?? data.queue_length),
+              },
             ].map((kpi) => (
               <div key={kpi.label} className="panel px-2.5 py-2">
                 <p className="text-[9px] uppercase tracking-wide text-zinc-500">{kpi.label}</p>
@@ -450,6 +478,11 @@ export default function AlbedoDuelPanel() {
             </section>
           </div>
         </>
+      )}
+
+      {section === "dq" && queueData && <AlbedoEvalFailsPanel data={queueData} />}
+      {section === "dq" && !queueData && (
+        <div className="panel p-4 text-[10px] text-zinc-500">Loading DQ data…</div>
       )}
 
       {section === "judges" && (

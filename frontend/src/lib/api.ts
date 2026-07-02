@@ -538,6 +538,61 @@ export interface AlbedoPipelineStage {
   detail?: string | null;
 }
 
+export interface AlbedoEvalParticipant {
+  position?: number | null;
+  uid?: number | null;
+  hotkey?: string | null;
+  repo?: string | null;
+  model_uri?: string | null;
+  model_name?: string | null;
+  namespace?: string | null;
+  state?: string | null;
+  submission_id?: string | null;
+  eval_run_id?: string | null;
+  started_at?: string | null;
+  updated_at?: string | null;
+  commit_block?: number | null;
+}
+
+export interface AlbedoPipelineBucket {
+  stage: string;
+  label: string;
+  running_count: number;
+  queued_count: number;
+  running: AlbedoEvalParticipant[];
+  queued: AlbedoEvalParticipant[];
+}
+
+export interface AlbedoEvalFail {
+  submission_id?: string | null;
+  eval_run_id?: string | null;
+  uid?: number | null;
+  hotkey?: string | null;
+  repo?: string | null;
+  model_uri?: string | null;
+  state?: string | null;
+  fault_class?: string | null;
+  fault_code?: string | null;
+  fault_message?: string | null;
+  updated_at?: string | null;
+}
+
+export interface AlbedoEvalQueueOverview {
+  subnet: number;
+  source_url: string;
+  updated_at?: string | null;
+  dashboard_updated_at?: string | null;
+  state_updated_at?: string | null;
+  current_eval?: AlbedoCurrentEval | null;
+  queue: AlbedoEvalParticipant[];
+  pipeline: AlbedoPipelineBucket[];
+  fails: AlbedoEvalFail[];
+  fail_counts_by_class: Record<string, number>;
+  queue_length: number;
+  fail_count: number;
+  note: string;
+}
+
 export interface AlbedoReignSlotHolder {
   key: string;
   label: string;
@@ -807,6 +862,11 @@ export const api = {
   },
   getAlbedoAnalysis: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
     fetchApi<AlbedoAnalysisOverview>(`/albedo/analysis?subnet=${subnet}`, { forceRefresh }),
+  getAlbedoEvalQueue: (subnet = DEFAULT_SUBNET, forceRefresh = false, failLimit = 100) =>
+    fetchApi<AlbedoEvalQueueOverview>(
+      `/albedo/eval-queue?subnet=${subnet}&fail_limit=${failLimit}`,
+      { forceRefresh }
+    ),
   getAlbedoLiveDuel: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
     fetchApi<AlbedoLiveDuel>(`/albedo/live-duel?subnet=${subnet}`, { forceRefresh }),
 };

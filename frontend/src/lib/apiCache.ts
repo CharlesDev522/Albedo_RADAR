@@ -9,6 +9,7 @@ const inflight = new Map<string, Promise<unknown>>();
 /** Path prefix → stale-while-revalidate TTL (client only). */
 const SWR_TTL_MS: Record<string, number> = {
   "/albedo/analysis": 25_000,
+  "/albedo/eval-queue": 8_000,
   "/albedo/live-duel": 8_000,
   "/repo-activity/overview": 15_000,
   "/repo-activity/repos": 15_000,

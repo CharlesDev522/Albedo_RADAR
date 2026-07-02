@@ -294,18 +294,23 @@ def _margin_bucket(margin: float) -> str:
 def _build_pipeline(state: dict[str, Any] | None) -> list[AlbedoPipelineStage]:
     if not state:
         return []
-    stages: list[AlbedoPipelineStage] = []
-    for key, value in state.items():
-        if not isinstance(value, dict):
-            continue
-        stages.append(
+    stages = state.get("stages") or {}
+    counts = state.get("counts") or {}
+    result: list[AlbedoPipelineStage] = []
+    for stage_name in ("hippius_validate", "pre_eval", "eval"):
+        bucket = stages.get(stage_name) or {}
+        count_row = counts.get(stage_name) or {}
+        running = int(count_row.get("running") or len(bucket.get("running") or []))
+        queued = int(count_row.get("queued") or len(bucket.get("queued") or []))
+        label = stage_name.replace("_", " ").title()
+        result.append(
             AlbedoPipelineStage(
-                stage=key,
-                status=value.get("state") or value.get("status"),
-                detail=value.get("detail") or value.get("message"),
+                stage=stage_name,
+                status=f"{running} running, {queued} queued",
+                detail=label,
             )
         )
-    return stages
+    return result
 
 
 def _solo_dissenter(votes: dict[str, bool]) -> str | None:
