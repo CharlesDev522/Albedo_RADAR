@@ -65,12 +65,6 @@ class Settings(BaseSettings):
     huggingface_api_url: str = "https://huggingface.co/api"
     repo_track_interval_seconds: int = 60
     repo_track_revision: str = "main"
-    priority_miner_namespaces: list[str] = [
-        "cyantest",
-        "booksome",
-        "divinequest",
-    ]
-    priority_challenger_top_n: int = 10
 
     # Notifications (Slack)
     notifications_enabled: bool = True

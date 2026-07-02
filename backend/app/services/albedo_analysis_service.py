@@ -1162,7 +1162,6 @@ def build_analysis_overview(
         note=(
             "Live duel data from Hippius Albedo dashboard JSON (eval_runs + reign chain)."
             + lookup_note
-            + f" {repo_crown_analysis.crown_history_coverage_note}"
         ),
     )
 

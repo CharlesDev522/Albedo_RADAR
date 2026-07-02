@@ -1,7 +1,6 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import PriorityMinersPanel from "@/components/PriorityMinersPanel";
 import LatestHippiusReposPanel from "@/components/LatestHippiusReposPanel";
 import {
   api,
@@ -12,7 +11,6 @@ import {
   shortHash,
   shortRepo,
   type HippiusLatestRepo,
-  type PriorityMinerStatus,
   type RepoActivityEvent,
   type RepoActivityOverview,
   type RepoTrackEntry,
@@ -107,8 +105,6 @@ function trackSourceLabel(source: string | null | undefined): string | null {
       return "slot · hub pending";
     case "hub_poll":
       return "hub polled";
-    case "priority_miner":
-      return "priority watch";
     case "commitment":
       return "on-chain";
     default:
@@ -126,8 +122,6 @@ function trackSourceColor(source: string | null | undefined): string {
       return "text-lime-300 border-lime-500/30 bg-lime-500/10";
     case "hub_poll":
       return "text-sky-300 border-sky-500/30 bg-sky-500/10";
-    case "priority_miner":
-      return "text-fuchsia-300 border-fuchsia-500/30 bg-fuchsia-500/10";
     default:
       return "text-zinc-400 border-zinc-600 bg-zinc-800/30";
   }
@@ -138,7 +132,6 @@ export default function RepoActivityPanel() {
   const pageVisible = usePageVisibility();
   const panelActive = view === "activity" && pageVisible;
   const [overview, setOverview] = useState<RepoActivityOverview | null>(null);
-  const [priorityMiners, setPriorityMiners] = useState<PriorityMinerStatus[]>([]);
   const [hippiusLatest, setHippiusLatest] = useState<HippiusLatestRepo[]>([]);
   const [hippiusIndexTotal, setHippiusIndexTotal] = useState<number | null>(null);
   const [tracks, setTracks] = useState<RepoTrackEntry[]>([]);
@@ -157,17 +150,15 @@ export default function RepoActivityPanel() {
 
   const refresh = useCallback(async (forceRefresh = false) => {
     try {
-      const [ov, tr, fd, pm, latest] = await Promise.all([
+      const [ov, tr, fd, latest] = await Promise.all([
         api.getRepoActivityOverview(subnet, forceRefresh),
         api.getRepoTracks(subnet, familyParam, undefined, forceRefresh),
         api.getRepoActivityFeed(subnet, { family: familyParam, limit: 60, forceRefresh }),
-        api.getPriorityMiners(subnet, forceRefresh),
         api.getHippiusLatestRepos(TRACKED_REPOS_PREVIEW, forceRefresh),
       ]);
       setOverview(ov);
       setTracks(tr);
       setFeed(fd);
-      setPriorityMiners(pm);
       setHippiusLatest(latest.repos);
       setHippiusIndexTotal(latest.total_indexed);
       setError(null);
@@ -236,8 +227,8 @@ export default function RepoActivityPanel() {
           <h2 className="text-[12px] font-semibold text-zinc-100">Model repo activity</h2>
           <p className="text-[10px] text-zinc-500 mt-0.5 max-w-2xl">
             Hub-first tracking: Qwen3.6-35B / Qwen3-4B repos from Hippius Hub index
-            (hub.hippius.com?q=albedo), chain slots, HF discovery, and priority miner namespaces —
-            polled on Hippius/HF in near real-time.
+            (hub.hippius.com?q=albedo), chain slots, and HF discovery — polled on
+            Hippius/HF in near real-time.
           </p>
         </div>
         <button
@@ -320,9 +311,8 @@ export default function RepoActivityPanel() {
       </div>
 
       {overview && overview.tracked_miners > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-13 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-12 gap-2">
           <Kpi label="repos tracked" value={String(overview.tracked_miners)} />
-          <Kpi label="priority" value={String(overview.priority_miner_count ?? 0)} accent="text-fuchsia-300" />
           <Kpi label="slot only" value={String(overview.slot_only_count ?? 0)} accent="text-amber-300" />
           <Kpi label="on-chain" value={String(overview.chain_committed_count ?? 0)} accent="text-lime-300" />
           <Kpi label="hub watches" value={String(overview.hub_watch_count ?? 0)} accent="text-violet-300" />
@@ -342,8 +332,6 @@ export default function RepoActivityPanel() {
         loading={loading}
         totalHint={hippiusIndexTotal}
       />
-
-      <PriorityMinersPanel miners={priorityMiners} loading={loading} />
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
         <section className="panel xl:col-span-5">

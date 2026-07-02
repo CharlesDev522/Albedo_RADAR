@@ -34,7 +34,6 @@ from app.integrations.model_registry import (
     normalize_digest,
     remote_digests_match,
 )
-from app.processing.priority_miner_discovery import discover_priority_miner_repos
 from app.processing.repo_watch_targets import (
     HUB_WATCH_PREFIX,
     RepoWatchTarget,
@@ -83,13 +82,11 @@ class RepoTrackBuilder:
 
             hub_repos = self._albedo_repos_from_hub_index(hub_index)
             hf_repos = await self._discover_hub_search_repos(http)
-            priority_repos = await self._discover_priority_miner_repos(http, hub_index=hub_index)
             targets = await discover_watch_targets(
                 session,
                 netuid,
                 extra_repos=hf_repos,
                 hippius_hub_repos=hub_repos,
-                priority_repos=priority_repos,
             )
             stats["unique_repos"] = len({t.repo for t in targets})
             stats["hub_watches"] = sum(1 for t in targets if is_hub_watch_hotkey(t.hotkey))
@@ -189,22 +186,6 @@ class RepoTrackBuilder:
         except Exception:
             logger.exception("hub search discovery failed")
         return list(dict.fromkeys(repos))
-
-    async def _discover_priority_miner_repos(
-        self,
-        client: httpx.AsyncClient,
-        *,
-        hub_index: dict[str, HippiusHubModel] | None = None,
-    ) -> list[str]:
-        try:
-            return await discover_priority_miner_repos(
-                settings=self.settings,
-                client=client,
-                hub_index=hub_index,
-            )
-        except Exception:
-            logger.exception("priority miner discovery failed")
-            return []
 
     async def _apply_hub_index_entry(
         self,

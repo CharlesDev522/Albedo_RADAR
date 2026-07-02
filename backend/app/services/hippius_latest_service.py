@@ -9,8 +9,11 @@ import httpx
 from app.chain_reader.albedo_model_family import FAMILY_QWEN36_35B, FAMILY_QWEN3_4B, infer_albedo_model_family
 from app.config import Settings, get_settings
 from app.integrations.hippius_hub_client import HippiusHubClient
-from app.processing.priority_miner_discovery import hippius_browse_url
 from app.schemas.repo_activity import HippiusLatestRepo
+
+
+def hippius_browse_url(repo: str, revision: str = "main") -> str:
+    return f"https://hub.hippius.com/models/{repo}/{revision}"
 
 
 async def fetch_latest_hippius_repos(
