@@ -11,17 +11,17 @@ from app.notifications.formatters import commit_alert_detail, repo_alert_detail,
 from app.notifications.kinds import AlertKind
 
 KIND_LABELS: dict[AlertKind, str] = {
-    "crown_won": "Crowned",
-    "crown_lost": "Crown Lost",
-    "duel_new": "New Duel",
+    "crown_won": "King Coronated",
+    "crown_lost": "King Dethroned",
+    "duel_new": "Albedo Eval Started",
     "king_defended": "King Defended",
-    "slot_new": "New Slot",
-    "slot_changed": "Slot Changed",
-    "commit_new": "New Commit",
-    "commit_updated": "Commit Updated",
-    "repo_new": "New Repo",
-    "repo_updated": "Repo Updated",
-    "reg_fee_low": "Low Reg Fee",
+    "slot_new": "UID Published Commitment",
+    "slot_changed": "UID Published Commitment",
+    "commit_new": "CommitmentOf Revealed",
+    "commit_updated": "CommitmentOf Changed",
+    "repo_new": "New Hippius Repo",
+    "repo_updated": "Hippius Manifest Updated",
+    "reg_fee_low": "Registration Burn Low",
 }
 
 # Ordered keys per kind for Slack detail lines (most important first).
@@ -121,13 +121,14 @@ def _short_digest(digest: str | None, n: int = 12) -> str:
 
 def build_commit_new_alert(commit: Commit) -> AlertContent:
     repo = commit.commit_payload.get("repo", "?")
+    version = commit.commit_payload.get("version", "pipe")
     detail = commit_alert_detail(commit)
     return AlertContent(
         kind="commit_new",
-        title=f"[commit_new] uid {commit.uid} — {repo}",
+        title=f"[commit_new] uid {commit.uid} revealed {version} — {repo}",
         message=(
-            f"SN{commit.netuid} new v6 commit at block {commit.block_number} "
-            f"| digest {_short_digest(commit.commit_payload.get('digest'))}"
+            f"SN{commit.netuid} uid {commit.uid} revealed CommitmentOf ({version} pipe) "
+            f"at block {commit.block_number} | {_short_digest(commit.commit_payload.get('digest'))}"
         ),
         source_key=f"commit_new:{commit.netuid}:{commit.hotkey}:{commit.payload_hash}",
         detail=detail,
@@ -140,10 +141,10 @@ def build_commit_updated_alert(commit: Commit, *, previous_hash: str) -> AlertCo
     detail = commit_alert_detail(commit, previous_hash=previous_hash)
     return AlertContent(
         kind="commit_updated",
-        title=f"[commit_updated] uid {commit.uid} — {repo}",
+        title=f"[commit_updated] uid {commit.uid} changed CommitmentOf — {repo}",
         message=(
-            f"SN{commit.netuid} digest changed at block {commit.block_number} "
-            f"| {_short_digest(previous_hash)} → {_short_digest(commit.commit_payload.get('digest'))}"
+            f"SN{commit.netuid} uid {commit.uid} changed revealed model at block {commit.block_number} "
+            f"| digest {_short_digest(previous_hash)} → {_short_digest(commit.commit_payload.get('digest'))}"
         ),
         source_key=f"commit_updated:{commit.netuid}:{commit.hotkey}:{commit.payload_hash}",
         detail=detail,
@@ -154,10 +155,14 @@ def build_commit_updated_alert(commit: Commit, *, previous_hash: str) -> AlertCo
 def build_slot_new_alert(slot: SlotStatus, netuid: int) -> AlertContent:
     detail = slot_alert_detail(slot)
     model = slot.detail or "?"
+    pipe = slot.commitment_type.value
     return AlertContent(
         kind="slot_new",
-        title=f"[slot_new] uid {slot.uid} — new slot",
-        message=f"SN{netuid} slot purchased at block {slot.commit_block} · {model}",
+        title=f"[slot_new] uid {slot.uid} published {pipe} commitment",
+        message=(
+            f"SN{netuid} uid {slot.uid} went from no commitment to {pipe} pipe "
+            f"at block {slot.commit_block} · {model}"
+        ),
         source_key=f"slot_new:{netuid}:{slot.uid}:{slot.payload_hash or slot.commit_block}",
         detail=detail,
         subnet=netuid,
@@ -172,10 +177,14 @@ def build_slot_changed_alert(
 ) -> AlertContent:
     detail = slot_alert_detail(slot, previous=previous)
     model = slot.detail or "?"
+    pipe = slot.commitment_type.value
     return AlertContent(
         kind="slot_changed",
-        title=f"[slot_changed] uid {slot.uid} — new slot",
-        message=f"SN{netuid} slot purchased at block {slot.commit_block} · {model}",
+        title=f"[slot_changed] uid {slot.uid} published {pipe} commitment",
+        message=(
+            f"SN{netuid} uid {slot.uid} went from no commitment to {pipe} pipe "
+            f"at block {slot.commit_block} · {model}"
+        ),
         source_key=f"slot_changed:{netuid}:{slot.uid}:{slot.payload_hash or slot.commit_block}",
         detail=detail,
         subnet=netuid,
@@ -357,7 +366,7 @@ def build_duel_new_alert(
     return AlertContent(
         kind="duel_new",
         title=f"[duel_new] {label}",
-        message=f"SN{netuid} new duel started — vs king v{king.get('king_version', '?')}",
+        message=f"SN{netuid} Albedo eval started — challenger vs king v{king.get('king_version', '?')}",
         source_key=source_key,
         detail={k: v for k, v in detail.items() if v is not None},
         subnet=netuid,
@@ -378,8 +387,8 @@ def build_king_defended_alert(
         kind="king_defended",
         title=f"[king_defended] {label}",
         message=(
-            f"SN{netuid} duel finished — king defended"
-            f"{margin_s} (challenger lost)"
+            f"SN{netuid} eval finished — king defended"
+            f"{margin_s} (challenger lost eval)"
         ),
         source_key=source_key,
         detail=detail,

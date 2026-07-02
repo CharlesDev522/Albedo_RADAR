@@ -179,7 +179,8 @@ def test_commit_new_alert_kind_tag():
     assert alert.kind == "commit_new"
     assert alert.title.startswith("[commit_new]")
     assert "uid 12" in alert.title
-    assert "digest" in alert.message.lower()
+    assert "revealed" in alert.title.lower()
+    assert "sha256" in alert.message.lower()
 
 
 def test_format_alert_body_orders_detail():
