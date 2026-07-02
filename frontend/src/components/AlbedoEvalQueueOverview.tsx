@@ -133,15 +133,6 @@ export default function AlbedoEvalQueueOverviewPanel({
   data: AlbedoEvalQueueOverview;
   compact?: boolean;
 }) {
-  const evalProgress =
-    data.current_eval?.sample_count != null &&
-    data.current_eval.sample_count > 0 &&
-    data.current_eval.generated_sample_count != null
-      ? Math.round(
-          (data.current_eval.generated_sample_count / data.current_eval.sample_count) * 100
-        )
-      : null;
-
   return (
     <div className="space-y-3">
       <section className="panel px-3 py-2.5">
@@ -166,10 +157,7 @@ export default function AlbedoEvalQueueOverviewPanel({
 
         {data.current_eval && (
           <div className="mb-3 rounded border border-sky-500/25 bg-sky-500/5 px-2.5 py-2 text-[10px]">
-            <p className="text-sky-200 font-medium">
-              Active eval · {data.current_eval.state}
-              {evalProgress != null && <span className="text-zinc-400 font-normal"> · {evalProgress}% samples</span>}
-            </p>
+            <p className="text-sky-200 font-medium">Active eval · {data.current_eval.state}</p>
             <p className="text-zinc-500 mt-0.5 truncate">
               {repoLabel(data.current_eval)} · uid {data.current_eval.uid}
             </p>

@@ -89,8 +89,6 @@ export default function LiveDuelBanner() {
 
   if (!live?.is_active) return null;
 
-  const progress = live.progress_pct;
-  const hasProgress = progress != null && live.sample_count != null && live.sample_count > 0;
   const elapsed = fmtElapsed(live.elapsed_seconds);
 
   return (
@@ -104,7 +102,7 @@ export default function LiveDuelBanner() {
             </span>
             <div>
               <p className="text-[11px] font-semibold text-sky-200 leading-tight">Live duel</p>
-              <p className="text-[9px] text-zinc-500 leading-tight">{live.phase_label}</p>
+              <p className="text-[9px] text-zinc-500 leading-tight sm:hidden">{live.phase_label}</p>
             </div>
           </div>
 
@@ -116,36 +114,28 @@ export default function LiveDuelBanner() {
             <FighterCard role="King" tone="king" participant={live.king} />
           </div>
 
-          {hasProgress && (
-            <div className="w-full sm:w-36 shrink-0">
-              <div className="flex justify-between text-[8px] text-zinc-500 mb-1">
-                <span>Samples</span>
-                <span className="mono">
-                  {live.generated_sample_count}/{live.sample_count}
-                </span>
-              </div>
-              <div className="h-1 rounded-full bg-zinc-800 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-sky-400/90 transition-all duration-700"
-                  style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
-                />
-              </div>
-              <p className="text-[8px] text-zinc-600 mono mt-0.5 text-right">{progress.toFixed(0)}%</p>
+          <div className="flex flex-col items-end shrink-0 ml-auto min-w-[88px]">
+            {elapsed ? (
+              <p className="text-[22px] sm:text-[26px] font-semibold text-zinc-50 mono leading-none tracking-tight tabular-nums">
+                {elapsed}
+              </p>
+            ) : (
+              <p className="text-[14px] font-medium text-zinc-400 leading-none">In progress</p>
+            )}
+            <p className="text-[10px] text-sky-300/90 mt-1.5 text-right max-w-[140px] leading-snug hidden sm:block">
+              {live.phase_label}
+            </p>
+            <div className="flex flex-wrap justify-end gap-x-2 gap-y-0.5 mt-1 text-[9px] text-zinc-500">
+              {live.eval_queue_depth > 0 && <span>{live.eval_queue_depth} queued</span>}
+              <a
+                href={live.dashboard_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sky-400 hover:underline"
+              >
+                dashboard ↗
+              </a>
             </div>
-          )}
-
-          <div className="flex flex-col items-end gap-0.5 text-[9px] text-zinc-500 shrink-0 ml-auto">
-            {elapsed && <span>{elapsed}</span>}
-            {live.pipeline_stage && <span className="text-zinc-600">{live.pipeline_stage}</span>}
-            {live.eval_queue_depth > 0 && <span>{live.eval_queue_depth} queued</span>}
-            <a
-              href={live.dashboard_url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-sky-400 hover:underline"
-            >
-              dashboard ↗
-            </a>
           </div>
         </div>
       </div>
