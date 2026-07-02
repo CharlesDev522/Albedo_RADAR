@@ -71,7 +71,6 @@ class RepoActivityOverview(BaseModel):
     huggingface_count: int = 0
     pending_hub_poll: int = 0
     hub_watch_count: int = 0
-    priority_miner_count: int = 0
     slot_only_count: int = 0
     chain_committed_count: int = 0
 
@@ -104,44 +103,3 @@ class HippiusLatestRepo(BaseModel):
 class HippiusLatestResponse(BaseModel):
     total_indexed: int
     repos: list[HippiusLatestRepo] = Field(default_factory=list)
-
-
-class PriorityMinerRepoStatus(BaseModel):
-    repo: str
-    model_family: str | None = None
-    hippius_url: str | None = None
-    huggingface_url: str | None = None
-    hippius_tracked: bool = False
-    hippius_digest: str | None = None
-    hippius_updated_at: datetime | None = None
-    hippius_commit_message: str | None = None
-    hippius_pending: bool = True
-    huggingface_tracked: bool = False
-    huggingface_digest: str | None = None
-    huggingface_updated_at: datetime | None = None
-    huggingface_commit_message: str | None = None
-    huggingface_pending: bool = True
-    huggingface_exists: bool = False
-    duel_count: int = 0
-    challenger_wins: int = 0
-    challenger_win_pct: float | None = None
-    coronations: int = 0
-    is_top_repo: bool = False
-    last_event_type: str | None = None
-    last_event_at: datetime | None = None
-
-
-class PriorityMinerStatus(BaseModel):
-    namespace: str
-    watch_source: str = "pinned"
-    challenger_rank: int | None = None
-    duel_count: int = 0
-    challenger_wins: int = 0
-    challenger_win_pct: float | None = None
-    coronations: int = 0
-    discovered_repos: int = 0
-    hippius_tracked_count: int = 0
-    huggingface_tracked_count: int = 0
-    updates_24h: int = 0
-    last_activity_at: datetime | None = None
-    repos: list[PriorityMinerRepoStatus] = Field(default_factory=list)

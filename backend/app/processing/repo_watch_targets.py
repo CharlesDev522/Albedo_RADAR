@@ -22,7 +22,6 @@ from app.db.models import (
     MinerSlotStatus,
 )
 from app.integrations.model_registry import RepoHost, infer_repo_host
-from app.processing.priority_miner_discovery import discover_priority_miner_repos, priority_hosts
 
 HUB_WATCH_PREFIX = "hub:"
 
@@ -31,7 +30,6 @@ SOURCE_SLOT = "slot"
 SOURCE_HISTORY = "history"
 SOURCE_HUB_SEARCH = "hub_search"
 SOURCE_KNOWN_TRACK = "known_track"
-SOURCE_PRIORITY_MINER = "priority_miner"
 
 
 @dataclass(frozen=True)
@@ -77,7 +75,6 @@ def _target_rank(source: str) -> int:
         SOURCE_COMMITMENT: 0,
         SOURCE_SLOT: 1,
         SOURCE_HISTORY: 2,
-        SOURCE_PRIORITY_MINER: 2,
         SOURCE_KNOWN_TRACK: 3,
         SOURCE_HUB_SEARCH: 4,
     }.get(source, 9)
@@ -89,7 +86,6 @@ async def discover_watch_targets(
     *,
     extra_repos: list[str] | None = None,
     hippius_hub_repos: list[str] | None = None,
-    priority_repos: list[str] | None = None,
 ) -> list[RepoWatchTarget]:
     """Merge on-chain, slot, history, DB, and hub-search repo targets."""
     by_key: dict[str, RepoWatchTarget] = {}
@@ -232,17 +228,5 @@ async def discover_watch_targets(
             source=SOURCE_HUB_SEARCH,
             preferred_host="hippius",
         )
-
-    for repo in priority_repos or []:
-        for host in priority_hosts():
-            _add(
-                repo,
-                hotkey=hub_watch_hotkey(repo, host),
-                uid=None,
-                coldkey=None,
-                chain_digest=None,
-                source=SOURCE_PRIORITY_MINER,
-                preferred_host=host,
-            )
 
     return list(by_key.values())

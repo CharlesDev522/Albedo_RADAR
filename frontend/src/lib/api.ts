@@ -234,7 +234,6 @@ export interface RepoActivityOverview {
   huggingface_count: number;
   pending_hub_poll: number;
   hub_watch_count?: number;
-  priority_miner_count?: number;
   slot_only_count?: number;
   chain_committed_count?: number;
 }
@@ -252,47 +251,6 @@ export interface HippiusLatestRepo {
   file_count?: number | null;
   total_size_bytes?: number | null;
   hub_url: string;
-}
-
-export interface PriorityMinerRepoStatus {
-  repo: string;
-  model_family?: string | null;
-  hippius_url?: string | null;
-  huggingface_url?: string | null;
-  hippius_tracked: boolean;
-  hippius_digest?: string | null;
-  hippius_updated_at?: string | null;
-  hippius_commit_message?: string | null;
-  hippius_pending: boolean;
-  huggingface_tracked: boolean;
-  huggingface_digest?: string | null;
-  huggingface_updated_at?: string | null;
-  huggingface_commit_message?: string | null;
-  huggingface_pending: boolean;
-  huggingface_exists: boolean;
-  duel_count: number;
-  challenger_wins: number;
-  challenger_win_pct?: number | null;
-  coronations: number;
-  is_top_repo: boolean;
-  last_event_type?: string | null;
-  last_event_at?: string | null;
-}
-
-export interface PriorityMinerStatus {
-  namespace: string;
-  watch_source: string;
-  challenger_rank?: number | null;
-  duel_count: number;
-  challenger_wins: number;
-  challenger_win_pct?: number | null;
-  coronations: number;
-  discovered_repos: number;
-  hippius_tracked_count: number;
-  huggingface_tracked_count: number;
-  updates_24h: number;
-  last_activity_at?: string | null;
-  repos: PriorityMinerRepoStatus[];
 }
 
 export interface RepoTrackEntry {
@@ -846,10 +804,6 @@ export const api = {
       forceRefresh: opts?.forceRefresh,
     });
   },
-  getPriorityMiners: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
-    fetchApi<PriorityMinerStatus[]>(`/repo-activity/priority-miners?subnet=${subnet}`, {
-      forceRefresh,
-    }),
   getHippiusLatestRepos: (limit = 10, forceRefresh = false) =>
     fetchApi<HippiusLatestResponse>(`/repo-activity/hippius-latest?limit=${limit}`, {
       forceRefresh,

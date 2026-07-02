@@ -106,9 +106,6 @@ def _commitment_to_entry(commit: MinerCommitment) -> RepoTrackEntry:
 
 
 def _hub_track_source(hotkey: str | None) -> str:
-    _repo, host = parse_hub_watch_hotkey(hotkey)
-    if host:
-        return "priority_miner"
     return "hub_watch"
 
 
