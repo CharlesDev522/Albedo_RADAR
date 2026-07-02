@@ -272,6 +272,9 @@ export default function RepoCrownAnalysisPanel({
             <span className="mono text-amber-300"> · {fmtTao(basis.daily_subnet_tao)}/day</span>
           )}
           <span className="text-zinc-600"> · {basis.note}</span>
+          <span className="block text-zinc-600 mt-0.5">
+            Crowns keyed by Hippius model path; coldkeys resolved from commitment history and miner records (not only active hotkeys).
+          </span>
         </div>
       )}
 

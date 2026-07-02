@@ -37,7 +37,7 @@ def _resolve_repo(
     repo = None
     commit_block = None
     if lookup and hotkey:
-        ident = lookup.resolve(hotkey=str(hotkey), uid=uid_i)
+        ident = lookup.resolve(hotkey=str(hotkey), uid=uid_i, model_uri=model_uri if isinstance(model_uri, str) else None)
         if ident:
             repo = ident.repo
             commit_block = ident.commit_block

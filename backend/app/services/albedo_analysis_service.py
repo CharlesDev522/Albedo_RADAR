@@ -99,8 +99,19 @@ def _resolve_repo(
     uid: int | None,
     namespace: str,
     model_name: str,
+    model_uri: str | None = None,
 ) -> tuple[str | None, str | None]:
-    ident = lookup.resolve(hotkey=hotkey, uid=uid) if lookup else None
+    ident = (
+        lookup.resolve(
+            hotkey=hotkey or None,
+            uid=uid,
+            model_uri=model_uri,
+            namespace=namespace,
+            model_name=model_name,
+        )
+        if lookup
+        else None
+    )
     repo = ident.repo if ident and ident.repo else (f"{namespace}/{model_name}" if namespace else None)
     coldkey = ident.coldkey if ident else None
     return repo, coldkey
@@ -195,13 +206,21 @@ def _duel_summary(
     k_ns, k_name, k_uri = parse_model_uri(king.get("model_uri"))
     uid = int(run.get("uid") or 0)
     king_uid = int(king["uid"]) if king.get("uid") is not None else None
-    repo, coldkey = _resolve_repo(lookup, hotkey=run.get("hotkey", ""), uid=uid, namespace=ns, model_name=name)
+    repo, coldkey = _resolve_repo(
+        lookup,
+        hotkey=run.get("hotkey", ""),
+        uid=uid,
+        namespace=ns,
+        model_name=name,
+        model_uri=run.get("model_uri"),
+    )
     king_repo, king_coldkey = _resolve_repo(
         lookup,
         hotkey=king.get("hotkey", ""),
         uid=king_uid,
         namespace=k_ns,
         model_name=k_name,
+        model_uri=king.get("model_uri"),
     )
     judge_votes = _build_judge_vote_rows(run)
     scores = [v.challenger_score for v in judge_votes]
@@ -245,7 +264,14 @@ def _duel_summary(
 def _reign_member(member: dict[str, Any], lookup: MinerLookup | None) -> AlbedoReignMember:
     ns, name, uri = parse_model_uri(member.get("model_uri"))
     uid = int(member.get("uid") or 0)
-    repo, coldkey = _resolve_repo(lookup, hotkey=member.get("hotkey", ""), uid=uid, namespace=ns, model_name=name)
+    repo, coldkey = _resolve_repo(
+        lookup,
+        hotkey=member.get("hotkey", ""),
+        uid=uid,
+        namespace=ns,
+        model_name=name,
+        model_uri=member.get("model_uri"),
+    )
     return AlbedoReignMember(
         king_version=int(member.get("king_version") or 0),
         model_uri=uri,
@@ -267,7 +293,14 @@ def _current_eval(raw: dict[str, Any] | None, lookup: MinerLookup | None) -> Alb
         return None
     ns, name, uri = parse_model_uri(raw.get("model_uri"))
     uid = int(raw.get("uid") or 0)
-    repo, coldkey = _resolve_repo(lookup, hotkey=raw.get("hotkey", ""), uid=uid, namespace=ns, model_name=name)
+    repo, coldkey = _resolve_repo(
+        lookup,
+        hotkey=raw.get("hotkey", ""),
+        uid=uid,
+        namespace=ns,
+        model_name=name,
+        model_uri=raw.get("model_uri"),
+    )
     return AlbedoCurrentEval(
         eval_run_id=raw.get("eval_run_id", ""),
         state=raw.get("state", ""),
@@ -558,7 +591,14 @@ def _build_king_tenures(
         namespace = reign_member.namespace if reign_member else coronation.namespace
         hotkey = reign_member.hotkey if reign_member else coronation.hotkey
         uid = reign_member.uid if reign_member else coronation.uid
-        repo, coldkey = _resolve_repo(lookup, hotkey=hotkey, uid=uid, namespace=namespace, model_name=model_name)
+        repo, coldkey = _resolve_repo(
+            lookup,
+            hotkey=hotkey,
+            uid=uid,
+            namespace=namespace,
+            model_name=model_name,
+            model_uri=model_uri,
+        )
         if coronation:
             repo = coronation.repo or repo
             coldkey = coronation.coldkey or coldkey
@@ -981,6 +1021,7 @@ def build_analysis_overview(
                 uid=d_uid,
                 namespace=d_ns,
                 model_name=d_name,
+                model_uri=defeated.get("model_uri"),
             )
             king_history.append(
                 AlbedoKingCoronation(
@@ -1070,7 +1111,10 @@ def build_analysis_overview(
 
     lookup_note = ""
     if miner_lookup and miner_lookup.by_hotkey:
-        lookup_note = f" Repo/coldkey merged from {len(miner_lookup.by_hotkey)} on-chain commits ({miner_lookup.coverage_pct}% with repo)."
+        lookup_note = (
+            f" Repo/coldkey from {len(miner_lookup.by_hotkey)} hotkeys"
+            f" ({len(miner_lookup.by_model_base)} model paths, historical + active commits)."
+        )
 
     return AlbedoAnalysisOverview(
         subnet=subnet,
