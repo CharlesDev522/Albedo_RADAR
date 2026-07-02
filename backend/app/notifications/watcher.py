@@ -20,6 +20,7 @@ from app.db.models import MinerCommitment, MinerSlotStatus, RepoActivityEvent
 from app.integrations.albedo_dashboard import fetch_dashboard
 from app.integrations.hippius_hub_client import HippiusHubClient
 from app.integrations.market_client import fetch_subnet_economics
+from app.services.albedo_crown_archive_service import sync_crowns_from_dashboard
 from app.notifications.dispatcher import NotificationDispatcher
 from app.notifications.messages import (
     _duel_participant_detail,
@@ -97,6 +98,12 @@ class NotificationWatcher:
         except Exception:
             logger.warning("notification bootstrap: dashboard fetch failed", exc_info=True)
             return
+
+        if session is not None:
+            try:
+                await sync_crowns_from_dashboard(session, netuid, dashboard)
+            except Exception:
+                logger.warning("crown archive bootstrap sync failed", exc_info=True)
 
         for run in dashboard.get("eval_runs") or []:
             if not isinstance(run, dict):
@@ -269,6 +276,11 @@ class NotificationWatcher:
         except Exception:
             logger.warning("duel notification: dashboard fetch failed", exc_info=True)
             return 0
+
+        try:
+            await sync_crowns_from_dashboard(session, netuid, dashboard)
+        except Exception:
+            logger.warning("crown archive sync failed", exc_info=True)
 
         sent = 0
         crown_won_sent = False

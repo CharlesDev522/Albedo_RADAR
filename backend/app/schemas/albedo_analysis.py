@@ -291,6 +291,10 @@ class AlbedoRepoCrownAnalysis(BaseModel):
     total_unique_coldkeys: int = 0
     grand_total_estimated_alpha: float | None = None
     grand_total_estimated_tao: float | None = None
+    earliest_crown_version: int | None = None
+    latest_crown_version: int | None = None
+    archived_crown_count: int = 0
+    crown_history_coverage_note: str = ""
 
 
 class AlbedoAnalysisOverview(BaseModel):

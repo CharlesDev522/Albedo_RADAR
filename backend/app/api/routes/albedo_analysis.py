@@ -31,7 +31,9 @@ async def albedo_analysis_overview(
     settings = get_settings()
     try:
         lookup = await _load_miner_lookup(db, subnet)
-        return await get_albedo_analysis_overview(subnet, settings=settings, miner_lookup=lookup)
+        return await get_albedo_analysis_overview(
+            subnet, settings=settings, miner_lookup=lookup, db=db
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=502,

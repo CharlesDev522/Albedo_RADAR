@@ -275,6 +275,9 @@ export default function RepoCrownAnalysisPanel({
           <span className="block text-zinc-600 mt-0.5">
             Crowns keyed by Hippius model path; coldkeys resolved from commitment history and miner records (not only active hotkeys).
           </span>
+          {analysis.crown_history_coverage_note && (
+            <span className="block text-amber-300/90 mt-1">{analysis.crown_history_coverage_note}</span>
+          )}
         </div>
       )}
 

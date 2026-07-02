@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 from statistics import mean, pstdev
 from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.integrations.albedo_dashboard import fetch_dashboard, fetch_state
@@ -38,7 +41,9 @@ from app.schemas.albedo_analysis import (
     AlbedoTimelinePoint,
     AlbedoWinRateRow,
 )
-from app.services.albedo_miner_lookup import MinerIdentity, MinerLookup, build_miner_lookup
+from app.services.albedo_miner_lookup import MinerLookup
+
+logger = logging.getLogger(__name__)
 
 MARGIN_BUCKETS: list[tuple[str, float, float]] = [
     ("≤ -20%", -1.0, -0.20),
@@ -945,6 +950,8 @@ def build_analysis_overview(
     source_url: str,
     miner_lookup: MinerLookup | None = None,
     reward_basis: AlbedoRewardBasis | None = None,
+    archived_king_history: list[AlbedoKingCoronation] | None = None,
+    archived_crown_count: int = 0,
 ) -> AlbedoAnalysisOverview:
     eval_runs: list[dict[str, Any]] = list(dashboard.get("eval_runs") or [])
     reign_members = [
@@ -1012,41 +1019,17 @@ def build_analysis_overview(
         if run.get("coronated"):
             for bucket, key in ((ns_stats, ns), (repo_stats, repo_key), (hk_stats, hk)):
                 bucket[key]["coronations"] += 1
-            defeated = run.get("king") or {}
-            d_ns, d_name, d_uri = parse_model_uri(defeated.get("model_uri"))
-            d_uid = int(defeated["uid"]) if defeated.get("uid") is not None else None
-            d_repo, d_coldkey = _resolve_repo(
-                miner_lookup,
-                hotkey=defeated.get("hotkey", ""),
-                uid=d_uid,
-                namespace=d_ns,
-                model_name=d_name,
-                model_uri=defeated.get("model_uri"),
-            )
-            king_history.append(
-                AlbedoKingCoronation(
-                    king_version=int(run.get("king_version") or 0),
-                    model_uri=summary.model_uri,
-                    model_name=summary.model_name,
-                    namespace=summary.namespace,
-                    repo=summary.repo,
-                    coldkey=summary.coldkey,
-                    hotkey=summary.hotkey,
-                    uid=summary.uid,
-                    finished_at=summary.finished_at,
-                    eval_run_id=summary.eval_run_id,
-                    score_challenger=summary.score_challenger,
-                    score_king=summary.score_king,
-                    win_margin=summary.win_margin,
-                    defeated_king_version=defeated.get("king_version"),
-                    defeated_model_uri=d_uri or None,
-                    defeated_model_name=d_name or None,
-                    defeated_namespace=d_ns or None,
-                    defeated_repo=d_repo,
-                    defeated_coldkey=d_coldkey,
-                )
-            )
+            from app.services.albedo_king_history import coronation_from_eval_run
 
+            cor = coronation_from_eval_run(run, miner_lookup)
+            if cor:
+                king_history.append(cor)
+
+    live_crown_count = len(king_history)
+    if archived_king_history:
+        from app.services.albedo_king_history import merge_king_histories
+
+        king_history = merge_king_histories(king_history, archived_king_history)
     king_history.sort(key=lambda k: k.king_version, reverse=True)
 
     def _sorted_rows(
@@ -1078,6 +1061,17 @@ def build_analysis_overview(
     king_tenures = _build_king_tenures(eval_runs, reign_members, king_history, updated_at, miner_lookup)
     repo_crown_analysis, crowns_by_coldkey = _build_repo_crown_analysis(
         king_history, reign_members, updated_at, repo_duel_stats=repo_stats, reward_basis=reward_basis
+    )
+    versions = sorted(c.king_version for c in king_history) if king_history else []
+    from app.services.albedo_king_history import crown_history_coverage_note
+
+    repo_crown_analysis.earliest_crown_version = versions[0] if versions else None
+    repo_crown_analysis.latest_crown_version = versions[-1] if versions else None
+    repo_crown_analysis.archived_crown_count = archived_crown_count
+    repo_crown_analysis.crown_history_coverage_note = crown_history_coverage_note(
+        merged=king_history,
+        live_count=live_crown_count,
+        archived_count=archived_crown_count,
     )
     crowns_by_repo = repo_crown_analysis.crowns_by_repo
 
@@ -1162,7 +1156,11 @@ def build_analysis_overview(
         timeline=timeline,
         pipeline=_build_pipeline(state),
         miner_lookup_coverage_pct=miner_lookup.coverage_pct if miner_lookup else None,
-        note="Live duel data from Hippius Albedo dashboard JSON (eval_runs + reign chain)." + lookup_note,
+        note=(
+            "Live duel data from Hippius Albedo dashboard JSON (eval_runs + reign chain)."
+            + lookup_note
+            + f" {repo_crown_analysis.crown_history_coverage_note}"
+        ),
     )
 
 
@@ -1171,6 +1169,7 @@ async def get_albedo_analysis_overview(
     *,
     settings: Settings | None = None,
     miner_lookup: MinerLookup | None = None,
+    db: AsyncSession | None = None,
 ) -> AlbedoAnalysisOverview:
     settings = settings or get_settings()
     source_url = f"{settings.albedo_dashboard_url.rstrip('/')}/data/dashboard.json"
@@ -1184,6 +1183,26 @@ async def get_albedo_analysis_overview(
         reward_basis = await fetch_crown_reward_basis(subnet, settings=settings)
     except Exception:
         reward_basis = AlbedoRewardBasis()
+
+    archived_history: list[AlbedoKingCoronation] = []
+    archived_count = 0
+    if db is not None:
+        try:
+            from app.services.albedo_crown_archive_service import (
+                backfill_crowns_from_alerts,
+                load_archived_king_history,
+                sync_crowns_from_dashboard,
+            )
+
+            await sync_crowns_from_dashboard(db, subnet, dashboard, miner_lookup=miner_lookup)
+            await backfill_crowns_from_alerts(db, subnet, miner_lookup=miner_lookup)
+            await db.commit()
+            archived_history = await load_archived_king_history(db, subnet, miner_lookup=miner_lookup)
+            archived_count = len(archived_history)
+        except Exception:
+            await db.rollback()
+            logger.exception("crown archive sync failed for subnet %s", subnet)
+
     return build_analysis_overview(
         dashboard,
         state=state_payload,
@@ -1191,4 +1210,6 @@ async def get_albedo_analysis_overview(
         source_url=source_url,
         miner_lookup=miner_lookup,
         reward_basis=reward_basis,
+        archived_king_history=archived_history,
+        archived_crown_count=archived_count,
     )

@@ -439,6 +439,43 @@ class RepoActivityEvent(Base):
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
 
+class AlbedoKingCrownRecord(Base):
+    """Archived king coronations — Hippius dashboard only keeps ~200 recent eval_runs."""
+
+    __tablename__ = "albedo_king_crowns"
+    __table_args__ = (
+        UniqueConstraint("subnet", "king_version", name="uq_albedo_king_crown_subnet_version"),
+        Index("ix_albedo_king_crown_subnet_finished", "subnet", "finished_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    subnet: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    king_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    eval_run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    model_uri: Mapped[str] = mapped_column(String(640), nullable=False)
+    model_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    namespace: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    repo: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    coldkey: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    hotkey: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    score_challenger: Mapped[float | None] = mapped_column(Float, nullable=True)
+    score_king: Mapped[float | None] = mapped_column(Float, nullable=True)
+    win_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+    defeated_king_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    defeated_model_uri: Mapped[str | None] = mapped_column(String(640), nullable=True)
+    defeated_model_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    defeated_namespace: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    defeated_repo: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    defeated_coldkey: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source: Mapped[str] = mapped_column(String(24), default="dashboard")
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class AlertNotification(Base):
     """Persisted alerts for Slack delivery and history."""
 

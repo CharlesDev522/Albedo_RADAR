@@ -66,6 +66,39 @@ MIGRATIONS: list[str] = [
       END IF;
     END $$
     """,
+    """
+    CREATE TABLE IF NOT EXISTS albedo_king_crowns (
+        id SERIAL PRIMARY KEY,
+        subnet INTEGER NOT NULL,
+        king_version INTEGER NOT NULL,
+        eval_run_id VARCHAR(128),
+        finished_at TIMESTAMPTZ NOT NULL,
+        model_uri VARCHAR(640) NOT NULL,
+        model_name VARCHAR(256),
+        namespace VARCHAR(256),
+        repo VARCHAR(512),
+        coldkey VARCHAR(64),
+        hotkey VARCHAR(64),
+        uid INTEGER,
+        score_challenger DOUBLE PRECISION,
+        score_king DOUBLE PRECISION,
+        win_margin DOUBLE PRECISION,
+        defeated_king_version INTEGER,
+        defeated_model_uri VARCHAR(640),
+        defeated_model_name VARCHAR(256),
+        defeated_namespace VARCHAR(256),
+        defeated_repo VARCHAR(512),
+        defeated_coldkey VARCHAR(64),
+        source VARCHAR(24) DEFAULT 'dashboard',
+        first_seen_at TIMESTAMPTZ DEFAULT NOW(),
+        last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT uq_albedo_king_crown_subnet_version UNIQUE (subnet, king_version)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_albedo_king_crown_subnet_finished
+        ON albedo_king_crowns (subnet, finished_at)
+    """,
 ]
 
 

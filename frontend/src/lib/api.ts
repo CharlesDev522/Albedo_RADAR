@@ -708,6 +708,10 @@ export interface AlbedoRepoCrownAnalysis {
   total_unique_coldkeys: number;
   grand_total_estimated_alpha?: number | null;
   grand_total_estimated_tao?: number | null;
+  earliest_crown_version?: number | null;
+  latest_crown_version?: number | null;
+  archived_crown_count?: number;
+  crown_history_coverage_note?: string;
 }
 
 export interface AlbedoAnalysisOverview {
