@@ -294,6 +294,7 @@ class AlbedoRepoCrownAnalysis(BaseModel):
     earliest_crown_version: int | None = None
     latest_crown_version: int | None = None
     archived_crown_count: int = 0
+    missing_crown_versions: list[int] = Field(default_factory=list)
     crown_history_coverage_note: str = ""
 
 

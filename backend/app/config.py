@@ -49,6 +49,8 @@ class Settings(BaseSettings):
 
     # Albedo subnet dashboard (public Hippius JSON mirror)
     albedo_dashboard_url: str = "https://us-east-1.hippius.com/albedo"
+    # Optional JSON file with pre-v13 coronations (v1–v12 etc.) — see data/albedo_crown_seed_sn97.example.json
+    albedo_crown_seed_path: str | None = None
 
     # Hippius registry repo tracking
     hippius_registry_url: str = "https://registry.hippius.com"

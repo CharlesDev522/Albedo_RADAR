@@ -278,6 +278,17 @@ export default function RepoCrownAnalysisPanel({
           {analysis.crown_history_coverage_note && (
             <span className="block text-amber-300/90 mt-1">{analysis.crown_history_coverage_note}</span>
           )}
+          {(analysis.missing_crown_versions?.length ?? 0) > 0 && (
+            <span className="block text-rose-300/90 mt-1">
+              Reward totals exclude {analysis.missing_crown_versions!.length} missing king
+              {analysis.missing_crown_versions!.length === 1 ? "" : "s"} (v
+              {analysis.missing_crown_versions![0]}
+              {analysis.missing_crown_versions!.length > 1
+                ? `–v${analysis.missing_crown_versions![analysis.missing_crown_versions!.length - 1]}`
+                : ""}
+              ). Add <code className="mono">data/albedo_crown_seed_sn97.json</code> on the API host.
+            </span>
+          )}
         </div>
       )}
 

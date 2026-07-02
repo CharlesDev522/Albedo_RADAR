@@ -82,6 +82,15 @@ def merge_king_histories(
     return sorted(by_version.values(), key=lambda c: c.king_version, reverse=True)
 
 
+def missing_crown_versions(merged: list[AlbedoKingCoronation]) -> list[int]:
+    if not merged:
+        return []
+    versions = sorted(c.king_version for c in merged)
+    latest = versions[-1]
+    have = {c.king_version for c in merged}
+    return [v for v in range(1, latest + 1) if v not in have]
+
+
 def crown_history_coverage_note(
     *,
     merged: list[AlbedoKingCoronation],
@@ -92,13 +101,18 @@ def crown_history_coverage_note(
         return "No crown history yet."
     versions = sorted(c.king_version for c in merged)
     earliest, latest = versions[0], versions[-1]
+    missing = missing_crown_versions(merged)
     parts = [
-        f"Archived {archived_count} coronations (v{earliest}–v{latest}).",
-        f"Hippius dashboard currently shows {live_count} live coronations.",
+        f"Reward history uses {archived_count} archived coronations (v{earliest}–v{latest}).",
+        f"Hippius dashboard feed only includes {live_count} recent coronations (oldest ~v13).",
     ]
-    if earliest > 1:
-        parts.append(
-            f"Kings before v{earliest} are not in Hippius eval_runs anymore — "
-            "rewards for those versions require a manual seed import."
-        )
+    if missing:
+        if len(missing) <= 15:
+            gap = ", ".join(f"v{v}" for v in missing)
+            parts.append(f"Missing from archive: {gap} — import seed JSON or Slack backfill.")
+        else:
+            parts.append(
+                f"Missing v{missing[0]}–v{missing[-1]} ({len(missing)} kings) — "
+                "Hippius dropped them; add data/albedo_crown_seed_sn97.json to fix totals."
+            )
     return " ".join(parts)

@@ -711,6 +711,7 @@ export interface AlbedoRepoCrownAnalysis {
   earliest_crown_version?: number | null;
   latest_crown_version?: number | null;
   archived_crown_count?: number;
+  missing_crown_versions?: number[];
   crown_history_coverage_note?: string;
 }
 

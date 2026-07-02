@@ -1063,9 +1063,12 @@ def build_analysis_overview(
         king_history, reign_members, updated_at, repo_duel_stats=repo_stats, reward_basis=reward_basis
     )
     versions = sorted(c.king_version for c in king_history) if king_history else []
-    from app.services.albedo_king_history import crown_history_coverage_note
+    from app.services.albedo_king_history import crown_history_coverage_note, missing_crown_versions
 
     repo_crown_analysis.earliest_crown_version = versions[0] if versions else None
+    repo_crown_analysis.latest_crown_version = versions[-1] if versions else None
+    repo_crown_analysis.archived_crown_count = archived_crown_count
+    repo_crown_analysis.missing_crown_versions = missing_crown_versions(king_history)
     repo_crown_analysis.latest_crown_version = versions[-1] if versions else None
     repo_crown_analysis.archived_crown_count = archived_crown_count
     repo_crown_analysis.crown_history_coverage_note = crown_history_coverage_note(
@@ -1190,12 +1193,16 @@ async def get_albedo_analysis_overview(
         try:
             from app.services.albedo_crown_archive_service import (
                 backfill_crowns_from_alerts,
+                import_crown_seed_if_configured,
                 load_archived_king_history,
                 sync_crowns_from_dashboard,
             )
 
             await sync_crowns_from_dashboard(db, subnet, dashboard, miner_lookup=miner_lookup)
             await backfill_crowns_from_alerts(db, subnet, miner_lookup=miner_lookup)
+            await import_crown_seed_if_configured(
+                db, subnet, settings=settings, miner_lookup=miner_lookup
+            )
             await db.commit()
             archived_history = await load_archived_king_history(db, subnet, miner_lookup=miner_lookup)
             archived_count = len(archived_history)
