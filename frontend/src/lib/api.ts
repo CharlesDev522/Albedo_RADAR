@@ -3,11 +3,14 @@ function apiBase(): string {
   if (typeof window !== "undefined") {
     return "/api/v1";
   }
+  // In Docker SSR, call FastAPI directly (avoids boot-time self-proxy through Next).
+  if (process.env.API_URL) {
+    return process.env.API_URL.replace(/\/$/, "");
+  }
   if (process.env.INTERNAL_API_PROXY) {
     return process.env.INTERNAL_API_PROXY.replace(/\/$/, "");
   }
   return (
-    process.env.API_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
     "http://localhost:8000/api/v1"
   ).replace(/\/$/, "");

@@ -28,7 +28,7 @@ async function proxyRequest(req: NextRequest, pathSegments: string[]) {
     body = await req.arrayBuffer();
   }
 
-  const maxAttempts = 3;
+  const maxAttempts = 5;
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -38,6 +38,7 @@ async function proxyRequest(req: NextRequest, pathSegments: string[]) {
         headers,
         body,
         cache: "no-store",
+        signal: AbortSignal.timeout(20_000),
       });
 
       const responseHeaders = new Headers();
@@ -53,7 +54,7 @@ async function proxyRequest(req: NextRequest, pathSegments: string[]) {
     } catch (error) {
       lastError = error;
       if (attempt < maxAttempts) {
-        await new Promise((r) => setTimeout(r, attempt * 500));
+        await new Promise((r) => setTimeout(r, attempt * 1000));
       }
     }
   }
@@ -61,7 +62,7 @@ async function proxyRequest(req: NextRequest, pathSegments: string[]) {
   const message = lastError instanceof Error ? lastError.message : String(lastError);
   return NextResponse.json(
     {
-      detail: `Cannot reach API at ${target}: ${message}. Check: docker compose ps api && docker compose logs api --tail 40 && curl -sf http://localhost:8000/health`,
+      detail: `Cannot reach API at ${target}: ${message}. The api service may be down or still starting. Run: docker compose ps api && docker compose logs api --tail 60 && curl -sf http://localhost:8000/health`,
     },
     { status: 502 },
   );
