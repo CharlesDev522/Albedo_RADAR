@@ -1,5 +1,6 @@
 """Hippius + Hugging Face repo tracking and miner activity feed."""
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
@@ -19,7 +20,32 @@ from app.schemas.repo_activity import (
 from app.services.hippius_latest_service import fetch_latest_hippius_repos
 from app.services.repo_activity_service import merged_repo_tracks
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/repo-activity", tags=["repo-activity"])
+
+
+def _event_to_response(row: RepoActivityEvent) -> RepoActivityEventResponse:
+    """Coalesce nullable JSON columns so feed serialization never 500s."""
+    return RepoActivityEventResponse(
+        id=row.id,
+        subnet=row.subnet,
+        event_type=row.event_type,
+        repo=row.repo,
+        uid=row.uid,
+        hotkey=row.hotkey,
+        coldkey=row.coldkey,
+        model_family=row.model_family,
+        chain_digest=row.chain_digest,
+        hub_digest=row.hub_digest,
+        previous_digest=row.previous_digest,
+        revision=row.revision,
+        commit_block=row.commit_block,
+        commit_message=row.commit_message,
+        changed_files=row.changed_files or [],
+        detected_at=row.detected_at,
+        meta=row.meta or {},
+    )
 
 
 @router.post("/sync")
@@ -114,7 +140,7 @@ async def repo_activity_feed(
         q = q.where(RepoActivityEvent.event_type == event_type)
     q = q.order_by(RepoActivityEvent.detected_at.desc()).limit(limit)
     rows = (await db.execute(q)).scalars().all()
-    return [RepoActivityEventResponse.model_validate(r) for r in rows]
+    return [_event_to_response(r) for r in rows]
 
 
 @router.get("/repos/{repo:path}/history", response_model=list[RepoRevisionResponse])
@@ -139,5 +165,9 @@ async def hippius_latest_repos(
     limit: int = Query(default=10, ge=1, le=50),
 ) -> HippiusLatestResponse:
     """Live latest Albedo repos from Hippius Hub index (hub.hippius.com?q=albedo)."""
-    total, repos = await fetch_latest_hippius_repos(limit=limit)
-    return HippiusLatestResponse(total_indexed=total, repos=repos)
+    try:
+        total, repos = await fetch_latest_hippius_repos(limit=limit)
+        return HippiusLatestResponse(total_indexed=total, repos=repos)
+    except Exception:
+        logger.warning("hippius-latest fetch failed", exc_info=True)
+        return HippiusLatestResponse(total_indexed=0, repos=[])

@@ -22,10 +22,12 @@ export default function LatestHippiusReposPanel({
   repos,
   loading,
   totalHint,
+  error,
 }: {
   repos: HippiusLatestRepo[];
   loading?: boolean;
   totalHint?: number | null;
+  error?: string | null;
 }) {
   return (
     <section className="panel px-3 py-2.5 space-y-2">
@@ -48,7 +50,11 @@ export default function LatestHippiusReposPanel({
         <span className="text-[9px] text-zinc-600">newest 10 by index time</span>
       </div>
 
-      {loading && repos.length === 0 ? (
+      {error ? (
+        <p className="text-[10px] text-amber-300/90 py-2">
+          Hippius Hub index unavailable ({error}). Tracked repos and feed still load from DB.
+        </p>
+      ) : loading && repos.length === 0 ? (
         <p className="text-[10px] text-zinc-500 py-2">Loading Hippius Hub index…</p>
       ) : repos.length === 0 ? (
         <p className="text-[10px] text-zinc-500 py-2">

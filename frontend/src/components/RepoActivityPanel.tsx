@@ -134,6 +134,7 @@ export default function RepoActivityPanel() {
   const [overview, setOverview] = useState<RepoActivityOverview | null>(null);
   const [hippiusLatest, setHippiusLatest] = useState<HippiusLatestRepo[]>([]);
   const [hippiusIndexTotal, setHippiusIndexTotal] = useState<number | null>(null);
+  const [hippiusLatestError, setHippiusLatestError] = useState<string | null>(null);
   const [tracks, setTracks] = useState<RepoTrackEntry[]>([]);
   const [feed, setFeed] = useState<RepoActivityEvent[]>([]);
   const [family, setFamily] = useState<FamilyFilter>("all");
@@ -150,22 +151,32 @@ export default function RepoActivityPanel() {
 
   const refresh = useCallback(async (forceRefresh = false) => {
     try {
-      const [ov, tr, fd, latest] = await Promise.all([
+      const [ov, tr, fd] = await Promise.all([
         api.getRepoActivityOverview(subnet, forceRefresh),
         api.getRepoTracks(subnet, familyParam, undefined, forceRefresh),
         api.getRepoActivityFeed(subnet, { family: familyParam, limit: 60, forceRefresh }),
-        api.getHippiusLatestRepos(TRACKED_REPOS_PREVIEW, forceRefresh),
       ]);
       setOverview(ov);
       setTracks(tr);
       setFeed(fd);
-      setHippiusLatest(latest.repos);
-      setHippiusIndexTotal(latest.total_indexed);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load repo activity");
     } finally {
       setLoading(false);
+    }
+
+    try {
+      const latest = await api.getHippiusLatestRepos(TRACKED_REPOS_PREVIEW, forceRefresh);
+      setHippiusLatest(latest.repos);
+      setHippiusIndexTotal(latest.total_indexed);
+      setHippiusLatestError(null);
+    } catch (e) {
+      setHippiusLatest([]);
+      setHippiusIndexTotal(null);
+      setHippiusLatestError(
+        e instanceof Error ? e.message : "Hippius Hub index unavailable"
+      );
     }
   }, [subnet, familyParam]);
 
@@ -329,8 +340,9 @@ export default function RepoActivityPanel() {
 
       <LatestHippiusReposPanel
         repos={hippiusLatest}
-        loading={loading}
+        loading={loading && hippiusLatest.length === 0 && !hippiusLatestError}
         totalHint={hippiusIndexTotal}
+        error={hippiusLatestError}
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
