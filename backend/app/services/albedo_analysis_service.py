@@ -1063,19 +1063,9 @@ def build_analysis_overview(
         king_history, reign_members, updated_at, repo_duel_stats=repo_stats, reward_basis=reward_basis
     )
     versions = sorted(c.king_version for c in king_history) if king_history else []
-    from app.services.albedo_king_history import crown_history_coverage_note, missing_crown_versions
-
     repo_crown_analysis.earliest_crown_version = versions[0] if versions else None
     repo_crown_analysis.latest_crown_version = versions[-1] if versions else None
     repo_crown_analysis.archived_crown_count = archived_crown_count
-    repo_crown_analysis.missing_crown_versions = missing_crown_versions(king_history)
-    repo_crown_analysis.latest_crown_version = versions[-1] if versions else None
-    repo_crown_analysis.archived_crown_count = archived_crown_count
-    repo_crown_analysis.crown_history_coverage_note = crown_history_coverage_note(
-        merged=king_history,
-        live_count=live_crown_count,
-        archived_count=archived_crown_count,
-    )
     crowns_by_repo = repo_crown_analysis.crowns_by_repo
 
     metric_aggregates = [

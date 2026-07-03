@@ -203,12 +203,6 @@ export default function RepoCrownAnalysisPanel({
     });
   }
 
-  const basis = analysis.reward_basis ?? {
-    daily_subnet_alpha: 0,
-    calculation_source: "unavailable",
-    default_weight_bps: 2000,
-    note: "",
-  };
   const hasRewards = (analysis.grand_total_estimated_alpha ?? 0) > 0;
 
   if (!analysis.crowns_by_repo?.length) {
@@ -263,17 +257,6 @@ export default function RepoCrownAnalysisPanel({
           </button>
         </div>
       </div>
-
-      {basis && (
-        <div className="rounded border border-zinc-800 bg-zinc-950/50 px-2 py-1.5 text-[9px] text-zinc-500">
-          <span className="text-zinc-400">Reward basis ({basis.calculation_source}): </span>
-          subnet <span className="mono text-violet-300">{fmtAlpha(basis.daily_subnet_alpha)}</span>/day
-          {basis.daily_subnet_tao != null && (
-            <span className="mono text-amber-300"> · {fmtTao(basis.daily_subnet_tao)}/day</span>
-          )}
-          <span className="text-zinc-600"> · {basis.note}</span>
-        </div>
-      )}
 
       <div className="flex flex-wrap items-center gap-2 text-[9px]">
         <input

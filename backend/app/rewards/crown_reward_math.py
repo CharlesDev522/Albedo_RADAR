@@ -54,10 +54,7 @@ async def fetch_crown_reward_basis(subnet: int, *, settings=None) -> AlbedoRewar
 
     daily_subnet_alpha = 0.0
     source = "unavailable"
-    note = (
-        "Set TAOSTATS_API_KEY for live subnet emission. "
-        "Crown reward = Σ slot_hours × (weight_bps/10000) × (daily_subnet_α / 24)."
-    )
+    note = ""
 
     if taostats is not None:
         champion_daily = daily_alpha_from_daily_reward_rao(taostats.daily_reward_rao)
@@ -69,11 +66,7 @@ async def fetch_crown_reward_basis(subnet: int, *, settings=None) -> AlbedoRewar
             else:
                 daily_subnet_alpha = champion_daily
             source = "taostats"
-            note = (
-                f"Subnet daily α ≈ top miner daily α / incentive ({taostats.incentive:.4f}). "
-                "Per crown: slot_hours × weight_share × (daily_subnet_α / 24). "
-                f"Default weight {DEFAULT_KING_WEIGHT_BPS} bps when historical weight unknown."
-            )
+            note = ""
 
     daily_tao = daily_tao_equivalent(daily_subnet_alpha, alpha_price)
     daily_usd_val = daily_usd(daily_tao, tao_usd)
