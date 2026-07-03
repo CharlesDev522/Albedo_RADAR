@@ -16,6 +16,7 @@ AlertKind = Literal[
     "repo_new",
     "repo_updated",
     "reg_fee_low",
+    "eval_dq",
 ]
 
 SEVERITY: dict[AlertKind, str] = {
@@ -30,6 +31,7 @@ SEVERITY: dict[AlertKind, str] = {
     "repo_new": "high",
     "repo_updated": "medium",
     "reg_fee_low": "high",
+    "eval_dq": "high",
 }
 
 SLACK_EMOJI: dict[AlertKind, str] = {
@@ -44,4 +46,5 @@ SLACK_EMOJI: dict[AlertKind, str] = {
     "repo_new": ":package:",
     "repo_updated": ":cloud:",
     "reg_fee_low": ":money_with_wings:",
+    "eval_dq": ":no_entry_sign:",
 }

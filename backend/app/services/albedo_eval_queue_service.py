@@ -117,6 +117,16 @@ def _parse_pipeline_buckets(
     return buckets
 
 
+def parse_dashboard_fails(
+    dashboard: dict[str, Any],
+    *,
+    lookup: MinerLookup | None = None,
+    limit: int = 100,
+) -> list[AlbedoEvalFail]:
+    """Parse Hippius dashboard fails[] for DQ list and notifications."""
+    return _parse_fails(dashboard, lookup=lookup, limit=limit)
+
+
 def _parse_fails(
     dashboard: dict[str, Any],
     *,
@@ -158,7 +168,7 @@ def build_eval_queue_overview(
 ) -> AlbedoEvalQueueOverview:
     queue = _parse_queue(dashboard, lookup=miner_lookup)
     pipeline = _parse_pipeline_buckets(state, lookup=miner_lookup)
-    fails = _parse_fails(dashboard, lookup=miner_lookup, limit=fail_limit)
+    fails = parse_dashboard_fails(dashboard, lookup=miner_lookup, limit=fail_limit)
     fail_counts: dict[str, int] = {}
     for row in fails:
         key = row.fault_class or "UNKNOWN"

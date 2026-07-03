@@ -22,6 +22,7 @@ KIND_LABELS: dict[AlertKind, str] = {
     "repo_new": "New Hippius Repo",
     "repo_updated": "Hippius Manifest Updated",
     "reg_fee_low": "Registration Burn Low",
+    "eval_dq": "Eval DQ (Disqualified)",
 }
 
 # Ordered keys per kind for Slack detail lines (most important first).
@@ -97,6 +98,19 @@ DETAIL_ORDER: dict[AlertKind, tuple[str, ...]] = {
         "alpha_price_tao",
         "chain_block",
         "network",
+    ),
+    "eval_dq": (
+        "uid",
+        "hotkey",
+        "repo",
+        "fault_class",
+        "fault_code",
+        "fault_message",
+        "submission_id",
+        "eval_run_id",
+        "state",
+        "updated_at",
+        "model_uri",
     ),
 }
 
@@ -178,12 +192,14 @@ def build_slot_changed_alert(
     detail = slot_alert_detail(slot, previous=previous)
     model = slot.detail or "?"
     pipe = slot.commitment_type.value
+    prev_type = previous.get("commitment_type") or "none"
+    prev_detail = previous.get("detail") or "none"
     return AlertContent(
         kind="slot_changed",
         title=f"[slot_changed] uid {slot.uid} published {pipe} commitment",
         message=(
-            f"SN{netuid} uid {slot.uid} went from no commitment to {pipe} pipe "
-            f"at block {slot.commit_block} · {model}"
+            f"SN{netuid} uid {slot.uid} published {pipe} commitment at block {slot.commit_block} "
+            f"(was {prev_type}: {prev_detail}) · {model}"
         ),
         source_key=f"slot_changed:{netuid}:{slot.uid}:{slot.payload_hash or slot.commit_block}",
         detail=detail,
@@ -393,6 +409,31 @@ def build_king_defended_alert(
         source_key=source_key,
         detail=detail,
         subnet=netuid,
+    )
+
+
+def build_eval_dq_alert(
+    *,
+    netuid: int,
+    source_key: str,
+    detail: dict[str, Any],
+    repo: str | None,
+) -> AlertContent:
+    label = repo or detail.get("model_uri") or "unknown"
+    fault_code = detail.get("fault_code") or "?"
+    fault_class = detail.get("fault_class") or "UNKNOWN"
+    uid = detail.get("uid")
+    uid_s = f"uid {uid} " if uid is not None else ""
+    return AlertContent(
+        kind="eval_dq",
+        title=f"[eval_dq] {label}",
+        message=(
+            f"SN{netuid} {uid_s}added to DQ list — {fault_class} / {fault_code}"
+        ),
+        source_key=source_key,
+        detail=detail,
+        subnet=netuid,
+        severity="high" if fault_class == "MINER_FAULT" else "medium",
     )
 
 

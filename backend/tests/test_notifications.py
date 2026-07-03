@@ -664,3 +664,119 @@ async def test_watcher_reg_fee_skips_above_threshold():
 
     assert sent == 0
     dispatcher.notify_content.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_watcher_bootstrap_seeds_eval_dq_fails():
+    settings = Settings(notifications_enabled=True, default_subnet=97)
+    dispatcher = NotificationDispatcher(settings)
+    watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+
+    dashboard = {
+        "reign": {"members": [{"king_version": 1, "model_uri": "cyantest/model@v1"}]},
+        "current_eval": None,
+        "eval_runs": [],
+        "fails": [
+            {
+                "submission_id": "sub-fail-1",
+                "uid": 20,
+                "hotkey": "hk_fail",
+                "state": "TERMINAL_INVALID",
+                "fault_class": "MINER_FAULT",
+                "fault_code": "INVALID_MODEL",
+            }
+        ],
+    }
+    with patch(
+        "app.notifications.watcher.fetch_subnet_economics",
+        return_value={"registration_burn_tao": 1.5},
+    ), patch("app.notifications.watcher.fetch_dashboard", return_value=dashboard):
+        await watcher.bootstrap()
+
+    assert dispatcher.is_seen("eval_dq:sub-fail-1")
+
+
+@pytest.mark.asyncio
+async def test_watcher_emits_eval_dq_on_new_fail():
+    settings = Settings(notifications_enabled=True, default_subnet=97)
+    dispatcher = NotificationDispatcher(settings)
+    dispatcher.enable_resume_mode()
+    dispatcher.notify_content = AsyncMock(return_value=True)
+    watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+    watcher._bootstrapped = True
+    watcher._last_king_version = 1
+    watcher._last_king_uri = "cyantest/model@v1"
+
+    dashboard = {
+        "reign": {"members": [{"king_version": 1, "model_uri": "cyantest/model@v1"}]},
+        "current_eval": None,
+        "eval_runs": [],
+        "fails": [
+            {
+                "submission_id": "sub-fail-new",
+                "eval_run_id": "eval-fail-new",
+                "uid": 42,
+                "hotkey": "hk_dq",
+                "model_uri": "org/bad-model@sha256:bad",
+                "state": "TERMINAL_INVALID",
+                "fault_class": "MINER_FAULT",
+                "fault_code": "INVALID_MODEL",
+                "fault_message": "Model failed validation",
+                "updated_at": "2026-06-27T11:30:00+00:00",
+            }
+        ],
+    }
+    session = _mock_session_no_existing()
+    with (
+        patch("app.notifications.watcher.fetch_dashboard", return_value=dashboard),
+        patch(
+            "app.notifications.watcher.fetch_subnet_economics",
+            return_value={"registration_burn_tao": 1.5},
+        ),
+    ):
+        sent = await watcher.poll_subnet(session, 97)
+
+    assert sent >= 1
+    kinds = [call.args[1].kind for call in dispatcher.notify_content.await_args_list]
+    assert "eval_dq" in kinds
+    dq_alert = next(c.args[1] for c in dispatcher.notify_content.await_args_list if c.args[1].kind == "eval_dq")
+    assert dq_alert.source_key == "eval_dq:sub-fail-new"
+    assert dq_alert.detail["fault_code"] == "INVALID_MODEL"
+
+
+@pytest.mark.asyncio
+async def test_watcher_skips_eval_dq_when_already_seen():
+    settings = Settings(notifications_enabled=True, default_subnet=97)
+    dispatcher = NotificationDispatcher(settings)
+    dispatcher.enable_resume_mode()
+    dispatcher.mark_seen("eval_dq:sub-fail-1")
+    dispatcher.notify_content = AsyncMock(return_value=True)
+    watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+    watcher._bootstrapped = True
+    watcher._last_king_version = 1
+
+    dashboard = {
+        "reign": {"members": [{"king_version": 1, "model_uri": "cyantest/model@v1"}]},
+        "current_eval": None,
+        "eval_runs": [],
+        "fails": [
+            {
+                "submission_id": "sub-fail-1",
+                "state": "TERMINAL_INVALID",
+                "fault_class": "MINER_FAULT",
+                "fault_code": "INVALID_MODEL",
+            }
+        ],
+    }
+    session = _mock_session_no_existing()
+    with (
+        patch("app.notifications.watcher.fetch_dashboard", return_value=dashboard),
+        patch(
+            "app.notifications.watcher.fetch_subnet_economics",
+            return_value={"registration_burn_tao": 1.5},
+        ),
+    ):
+        sent = await watcher.poll_subnet(session, 97)
+
+    assert sent == 0
+    dispatcher.notify_content.assert_not_awaited()

@@ -105,6 +105,15 @@ def title_for(kind: AlertKind, subnet: int | None, detail: dict[str, Any]) -> st
         tier_s = f"{float(tier):g} τ" if tier is not None else "alert level"
         return f"{sn} registration burn below {tier_s}"
 
+    if kind == "eval_dq":
+        uid = uid_from_detail(detail)
+        code = detail.get("fault_code")
+        if uid is not None and code:
+            return f"UID {uid} disqualified — {code}"
+        if uid is not None:
+            return f"UID {uid} added to eval DQ list"
+        return f"Miner added to eval DQ list on {sn}"
+
     return f"Alert on {sn}"
 
 
@@ -205,10 +214,27 @@ def prose_for(kind: AlertKind, message: str, detail: dict[str, Any]) -> str:
         pipe_s = pipe or "pipe"
         block = detail.get("commit_block")
         block_s = f" at block {block}" if block is not None else ""
+        if kind == "slot_changed":
+            paragraphs.append(
+                f"{who} published a new {pipe_s} Albedo commitment{block_s} for {model} "
+                f"(slot commitment changed on an existing metagraph UID)."
+            )
+        else:
+            paragraphs.append(
+                f"{who} on the metagraph had no published commitment before. "
+                f"It now reveals a {pipe_s} Albedo commitment{block_s} for {model}."
+            )
+
+    elif kind == "eval_dq":
+        who = miner_ref(detail, repo)
+        fault_class = detail.get("fault_class") or "UNKNOWN"
+        fault_code = detail.get("fault_code") or "unknown"
         paragraphs.append(
-            f"{who} on the metagraph had no published commitment before. "
-            f"It now reveals a {pipe_s} Albedo commitment{block_s} for {model}."
+            f"{who} was added to the Albedo eval DQ (disqualified) list after a terminal "
+            f"pipeline failure ({fault_class}: {fault_code})."
         )
+        if fault_msg := detail.get("fault_message"):
+            paragraphs.append(str(fault_msg))
 
     elif kind == "repo_new":
         name = repo or "a repository"

@@ -27,9 +27,11 @@ from app.notifications.messages import (
     build_crown_lost_alert,
     build_crown_won_alert,
     build_duel_new_alert,
+    build_eval_dq_alert,
     build_king_defended_alert,
     build_reg_fee_low_alert,
 )
+from app.services.albedo_eval_queue_service import parse_dashboard_fails
 from app.notifications.reg_fee_tiers import (
     normalize_reg_fee_thresholds,
     tiers_newly_crossed,
@@ -59,6 +61,41 @@ def _duel_new_source_key(eval_id: str) -> str:
 
 def _king_defended_source_key(eval_id: str) -> str:
     return f"king_defended:{eval_id}"
+
+
+def _eval_dq_source_key(
+    *,
+    submission_id: str | None = None,
+    eval_run_id: str | None = None,
+    uid: int | None = None,
+    hotkey: str | None = None,
+    updated_at: str | None = None,
+) -> str:
+    if submission_id:
+        return f"eval_dq:{submission_id}"
+    if eval_run_id:
+        return f"eval_dq:run:{eval_run_id}"
+    return f"eval_dq:{uid or '?'}:{hotkey or '?'}:{updated_at or '?'}"
+
+
+def _eval_dq_detail(fail) -> dict[str, Any]:
+    return {
+        k: v
+        for k, v in {
+            "submission_id": fail.submission_id,
+            "eval_run_id": fail.eval_run_id,
+            "uid": fail.uid,
+            "hotkey": fail.hotkey,
+            "repo": fail.repo,
+            "model_uri": fail.model_uri,
+            "state": fail.state,
+            "fault_class": fail.fault_class,
+            "fault_code": fail.fault_code,
+            "fault_message": fail.fault_message,
+            "updated_at": fail.updated_at,
+        }.items()
+        if v is not None
+    }
 
 
 class NotificationWatcher:
@@ -125,6 +162,21 @@ class NotificationWatcher:
             if live_id:
                 self._last_live_eval_id = str(live_id)
                 self.dispatcher.mark_seen(_duel_new_source_key(self._last_live_eval_id))
+
+        for raw in dashboard.get("fails") or []:
+            if not isinstance(raw, dict):
+                continue
+            if raw.get("state") != "TERMINAL_INVALID":
+                continue
+            self.dispatcher.mark_seen(
+                _eval_dq_source_key(
+                    submission_id=raw.get("submission_id"),
+                    eval_run_id=raw.get("eval_run_id"),
+                    uid=int(raw["uid"]) if raw.get("uid") is not None else None,
+                    hotkey=raw.get("hotkey"),
+                    updated_at=raw.get("updated_at"),
+                )
+            )
 
         reign = dashboard.get("reign") or {}
         members = reign.get("members") or []
@@ -373,6 +425,39 @@ class NotificationWatcher:
             self._last_king_version = int(current_version)
             self._last_king_uri = current_uri
 
+        sent += await self._poll_eval_dq_fails(session, netuid, dashboard)
+
+        return sent
+
+    async def _poll_eval_dq_fails(
+        self,
+        session: AsyncSession,
+        netuid: int,
+        dashboard: dict[str, Any],
+    ) -> int:
+        if netuid != self.settings.default_subnet:
+            return 0
+        sent = 0
+        for fail in parse_dashboard_fails(dashboard, limit=200):
+            if fail.state != "TERMINAL_INVALID":
+                continue
+            source_key = _eval_dq_source_key(
+                submission_id=fail.submission_id,
+                eval_run_id=fail.eval_run_id,
+                uid=fail.uid,
+                hotkey=fail.hotkey,
+                updated_at=fail.updated_at,
+            )
+            if self.dispatcher.is_seen(source_key):
+                continue
+            alert = build_eval_dq_alert(
+                netuid=netuid,
+                source_key=source_key,
+                detail=_eval_dq_detail(fail),
+                repo=fail.repo,
+            )
+            if await self.dispatcher.notify_content(session, alert):
+                sent += 1
         return sent
 
     async def _poll_duel_new(
