@@ -311,8 +311,11 @@ class AlbedoEntityJudgeStats(BaseModel):
     key: str
     label: str
     repo: str | None = None
+    coldkey: str | None = None
     hotkey: str | None = None
     uid: int | None = None
+    miner_count: int = 0
+    repos: list[str] = Field(default_factory=list)
     duels: int
     wins: int
     losses: int
@@ -356,7 +359,7 @@ class AlbedoJudgeAnalytics(BaseModel):
     total_submissions: int = 0
     judge_models: list[str] = Field(default_factory=list)
     by_repo: list[AlbedoEntityJudgeStats] = Field(default_factory=list)
-    by_challenger: list[AlbedoEntityJudgeStats] = Field(default_factory=list)
+    by_coldkey: list[AlbedoEntityJudgeStats] = Field(default_factory=list)
     pairwise: list[AlbedoJudgePairwise] = Field(default_factory=list)
     by_outcome: list[AlbedoJudgeOutcomeSlice] = Field(default_factory=list)
     spread_summary: AlbedoJudgeSpreadSummary = Field(default_factory=AlbedoJudgeSpreadSummary)

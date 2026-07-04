@@ -535,10 +535,55 @@ def _entity_judge_bucket() -> dict[str, Any]:
         "unanimous": 0,
         "label": "",
         "repo": None,
+        "coldkey": None,
         "hotkey": None,
         "uid": None,
+        "hotkeys": set(),
+        "uids": set(),
+        "repos": set(),
         "judges": defaultdict(lambda: {"scores": [], "pick_ch": 0, "agree": 0}),
     }
+
+
+def _touch_entity_bucket(
+    buckets: dict[str, dict[str, Any]],
+    key: str,
+    *,
+    label: str,
+    repo: str | None,
+    coldkey: str | None,
+    hotkey: str | None,
+    uid: int | None,
+    challenger_won: bool,
+    coronated: bool,
+    margin: float,
+    spread: float | None,
+    unanimous: bool,
+) -> dict[str, Any]:
+    b = buckets[key]
+    b["duels"] += 1
+    if challenger_won:
+        b["wins"] += 1
+    if coronated:
+        b["coronations"] += 1
+    b["margins"].append(margin)
+    if spread is not None:
+        b["spreads"].append(spread)
+    if unanimous:
+        b["unanimous"] += 1
+    b["label"] = label
+    if repo:
+        b["repo"] = repo
+        b["repos"].add(repo)
+    if coldkey:
+        b["coldkey"] = coldkey
+    if hotkey:
+        b["hotkey"] = hotkey
+        b["hotkeys"].add(hotkey)
+    if uid is not None:
+        b["uid"] = uid
+        b["uids"].add(uid)
+    return b
 
 
 def _judge_slices(
@@ -577,8 +622,11 @@ def _entity_judge_row(
         key=key,
         label=bucket["label"] or key,
         repo=bucket.get("repo"),
+        coldkey=bucket.get("coldkey"),
         hotkey=bucket.get("hotkey"),
         uid=bucket.get("uid"),
+        miner_count=len(bucket.get("hotkeys") or ()),
+        repos=sorted(bucket.get("repos") or []),
         duels=duels,
         wins=wins,
         losses=duels - wins,
@@ -597,7 +645,7 @@ def _build_judge_analytics(
     miner_lookup: MinerLookup | None = None,
 ) -> AlbedoJudgeAnalytics:
     repo_buckets: dict[str, dict[str, Any]] = defaultdict(_entity_judge_bucket)
-    challenger_buckets: dict[str, dict[str, Any]] = defaultdict(_entity_judge_bucket)
+    coldkey_buckets: dict[str, dict[str, Any]] = defaultdict(_entity_judge_bucket)
     outcome_buckets: dict[str, dict[str, dict[str, Any]]] = {
         "challenger_win": defaultdict(lambda: {"scores": [], "pick_ch": 0, "agree": 0}),
         "king_win": defaultdict(lambda: {"scores": [], "pick_ch": 0, "agree": 0}),
@@ -614,6 +662,7 @@ def _build_judge_analytics(
     for run in eval_runs:
         summary = _duel_summary(run, miner_lookup)
         repo_key = summary.repo or f"{summary.namespace}/{summary.model_name}"
+        coldkey_key = summary.coldkey
         hk_key = summary.hotkey or "unknown"
         challenger_won = summary.challenger_won
         margin = summary.win_margin
@@ -632,32 +681,37 @@ def _build_judge_analytics(
             if summary.judge_spread >= 0.15:
                 high_spread += 1
 
-        for bucket, key, label, repo, hotkey, uid in (
-            (repo_buckets, repo_key, repo_key, repo_key, None, None),
-            (
-                challenger_buckets,
-                hk_key,
-                f"uid {summary.uid} · {hk_key[:8]}…" if len(hk_key) > 12 else f"uid {summary.uid} · {hk_key}",
-                repo_key,
-                hk_key,
-                summary.uid,
-            ),
-        ):
-            b = bucket[key]
-            b["duels"] += 1
-            if challenger_won:
-                b["wins"] += 1
-            if run.get("coronated"):
-                b["coronations"] += 1
-            b["margins"].append(margin)
-            if summary.judge_spread is not None:
-                b["spreads"].append(summary.judge_spread)
-            if is_unanimous:
-                b["unanimous"] += 1
-            b["label"] = label
-            b["repo"] = repo
-            b["hotkey"] = hotkey
-            b["uid"] = uid
+        spread = summary.judge_spread
+
+        _touch_entity_bucket(
+            repo_buckets,
+            repo_key,
+            label=repo_key,
+            repo=repo_key,
+            coldkey=summary.coldkey,
+            hotkey=hk_key,
+            uid=summary.uid,
+            challenger_won=challenger_won,
+            coronated=bool(run.get("coronated")),
+            margin=margin,
+            spread=spread,
+            unanimous=is_unanimous,
+        )
+        if coldkey_key:
+            _touch_entity_bucket(
+                coldkey_buckets,
+                coldkey_key,
+                label=coldkey_key,
+                repo=repo_key,
+                coldkey=coldkey_key,
+                hotkey=hk_key,
+                uid=summary.uid,
+                challenger_won=challenger_won,
+                coronated=bool(run.get("coronated")),
+                margin=margin,
+                spread=spread,
+                unanimous=is_unanimous,
+            )
 
         breakdown = run.get("score_breakdown") or {}
         by_judge = {str(j): float(s) for j, s in (breakdown.get("by_judge") or {}).items()}
@@ -666,7 +720,10 @@ def _build_judge_analytics(
         for judge, score in by_judge.items():
             picks_ch = score > 0.5
             agrees = picks_ch == challenger_won
-            for bucket in (repo_buckets[repo_key], challenger_buckets[hk_key]):
+            entity_targets = [repo_buckets[repo_key]]
+            if coldkey_key:
+                entity_targets.append(coldkey_buckets[coldkey_key])
+            for bucket in entity_targets:
                 jstats = bucket["judges"][judge]
                 jstats["scores"].append(score)
                 if picks_ch:
@@ -699,21 +756,22 @@ def _build_judge_analytics(
     )
     total = len(eval_runs)
 
+    min_entity_duels = 2
     by_repo = [
         _entity_judge_row(key, bucket, ordered_judges)
         for key, bucket in sorted(
             repo_buckets.items(),
             key=lambda item: (-item[1]["duels"], -item[1]["wins"]),
         )
-        if bucket["duels"] >= 1
+        if bucket["duels"] >= min_entity_duels
     ]
-    by_challenger = [
+    by_coldkey = [
         _entity_judge_row(key, bucket, ordered_judges)
         for key, bucket in sorted(
-            challenger_buckets.items(),
+            coldkey_buckets.items(),
             key=lambda item: (-item[1]["duels"], -item[1]["wins"]),
         )
-        if bucket["duels"] >= 1
+        if bucket["duels"] >= min_entity_duels
     ]
 
     pairwise_rows: list[AlbedoJudgePairwise] = []
@@ -761,7 +819,7 @@ def _build_judge_analytics(
         total_submissions=total,
         judge_models=ordered_judges,
         by_repo=by_repo,
-        by_challenger=by_challenger,
+        by_coldkey=by_coldkey,
         pairwise=pairwise_rows,
         by_outcome=by_outcome,
         spread_summary=spread_summary,

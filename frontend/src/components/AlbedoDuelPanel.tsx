@@ -369,7 +369,7 @@ export default function AlbedoDuelPanel() {
             total_submissions: data.total_duels,
             judge_models: data.judge_models,
             by_repo: [],
-            by_challenger: [],
+            by_coldkey: [],
             pairwise: [],
             by_outcome: [],
             spread_summary: {

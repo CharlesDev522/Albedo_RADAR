@@ -483,8 +483,11 @@ export interface AlbedoEntityJudgeStats {
   key: string;
   label: string;
   repo?: string | null;
+  coldkey?: string | null;
   hotkey?: string | null;
   uid?: number | null;
+  miner_count: number;
+  repos: string[];
   duels: number;
   wins: number;
   losses: number;
@@ -528,7 +531,7 @@ export interface AlbedoJudgeAnalytics {
   total_submissions: number;
   judge_models: string[];
   by_repo: AlbedoEntityJudgeStats[];
-  by_challenger: AlbedoEntityJudgeStats[];
+  by_coldkey: AlbedoEntityJudgeStats[];
   pairwise: AlbedoJudgePairwise[];
   by_outcome: AlbedoJudgeOutcomeSlice[];
   spread_summary: AlbedoJudgeSpreadSummary;

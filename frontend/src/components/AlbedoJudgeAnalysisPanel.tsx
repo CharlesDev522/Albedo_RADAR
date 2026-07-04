@@ -2,6 +2,7 @@
 
 import { Fragment } from "react";
 import {
+  shortAddr,
   shortRepo,
   type AlbedoEntityJudgeStats,
   type AlbedoJudgeAnalytics,
@@ -201,14 +202,14 @@ function EntityJudgeTable({
   subtitle,
   rows,
   judgeOrder,
-  showRepo = false,
+  groupBy,
   limit = 25,
 }: {
   title: string;
   subtitle: string;
   rows: AlbedoEntityJudgeStats[];
   judgeOrder: string[];
-  showRepo?: boolean;
+  groupBy: "repo" | "coldkey";
   limit?: number;
 }) {
   const visible = rows.slice(0, limit);
@@ -229,8 +230,11 @@ function EntityJudgeTable({
         <table className="w-full text-[10px] min-w-[720px]">
           <thead>
             <tr className="text-zinc-500 border-b border-zinc-800">
-              <th className="text-left py-1 pr-2 sticky left-0 bg-zinc-900/95">Entity</th>
-              {showRepo && <th className="text-left py-1 pr-2">Repo</th>}
+              <th className="text-left py-1 pr-2 sticky left-0 bg-zinc-900/95">
+                {groupBy === "repo" ? "Repo" : "Coldkey"}
+              </th>
+              {groupBy === "coldkey" && <th className="text-left py-1 pr-2">Repos</th>}
+              <th className="text-right py-1 px-1">Miners</th>
               <th className="text-right py-1 px-1">Duels</th>
               <th className="text-right py-1 px-1">Win%</th>
               <th className="text-right py-1 px-1">👑</th>
@@ -249,8 +253,8 @@ function EntityJudgeTable({
             </tr>
             <tr className="text-zinc-600 border-b border-zinc-800/50 text-[9px]">
               <th className="sticky left-0 bg-zinc-900/95" />
-              {showRepo && <th />}
-              <th colSpan={6} />
+              {groupBy === "coldkey" && <th />}
+              <th colSpan={7} />
               {judgeOrder.map((j) => (
                 <Fragment key={`hdr-${j}`}>
                   <th className="text-right py-0.5 px-0.5 border-l border-zinc-800/30">avg</th>
@@ -265,14 +269,19 @@ function EntityJudgeTable({
               const judges = sliceMap(row.judges);
               return (
                 <tr key={row.key} className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
-                  <td className="py-1 pr-2 text-zinc-300 sticky left-0 bg-zinc-900/90 truncate max-w-[140px]" title={row.label}>
-                    {row.label}
+                  <td className="py-1 pr-2 text-zinc-300 sticky left-0 bg-zinc-900/90 truncate max-w-[160px]" title={row.label}>
+                    {groupBy === "coldkey"
+                      ? shortAddr(row.coldkey ?? row.label, 6)
+                      : shortRepo(row.repo ?? row.label, 28)}
                   </td>
-                  {showRepo && (
-                    <td className="py-1 pr-2 text-zinc-500 truncate max-w-[120px]" title={row.repo ?? ""}>
-                      {shortRepo(row.repo ?? "—", 22)}
+                  {groupBy === "coldkey" && (
+                    <td className="py-1 pr-2 text-zinc-500 truncate max-w-[140px]" title={(row.repos ?? []).join(", ")}>
+                      {(row.repos ?? []).length <= 1
+                        ? shortRepo(row.repos?.[0] ?? row.repo ?? "—", 22)
+                        : `${row.repos.length} repos`}
                     </td>
                   )}
+                  <td className="text-right py-1 px-1 mono text-zinc-500">{row.miner_count || "—"}</td>
                   <td className="text-right py-1 px-1 mono text-zinc-400">{row.duels}</td>
                   <td className="text-right py-1 px-1 mono text-emerald-300">{fmtPct(row.win_pct)}</td>
                   <td className="text-right py-1 px-1 mono text-amber-300">{row.coronations || "—"}</td>
@@ -378,7 +387,7 @@ export default function AlbedoJudgeAnalysisPanel({
       <section className="panel px-3 py-2.5">
         <h3 className="text-[11px] font-semibold text-zinc-200">Judge panel summary</h3>
         <p className="text-[9px] text-zinc-600 mt-0.5 mb-3">
-          {analytics.total_submissions} evaluated submissions · GLM · Qwen · DeepSeek breakdown
+          {analytics.total_submissions} evaluated submissions · aggregated by repo and coldkey (min 2 duels)
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
           {[
@@ -433,17 +442,18 @@ export default function AlbedoJudgeAnalysisPanel({
 
       <EntityJudgeTable
         title="Per-repo judge analysis"
-        subtitle="Win rate and per-judge avg score, pick rate, verdict alignment"
+        subtitle="All submissions rolled up by Hippius repo — win rate and GLM · Qwen · DeepSeek splits"
         rows={analytics.by_repo}
         judgeOrder={judgeOrder}
+        groupBy="repo"
       />
 
       <EntityJudgeTable
-        title="Per-challenger judge analysis"
-        subtitle="By hotkey / uid — submissions, win rate, GLM · Qwen · DeepSeek splits"
-        rows={analytics.by_challenger}
+        title="Per-coldkey judge analysis"
+        subtitle="All submissions rolled up by miner coldkey — spans repos and hotkeys under the same owner"
+        rows={analytics.by_coldkey}
         judgeOrder={judgeOrder}
-        showRepo
+        groupBy="coldkey"
       />
 
       <section className="panel px-3 py-2">
