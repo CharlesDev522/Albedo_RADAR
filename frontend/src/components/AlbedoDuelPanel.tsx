@@ -24,12 +24,6 @@ const POLL_MS = 30_000;
 const QUEUE_POLL_MS = 8_000;
 type Section = "overview" | "judges" | "kings" | "duels" | "dq";
 
-const JUDGE_COLORS: Record<string, string> = {
-  "glm-5.1": "border-cyan-500/40 bg-cyan-500/10 text-cyan-200",
-  "qwen3.5-397b-a17b": "border-violet-500/40 bg-violet-500/10 text-violet-200",
-  "deepseek-v3.2": "border-amber-500/40 bg-amber-500/10 text-amber-200",
-};
-
 function fmtPct(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   return `${n.toFixed(1)}%`;
@@ -65,10 +59,6 @@ function fmtTime(iso: string | null | undefined): string {
 
 function modelLink(modelUri: string): string {
   return hippiusModelUrl(modelUri.split("@")[0]);
-}
-
-function judgeStyle(shortName: string): string {
-  return JUDGE_COLORS[shortName] ?? "border-zinc-700 bg-zinc-800/50 text-zinc-300";
 }
 
 function SectionTabs({
@@ -168,24 +158,18 @@ function KingTenureCard({ tenure }: { tenure: AlbedoKingTenure }) {
   );
 }
 
-function JudgeScoreCell({
-  vote,
-  judgeShortName,
-}: {
-  vote: AlbedoDuelJudgeVote | undefined;
-  judgeShortName: string;
-}) {
+function JudgeScoreCell({ vote }: { vote: AlbedoDuelJudgeVote | undefined }) {
   if (!vote) return <td className="py-1.5 px-1 text-center text-zinc-700 border-l border-zinc-800/50">—</td>;
   const pickCh = vote.pick_challenger;
   return (
     <td
-      className={`py-1.5 px-1 text-center mono text-[10px] border-l ${judgeStyle(judgeShortName)}`}
+      className={`py-1.5 px-1 text-center mono text-[10px] border-l border-zinc-800/50 ${
+        pickCh ? "text-rose-300 bg-rose-500/10" : "text-emerald-300 bg-emerald-500/10"
+      }`}
       title={`${vote.judge}\nch ${fmtScore(vote.challenger_score)} · k ${fmtScore(vote.king_score)}\npick ${pickCh ? "challenger" : "king"}`}
     >
       <div>{fmtScore(vote.challenger_score)}</div>
-      <div className={`text-[8px] font-medium ${pickCh ? "text-emerald-400" : "text-rose-400"}`}>
-        {pickCh ? "ch" : "k"}
-      </div>
+      <div className="text-[8px] font-medium opacity-80">{pickCh ? "ch" : "k"}</div>
     </td>
   );
 }
@@ -216,7 +200,7 @@ function DuelRow({ duel, judgeOrder }: { duel: AlbedoDuelSummary; judgeOrder: st
         vs {duel.king_model_name ? shortRepo(duel.king_model_name, 12) : "—"}
       </td>
       {judgeOrder.map((name) => (
-        <JudgeScoreCell key={name} vote={votes[name]} judgeShortName={name} />
+        <JudgeScoreCell key={name} vote={votes[name]} />
       ))}
       <td className="py-1.5 px-1 mono text-zinc-400 text-center">{duel.judge_spread != null ? fmtScore(duel.judge_spread) : "—"}</td>
       <td className="py-1.5 pr-2 mono text-zinc-300">{fmtScore(duel.score_challenger)}</td>
@@ -495,8 +479,7 @@ export default function AlbedoDuelPanel() {
         <section className="panel px-3 py-2">
           <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge duel scores</h3>
           <p className="text-[9px] text-zinc-600 mb-2">
-            Judge columns = GLM · Qwen · DeepSeek (each model its own color) · green ch / red k = that judge&apos;s pick ·
-            result: green challenger win · grey defended
+            Each judge cell: green = picked king · red = picked challenger · result: green challenger win · grey defended
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-[10px] min-w-[720px]">
@@ -506,7 +489,7 @@ export default function AlbedoDuelPanel() {
                   <th className="text-left py-1 pr-2">Challenger repo</th>
                   <th className="text-left py-1 pr-2">King</th>
                   {judgeOrder.map((name) => (
-                    <th key={name} className={`text-center py-1 px-1 border-l border-zinc-800/50 ${judgeStyle(name).split(" ")[2]}`}>
+                    <th key={name} className="text-center py-1 px-1 border-l border-zinc-800/50 text-zinc-400">
                       {name.split("-")[0]}
                     </th>
                   ))}
