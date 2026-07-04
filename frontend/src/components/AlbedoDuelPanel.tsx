@@ -167,15 +167,21 @@ function KingTenureCard({ tenure }: { tenure: AlbedoKingTenure }) {
   );
 }
 
-function JudgeScoreCell({ vote }: { vote: AlbedoDuelJudgeVote | undefined }) {
+function JudgeScoreCell({
+  vote,
+  challengerWon,
+}: {
+  vote: AlbedoDuelJudgeVote | undefined;
+  challengerWon: boolean;
+}) {
   if (!vote) return <td className="py-1.5 px-1 text-center text-zinc-700">—</td>;
-  const agree = vote.agrees_with_verdict;
+  const kingWon = !challengerWon;
   return (
     <td
       className={`py-1.5 px-1 text-center mono text-[10px] border-l border-zinc-800/50 ${
-        agree ? "text-emerald-300 bg-emerald-500/5" : "text-rose-300 bg-rose-500/5"
+        kingWon ? "text-emerald-300 bg-emerald-500/10" : "text-rose-300 bg-rose-500/10"
       }`}
-      title={`${vote.judge}\nch ${fmtScore(vote.challenger_score)} · k ${fmtScore(vote.king_score)}\n${agree ? "matches verdict" : "dissents"}`}
+      title={`${vote.judge}\nch ${fmtScore(vote.challenger_score)} · k ${fmtScore(vote.king_score)}\n${kingWon ? "King defended" : "Challenger won"}`}
     >
       <div>{fmtScore(vote.challenger_score)}</div>
       <div className="text-[8px] opacity-70">{vote.pick_challenger ? "ch" : "k"}</div>
@@ -209,19 +215,19 @@ function DuelRow({ duel, judgeOrder }: { duel: AlbedoDuelSummary; judgeOrder: st
         vs {duel.king_model_name ? shortRepo(duel.king_model_name, 12) : "—"}
       </td>
       {judgeOrder.map((name) => (
-        <JudgeScoreCell key={name} vote={votes[name]} />
+        <JudgeScoreCell key={name} vote={votes[name]} challengerWon={won} />
       ))}
       <td className="py-1.5 px-1 mono text-zinc-400 text-center">{duel.judge_spread != null ? fmtScore(duel.judge_spread) : "—"}</td>
       <td className="py-1.5 pr-2 mono text-zinc-300">{fmtScore(duel.score_challenger)}</td>
-      <td className={`py-1.5 pr-2 mono ${won ? "text-emerald-300" : "text-rose-300"}`}>{fmtMargin(duel.win_margin)}</td>
+      <td className={`py-1.5 pr-2 mono ${won ? "text-rose-300" : "text-emerald-300"}`}>{fmtMargin(duel.win_margin)}</td>
       <td className="py-1.5">
         <span
           className={`inline-block px-1.5 py-0.5 rounded text-[9px] border ${
             duel.coronated
               ? "text-amber-200 border-amber-500/40 bg-amber-500/15"
               : won
-                ? "text-emerald-200 border-emerald-500/30 bg-emerald-500/10"
-                : "text-zinc-400 border-zinc-700"
+                ? "text-rose-200 border-rose-500/30 bg-rose-500/10"
+                : "text-emerald-200 border-emerald-500/30 bg-emerald-500/10"
           }`}
         >
           {duel.coronated ? "crowned" : won ? "challenger" : "defended"}
@@ -483,7 +489,7 @@ export default function AlbedoDuelPanel() {
         <section className="panel px-3 py-2">
           <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge duel scores</h3>
           <p className="text-[9px] text-zinc-600 mb-2">
-            Each cell = challenger score from that judge · green = agrees with final verdict · spread = max−min judge score
+            Each cell = challenger score from that judge · green = king defended · red = challenger won
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-[10px] min-w-[720px]">
