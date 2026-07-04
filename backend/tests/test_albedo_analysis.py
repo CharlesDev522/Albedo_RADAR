@@ -113,8 +113,89 @@ def test_build_analysis_overview_counts_and_history():
     assert len(overview.reign_slot_holders) == 2
     assert overview.recent_duels[0].judge_scores
 
+    analytics = overview.judge_analytics
+    assert analytics.total_submissions == 2
+    assert len(analytics.by_repo) >= 2
+    assert len(analytics.by_challenger) == 2
+    assert len(analytics.pairwise) == 1
+    assert analytics.pairwise[0].duels == 2
+    assert len(analytics.by_outcome) == 2
+    assert analytics.spread_summary.avg_spread is not None
 
-def test_repo_crown_analysis_multi_owner_and_links():
+
+def test_judge_analytics_three_judge_panel():
+    dashboard = {
+        "updated_at": "2026-06-27T12:00:00+00:00",
+        "chain": {
+            "judge_models": [
+                "z-ai/glm-5.1",
+                "qwen/qwen3.5-397b-a17b",
+                "deepseek/deepseek-v3.2",
+            ]
+        },
+        "reign": {"members": []},
+        "current_eval": None,
+        "queue": [],
+        "eval_runs": [
+            {
+                "eval_run_id": "r1",
+                "challenger_won": True,
+                "coronated": False,
+                "score_challenger": 0.6,
+                "score_king": 0.4,
+                "win_margin": 0.2,
+                "finished_at": "2026-06-27T10:00:00+00:00",
+                "model_uri": "org/repo-a@sha256:1",
+                "hotkey": "hk_a",
+                "uid": 1,
+                "score_breakdown": {
+                    "by_judge": {
+                        "z-ai/glm-5.1": 0.7,
+                        "qwen/qwen3.5-397b-a17b": 0.65,
+                        "deepseek/deepseek-v3.2": 0.45,
+                    }
+                },
+                "king": {"king_version": 1, "model_uri": "org/king@sha256:0", "uid": 9, "hotkey": "hk_k"},
+            },
+            {
+                "eval_run_id": "r2",
+                "challenger_won": False,
+                "coronated": False,
+                "score_challenger": 0.4,
+                "score_king": 0.6,
+                "win_margin": -0.2,
+                "finished_at": "2026-06-27T11:00:00+00:00",
+                "model_uri": "org/repo-b@sha256:2",
+                "hotkey": "hk_b",
+                "uid": 2,
+                "score_breakdown": {
+                    "by_judge": {
+                        "z-ai/glm-5.1": 0.35,
+                        "qwen/qwen3.5-397b-a17b": 0.4,
+                        "deepseek/deepseek-v3.2": 0.55,
+                    }
+                },
+                "king": {"king_version": 1, "model_uri": "org/king@sha256:0", "uid": 9, "hotkey": "hk_k"},
+            },
+        ],
+    }
+
+    overview = build_analysis_overview(
+        dashboard,
+        subnet=97,
+        source_url="https://example.com/dashboard.json",
+    )
+    analytics = overview.judge_analytics
+
+    assert analytics.total_submissions == 2
+    assert len(analytics.judge_models) == 3
+    assert len(analytics.pairwise) == 3
+    repo_a = next(r for r in analytics.by_repo if r.key == "org/repo-a")
+    assert repo_a.duels == 1
+    assert repo_a.wins == 1
+    assert len(repo_a.judges) == 3
+    assert analytics.spread_summary.split_duels == 2
+
     from app.services.albedo_miner_lookup import MinerIdentity, MinerLookup
 
     lookup = MinerLookup(

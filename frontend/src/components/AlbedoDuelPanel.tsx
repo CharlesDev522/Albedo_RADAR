@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import RepoCrownAnalysisPanel from "@/components/RepoCrownAnalysisPanel";
+import AlbedoJudgeAnalysisPanel from "@/components/AlbedoJudgeAnalysisPanel";
 import AlbedoEvalQueueOverviewPanel from "@/components/AlbedoEvalQueueOverview";
 import AlbedoEvalFailsPanel from "@/components/AlbedoEvalFailsPanel";
 import {
@@ -13,9 +14,7 @@ import {
   type AlbedoDuelJudgeVote,
   type AlbedoDuelSummary,
   type AlbedoEvalQueueOverview,
-  type AlbedoJudgeDetail,
   type AlbedoKingTenure,
-  type AlbedoWinRateRow,
 } from "@/lib/api";
 import { useSubnet } from "@/lib/useSubnet";
 import { usePageVisibility } from "@/lib/usePageVisibility";
@@ -115,48 +114,6 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-function JudgeCard({ judge }: { judge: AlbedoJudgeDetail }) {
-  return (
-    <article className={`rounded-lg border p-3 ${judgeStyle(judge.short_name)}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <h4 className="text-[12px] font-semibold">{judge.short_name}</h4>
-          <p className="text-[9px] opacity-70 mt-0.5 truncate" title={judge.judge}>
-            {judge.judge}
-          </p>
-        </div>
-        <span className="text-[10px] mono opacity-80">{judge.duels} duels</span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-x-3 gap-y-2 mt-3 text-[10px]">
-        <Stat label="Avg challenger" value={fmtScore(judge.avg_challenger_score)} />
-        <Stat label="Avg king" value={fmtScore(judge.avg_king_score)} />
-        <Stat label="Picks challenger" value={fmtPct(judge.pick_challenger_pct)} />
-        <Stat label="Agrees w/ verdict" value={fmtPct(judge.agree_verdict_pct)} />
-        <Stat label="Split-panel align" value={fmtPct(judge.split_majority_align_pct)} />
-        <Stat label="Solo dissent wins" value={fmtPct(judge.solo_dissent_win_pct)} />
-        <Stat label="Extreme calls" value={fmtPct(judge.extreme_call_pct)} />
-        <Stat label="Score σ" value={judge.score_std != null ? judge.score_std.toFixed(3) : "—"} />
-      </div>
-
-      <div className="flex flex-wrap gap-1.5 mt-3 text-[9px]">
-        <span className="rounded px-1.5 py-0.5 bg-black/20">
-          overturns {judge.overturn_duels}
-        </span>
-        <span className="rounded px-1.5 py-0.5 bg-black/20">
-          3–0 ch {judge.unanimous_challenger_duels}
-        </span>
-        <span className="rounded px-1.5 py-0.5 bg-black/20">
-          0–3 k {judge.unanimous_king_duels}
-        </span>
-        <span className="rounded px-1.5 py-0.5 bg-black/20">
-          split {judge.split_duels}
-        </span>
-      </div>
-    </article>
-  );
-}
-
 function KingTenureCard({ tenure }: { tenure: AlbedoKingTenure }) {
   const accent = tenure.is_current_king
     ? "border-amber-500/50 bg-gradient-to-br from-amber-500/15 to-zinc-900/80"
@@ -207,66 +164,6 @@ function KingTenureCard({ tenure }: { tenure: AlbedoKingTenure }) {
         )}
       </div>
     </article>
-  );
-}
-
-function ConsensusBar({
-  rows,
-}: {
-  rows: { label: string; pct: number; duels: number; challenger_wins: number }[];
-}) {
-  const max = Math.max(...rows.map((r) => r.pct), 1);
-  return (
-    <div className="space-y-2">
-      {rows.map((row) => (
-        <div key={row.label} className="text-[10px]">
-          <div className="flex justify-between text-zinc-400 mb-0.5">
-            <span>{row.label}</span>
-            <span className="mono">
-              {row.duels} · ch {row.challenger_wins}/{row.duels}
-            </span>
-          </div>
-          <div className="h-2 rounded bg-zinc-800 overflow-hidden">
-            <div
-              className="h-full rounded bg-sky-500/70"
-              style={{ width: `${(row.pct / max) * 100}%` }}
-            />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function WinRateTable({ rows, showCoronations = false }: { rows: AlbedoWinRateRow[]; showCoronations?: boolean }) {
-  if (!rows.length) return <p className="text-[10px] text-zinc-500">No data yet.</p>;
-  return (
-    <table className="w-full text-[10px]">
-      <thead>
-        <tr className="text-zinc-500 border-b border-zinc-800">
-          <th className="text-left py-1 pr-2 font-medium">Entity</th>
-          <th className="text-right py-1 px-1 font-medium">Duels</th>
-          <th className="text-right py-1 px-1 font-medium">Win%</th>
-          <th className="text-right py-1 px-1 font-medium">Margin</th>
-          {showCoronations && <th className="text-right py-1 pl-1 font-medium">👑</th>}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.key} className="border-b border-zinc-800/50">
-            <td className="py-1 pr-2 text-zinc-300 truncate max-w-[160px]" title={row.label}>
-              {row.label}
-            </td>
-            <td className="text-right py-1 px-1 mono text-zinc-500">{row.duels}</td>
-            <td className="text-right py-1 px-1 mono text-emerald-300">{fmtPct(row.win_pct)}</td>
-            <td className="text-right py-1 px-1 mono text-zinc-500">{fmtMargin(row.avg_margin)}</td>
-            {showCoronations && (
-              <td className="text-right py-1 pl-1 mono text-amber-300">{row.coronations || "—"}</td>
-            )}
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }
 
@@ -458,25 +355,6 @@ export default function AlbedoDuelPanel() {
           </div>
 
           <RepoCrownAnalysisPanel analysis={data.repo_crown_analysis} compact />
-
-          <div className="grid lg:grid-cols-2 gap-3">
-            <section className="panel px-3 py-2">
-              <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Judge reliability snapshot</h3>
-              <div className="grid sm:grid-cols-3 gap-2">
-                {(data.judge_details ?? []).map((j) => (
-                  <div key={j.judge} className={`rounded border px-2 py-1.5 text-[10px] ${judgeStyle(j.short_name)}`}>
-                    <p className="font-medium">{j.short_name}</p>
-                    <p className="mono mt-1">{fmtPct(j.agree_verdict_pct)} align</p>
-                    <p className="mono text-[9px] opacity-80">{j.overturn_duels} overturns</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-            <section className="panel px-3 py-2">
-              <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Top repos (challenger duels)</h3>
-              <WinRateTable rows={(data.challenger_by_repo ?? []).slice(0, 8)} showCoronations />
-            </section>
-          </div>
         </>
       )}
 
@@ -486,51 +364,27 @@ export default function AlbedoDuelPanel() {
       )}
 
       {section === "judges" && (
-        <>
-          <section className="panel px-3 py-2.5">
-            <h3 className="text-[11px] font-semibold text-zinc-200">Judge ensemble detail</h3>
-            <p className="text-[9px] text-zinc-600 mt-0.5 mb-3">
-              GLM · Qwen · DeepSeek — per-judge challenger score, pick rate, and verdict alignment
-            </p>
-            <div className="grid md:grid-cols-3 gap-3">
-              {(data.judge_details ?? []).map((j) => (
-                <JudgeCard key={j.judge} judge={j} />
-              ))}
-            </div>
-          </section>
-
-          <div className="grid lg:grid-cols-2 gap-3">
-            <section className="panel px-3 py-2">
-              <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Panel consensus patterns</h3>
-              <p className="text-[9px] text-zinc-600 mb-2">How often judges agree before final verdict</p>
-              <ConsensusBar
-                rows={(data.judge_consensus ?? []).map((c) => ({
-                  label: c.label,
-                  pct: c.pct,
-                  duels: c.duels,
-                  challenger_wins: c.challenger_wins,
-                }))}
-              />
-            </section>
-            <section className="panel px-3 py-2">
-              <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Scoring metrics (challenger avg)</h3>
-              <div className="space-y-1.5">
-                {(data.metric_aggregates ?? []).map((m) => (
-                  <div key={m.metric} className="flex items-center gap-2 text-[10px]">
-                    <span className="w-20 text-zinc-400 capitalize">{m.metric}</span>
-                    <div className="flex-1 h-2 rounded bg-zinc-800 overflow-hidden">
-                      <div
-                        className="h-full rounded bg-violet-500/60"
-                        style={{ width: `${m.avg_challenger_score * 100}%` }}
-                      />
-                    </div>
-                    <span className="w-10 text-right mono text-zinc-300">{fmtScore(m.avg_challenger_score)}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-        </>
+        <AlbedoJudgeAnalysisPanel
+          analytics={data.judge_analytics ?? {
+            total_submissions: data.total_duels,
+            judge_models: data.judge_models,
+            by_repo: [],
+            by_challenger: [],
+            pairwise: [],
+            by_outcome: [],
+            spread_summary: {
+              high_spread_duels: 0,
+              high_spread_pct: 0,
+              unanimous_duels: 0,
+              unanimous_pct: 0,
+              split_duels: 0,
+              split_pct: 0,
+            },
+          }}
+          judgeDetails={data.judge_details ?? []}
+          judgeConsensus={data.judge_consensus ?? []}
+          metricAggregates={data.metric_aggregates ?? []}
+        />
       )}
 
       {section === "kings" && (

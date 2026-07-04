@@ -298,6 +298,70 @@ class AlbedoRepoCrownAnalysis(BaseModel):
     crown_history_coverage_note: str = ""
 
 
+class AlbedoJudgeSlice(BaseModel):
+    judge: str
+    short_name: str
+    duels: int
+    avg_challenger_score: float
+    pick_challenger_pct: float
+    agree_verdict_pct: float
+
+
+class AlbedoEntityJudgeStats(BaseModel):
+    key: str
+    label: str
+    repo: str | None = None
+    hotkey: str | None = None
+    uid: int | None = None
+    duels: int
+    wins: int
+    losses: int
+    win_pct: float
+    coronations: int = 0
+    avg_margin: float | None = None
+    avg_judge_spread: float | None = None
+    unanimous_pct: float | None = None
+    judges: list[AlbedoJudgeSlice] = Field(default_factory=list)
+
+
+class AlbedoJudgePairwise(BaseModel):
+    judge_a: str
+    judge_b: str
+    short_name_a: str
+    short_name_b: str
+    duels: int
+    agree_pct: float
+    avg_score_delta: float | None = None
+    score_correlation: float | None = None
+
+
+class AlbedoJudgeOutcomeSlice(BaseModel):
+    outcome: str
+    label: str
+    duels: int
+    judges: list[AlbedoJudgeSlice] = Field(default_factory=list)
+
+
+class AlbedoJudgeSpreadSummary(BaseModel):
+    avg_spread: float | None = None
+    high_spread_duels: int = 0
+    high_spread_pct: float = 0.0
+    unanimous_duels: int = 0
+    unanimous_pct: float = 0.0
+    split_duels: int = 0
+    split_pct: float = 0.0
+
+
+class AlbedoJudgeAnalytics(BaseModel):
+    total_submissions: int = 0
+    judge_models: list[str] = Field(default_factory=list)
+    by_repo: list[AlbedoEntityJudgeStats] = Field(default_factory=list)
+    by_challenger: list[AlbedoEntityJudgeStats] = Field(default_factory=list)
+    pairwise: list[AlbedoJudgePairwise] = Field(default_factory=list)
+    by_outcome: list[AlbedoJudgeOutcomeSlice] = Field(default_factory=list)
+    spread_summary: AlbedoJudgeSpreadSummary = Field(default_factory=AlbedoJudgeSpreadSummary)
+
+
 class AlbedoAnalysisOverview(BaseModel):
     subnet: int = 97
     source: str = "hippius_dashboard"
@@ -331,6 +395,7 @@ class AlbedoAnalysisOverview(BaseModel):
     judge_aggregates: list[AlbedoJudgeAggregate] = Field(default_factory=list)
     judge_details: list[AlbedoJudgeDetail] = Field(default_factory=list)
     judge_consensus: list[AlbedoJudgeConsensus] = Field(default_factory=list)
+    judge_analytics: AlbedoJudgeAnalytics = Field(default_factory=AlbedoJudgeAnalytics)
     metric_aggregates: list[AlbedoMetricAggregate] = Field(default_factory=list)
     margin_histogram: list[AlbedoMarginBucket] = Field(default_factory=list)
     timeline: list[AlbedoTimelinePoint] = Field(default_factory=list)

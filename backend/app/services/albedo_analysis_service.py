@@ -25,9 +25,15 @@ from app.schemas.albedo_analysis import (
     AlbedoCurrentEval,
     AlbedoDuelJudgeVote,
     AlbedoDuelSummary,
+    AlbedoEntityJudgeStats,
     AlbedoJudgeAggregate,
+    AlbedoJudgeAnalytics,
     AlbedoJudgeConsensus,
     AlbedoJudgeDetail,
+    AlbedoJudgeOutcomeSlice,
+    AlbedoJudgePairwise,
+    AlbedoJudgeSlice,
+    AlbedoJudgeSpreadSummary,
     AlbedoKingCoronation,
     AlbedoKingTenure,
     AlbedoMarginBucket,
@@ -503,6 +509,263 @@ def _build_judge_details(
         if stats["duels"] > 0 and pattern != "unknown"
     ]
     return aggregates, details, consensus
+
+
+def _pearson(xs: list[float], ys: list[float]) -> float | None:
+    n = len(xs)
+    if n < 2 or len(ys) != n:
+        return None
+    mx = mean(xs)
+    my = mean(ys)
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    den_x = sum((x - mx) ** 2 for x in xs) ** 0.5
+    den_y = sum((y - my) ** 2 for y in ys) ** 0.5
+    if den_x == 0 or den_y == 0:
+        return None
+    return round(num / (den_x * den_y), 3)
+
+
+def _entity_judge_bucket() -> dict[str, Any]:
+    return {
+        "duels": 0,
+        "wins": 0,
+        "coronations": 0,
+        "margins": [],
+        "spreads": [],
+        "unanimous": 0,
+        "label": "",
+        "repo": None,
+        "hotkey": None,
+        "uid": None,
+        "judges": defaultdict(lambda: {"scores": [], "pick_ch": 0, "agree": 0}),
+    }
+
+
+def _judge_slices(
+    judge_stats: dict[str, dict[str, Any]],
+    ordered_judges: list[str],
+) -> list[AlbedoJudgeSlice]:
+    rows: list[AlbedoJudgeSlice] = []
+    for judge in ordered_judges:
+        stats = judge_stats.get(judge)
+        if not stats or not stats["scores"]:
+            continue
+        duels = len(stats["scores"])
+        rows.append(
+            AlbedoJudgeSlice(
+                judge=judge,
+                short_name=judge_short_name(judge),
+                duels=duels,
+                avg_challenger_score=round(mean(stats["scores"]), 4),
+                pick_challenger_pct=round(stats["pick_ch"] / duels * 100, 1),
+                agree_verdict_pct=round(stats["agree"] / duels * 100, 1),
+            )
+        )
+    return rows
+
+
+def _entity_judge_row(
+    key: str,
+    bucket: dict[str, Any],
+    ordered_judges: list[str],
+) -> AlbedoEntityJudgeStats:
+    duels = bucket["duels"]
+    wins = bucket["wins"]
+    margins = bucket["margins"]
+    spreads = bucket["spreads"]
+    return AlbedoEntityJudgeStats(
+        key=key,
+        label=bucket["label"] or key,
+        repo=bucket.get("repo"),
+        hotkey=bucket.get("hotkey"),
+        uid=bucket.get("uid"),
+        duels=duels,
+        wins=wins,
+        losses=duels - wins,
+        win_pct=round(wins / duels * 100, 1) if duels else 0.0,
+        coronations=bucket["coronations"],
+        avg_margin=round(mean(margins), 4) if margins else None,
+        avg_judge_spread=round(mean(spreads), 4) if spreads else None,
+        unanimous_pct=round(bucket["unanimous"] / duels * 100, 1) if duels else None,
+        judges=_judge_slices(bucket["judges"], ordered_judges),
+    )
+
+
+def _build_judge_analytics(
+    eval_runs: list[dict[str, Any]],
+    judge_models: list[str],
+    miner_lookup: MinerLookup | None = None,
+) -> AlbedoJudgeAnalytics:
+    repo_buckets: dict[str, dict[str, Any]] = defaultdict(_entity_judge_bucket)
+    challenger_buckets: dict[str, dict[str, Any]] = defaultdict(_entity_judge_bucket)
+    outcome_buckets: dict[str, dict[str, dict[str, Any]]] = {
+        "challenger_win": defaultdict(lambda: {"scores": [], "pick_ch": 0, "agree": 0}),
+        "king_win": defaultdict(lambda: {"scores": [], "pick_ch": 0, "agree": 0}),
+    }
+    pairwise: dict[tuple[str, str], dict[str, Any]] = defaultdict(
+        lambda: {"duels": 0, "agree": 0, "deltas": [], "pairs_a": [], "pairs_b": []}
+    )
+
+    spreads: list[float] = []
+    unanimous = 0
+    split = 0
+    high_spread = 0
+
+    for run in eval_runs:
+        summary = _duel_summary(run, miner_lookup)
+        repo_key = summary.repo or f"{summary.namespace}/{summary.model_name}"
+        hk_key = summary.hotkey or "unknown"
+        challenger_won = summary.challenger_won
+        margin = summary.win_margin
+        votes = _judge_votes(run)
+        pattern = _consensus_pattern(votes)
+        is_unanimous = pattern in ("unanimous_challenger", "unanimous_king")
+        is_split = pattern in ("split_2_1_challenger", "split_1_2_king")
+
+        if is_unanimous:
+            unanimous += 1
+        if is_split:
+            split += 1
+
+        if summary.judge_spread is not None:
+            spreads.append(summary.judge_spread)
+            if summary.judge_spread >= 0.15:
+                high_spread += 1
+
+        for bucket, key, label, repo, hotkey, uid in (
+            (repo_buckets, repo_key, repo_key, repo_key, None, None),
+            (
+                challenger_buckets,
+                hk_key,
+                f"uid {summary.uid} · {hk_key[:8]}…" if len(hk_key) > 12 else f"uid {summary.uid} · {hk_key}",
+                repo_key,
+                hk_key,
+                summary.uid,
+            ),
+        ):
+            b = bucket[key]
+            b["duels"] += 1
+            if challenger_won:
+                b["wins"] += 1
+            if run.get("coronated"):
+                b["coronations"] += 1
+            b["margins"].append(margin)
+            if summary.judge_spread is not None:
+                b["spreads"].append(summary.judge_spread)
+            if is_unanimous:
+                b["unanimous"] += 1
+            b["label"] = label
+            b["repo"] = repo
+            b["hotkey"] = hotkey
+            b["uid"] = uid
+
+        breakdown = run.get("score_breakdown") or {}
+        by_judge = {str(j): float(s) for j, s in (breakdown.get("by_judge") or {}).items()}
+        outcome_key = "challenger_win" if challenger_won else "king_win"
+
+        for judge, score in by_judge.items():
+            picks_ch = score > 0.5
+            agrees = picks_ch == challenger_won
+            for bucket in (repo_buckets[repo_key], challenger_buckets[hk_key]):
+                jstats = bucket["judges"][judge]
+                jstats["scores"].append(score)
+                if picks_ch:
+                    jstats["pick_ch"] += 1
+                if agrees:
+                    jstats["agree"] += 1
+
+            ostats = outcome_buckets[outcome_key][judge]
+            ostats["scores"].append(score)
+            if picks_ch:
+                ostats["pick_ch"] += 1
+            if agrees:
+                ostats["agree"] += 1
+
+        judge_list = sorted(by_judge.keys())
+        for i, ja in enumerate(judge_list):
+            for jb in judge_list[i + 1 :]:
+                pair_key = (ja, jb) if ja < jb else (jb, ja)
+                pa = by_judge[ja]
+                pb = by_judge[jb]
+                pairwise[pair_key]["duels"] += 1
+                if (pa > 0.5) == (pb > 0.5):
+                    pairwise[pair_key]["agree"] += 1
+                pairwise[pair_key]["deltas"].append(abs(pa - pb))
+                pairwise[pair_key]["pairs_a"].append(pa)
+                pairwise[pair_key]["pairs_b"].append(pb)
+
+    ordered_judges = judge_models or sorted(
+        {j for b in repo_buckets.values() for j in b["judges"]}
+    )
+    total = len(eval_runs)
+
+    by_repo = [
+        _entity_judge_row(key, bucket, ordered_judges)
+        for key, bucket in sorted(
+            repo_buckets.items(),
+            key=lambda item: (-item[1]["duels"], -item[1]["wins"]),
+        )
+        if bucket["duels"] >= 1
+    ]
+    by_challenger = [
+        _entity_judge_row(key, bucket, ordered_judges)
+        for key, bucket in sorted(
+            challenger_buckets.items(),
+            key=lambda item: (-item[1]["duels"], -item[1]["wins"]),
+        )
+        if bucket["duels"] >= 1
+    ]
+
+    pairwise_rows: list[AlbedoJudgePairwise] = []
+    for (ja, jb), stats in sorted(pairwise.items(), key=lambda x: x[0]):
+        duels = stats["duels"]
+        if duels < 1:
+            continue
+        pairwise_rows.append(
+            AlbedoJudgePairwise(
+                judge_a=ja,
+                judge_b=jb,
+                short_name_a=judge_short_name(ja),
+                short_name_b=judge_short_name(jb),
+                duels=duels,
+                agree_pct=round(stats["agree"] / duels * 100, 1),
+                avg_score_delta=round(mean(stats["deltas"]), 4) if stats["deltas"] else None,
+                score_correlation=_pearson(stats["pairs_a"], stats["pairs_b"]),
+            )
+        )
+
+    by_outcome: list[AlbedoJudgeOutcomeSlice] = []
+    for outcome, label in (("challenger_win", "Challenger wins"), ("king_win", "King defenses")):
+        judges = outcome_buckets[outcome]
+        duels = sum(1 for r in eval_runs if bool(r.get("challenger_won")) == (outcome == "challenger_win"))
+        by_outcome.append(
+            AlbedoJudgeOutcomeSlice(
+                outcome=outcome,
+                label=label,
+                duels=duels,
+                judges=_judge_slices(judges, ordered_judges),
+            )
+        )
+
+    spread_summary = AlbedoJudgeSpreadSummary(
+        avg_spread=round(mean(spreads), 4) if spreads else None,
+        high_spread_duels=high_spread,
+        high_spread_pct=round(high_spread / total * 100, 1) if total else 0.0,
+        unanimous_duels=unanimous,
+        unanimous_pct=round(unanimous / total * 100, 1) if total else 0.0,
+        split_duels=split,
+        split_pct=round(split / total * 100, 1) if total else 0.0,
+    )
+
+    return AlbedoJudgeAnalytics(
+        total_submissions=total,
+        judge_models=ordered_judges,
+        by_repo=by_repo,
+        by_challenger=by_challenger,
+        pairwise=pairwise_rows,
+        by_outcome=by_outcome,
+        spread_summary=spread_summary,
+    )
 
 
 def _build_reign_slot_holders(
@@ -1057,6 +1320,7 @@ def build_analysis_overview(
         return rows
 
     judge_aggregates, judge_details, judge_consensus = _build_judge_details(eval_runs, judge_models)
+    judge_analytics = _build_judge_analytics(eval_runs, judge_models, miner_lookup)
     reign_slot_holders = _build_reign_slot_holders(reign_members, miner_lookup)
     king_tenures = _build_king_tenures(eval_runs, reign_members, king_history, updated_at, miner_lookup)
     repo_crown_analysis, crowns_by_coldkey = _build_repo_crown_analysis(
@@ -1144,6 +1408,7 @@ def build_analysis_overview(
         judge_aggregates=judge_aggregates,
         judge_details=judge_details,
         judge_consensus=judge_consensus,
+        judge_analytics=judge_analytics,
         metric_aggregates=metric_aggregates,
         margin_histogram=margin_histogram,
         timeline=timeline,

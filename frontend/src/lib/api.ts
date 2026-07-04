@@ -470,6 +470,70 @@ export interface AlbedoJudgeConsensus {
   king_wins: number;
 }
 
+export interface AlbedoJudgeSlice {
+  judge: string;
+  short_name: string;
+  duels: number;
+  avg_challenger_score: number;
+  pick_challenger_pct: number;
+  agree_verdict_pct: number;
+}
+
+export interface AlbedoEntityJudgeStats {
+  key: string;
+  label: string;
+  repo?: string | null;
+  hotkey?: string | null;
+  uid?: number | null;
+  duels: number;
+  wins: number;
+  losses: number;
+  win_pct: number;
+  coronations: number;
+  avg_margin?: number | null;
+  avg_judge_spread?: number | null;
+  unanimous_pct?: number | null;
+  judges: AlbedoJudgeSlice[];
+}
+
+export interface AlbedoJudgePairwise {
+  judge_a: string;
+  judge_b: string;
+  short_name_a: string;
+  short_name_b: string;
+  duels: number;
+  agree_pct: number;
+  avg_score_delta?: number | null;
+  score_correlation?: number | null;
+}
+
+export interface AlbedoJudgeOutcomeSlice {
+  outcome: string;
+  label: string;
+  duels: number;
+  judges: AlbedoJudgeSlice[];
+}
+
+export interface AlbedoJudgeSpreadSummary {
+  avg_spread?: number | null;
+  high_spread_duels: number;
+  high_spread_pct: number;
+  unanimous_duels: number;
+  unanimous_pct: number;
+  split_duels: number;
+  split_pct: number;
+}
+
+export interface AlbedoJudgeAnalytics {
+  total_submissions: number;
+  judge_models: string[];
+  by_repo: AlbedoEntityJudgeStats[];
+  by_challenger: AlbedoEntityJudgeStats[];
+  pairwise: AlbedoJudgePairwise[];
+  by_outcome: AlbedoJudgeOutcomeSlice[];
+  spread_summary: AlbedoJudgeSpreadSummary;
+}
+
 export interface AlbedoMetricAggregate {
   metric: string;
   avg_challenger_score: number;
@@ -706,6 +770,7 @@ export interface AlbedoAnalysisOverview {
   judge_aggregates: AlbedoJudgeAggregate[];
   judge_details: AlbedoJudgeDetail[];
   judge_consensus: AlbedoJudgeConsensus[];
+  judge_analytics: AlbedoJudgeAnalytics;
   metric_aggregates: AlbedoMetricAggregate[];
   margin_histogram: AlbedoMarginBucket[];
   timeline: AlbedoTimelinePoint[];
