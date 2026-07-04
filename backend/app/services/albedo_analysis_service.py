@@ -1311,50 +1311,65 @@ def _build_repo_crown_analysis(
     return analysis, crowns_by_coldkey
 
 
-def _repo_dq_counts_from_dashboard(
+def _repo_uid_sets_from_dashboard(
+    eval_runs: list[dict[str, Any]],
     dashboard: dict[str, Any],
     *,
     miner_lookup: MinerLookup | None,
-) -> dict[str, int]:
-    counts: dict[str, int] = defaultdict(int)
+) -> tuple[dict[str, set[int]], dict[str, set[int]]]:
+    """Per committed repo: evaled UIDs and DQ UIDs (deduped, eval wins over DQ)."""
+    evaled_by_repo: dict[str, set[int]] = defaultdict(set)
+    dq_by_repo: dict[str, set[int]] = defaultdict(set)
+
+    for run in eval_runs:
+        uid = run.get("uid")
+        if uid is None:
+            continue
+        ident = resolve_committed(
+            miner_lookup,
+            hotkey=run.get("hotkey"),
+            uid=int(uid),
+            model_uri=run.get("model_uri") if isinstance(run.get("model_uri"), str) else None,
+        )
+        if ident and ident.repo:
+            evaled_by_repo[ident.repo].add(int(uid))
+
     for raw in dashboard.get("fails") or []:
         if not isinstance(raw, dict):
+            continue
+        uid = raw.get("uid")
+        if uid is None:
             continue
         ident = resolve_committed(
             miner_lookup,
             hotkey=raw.get("hotkey"),
-            uid=int(raw["uid"]) if raw.get("uid") is not None else None,
+            uid=int(uid),
             model_uri=raw.get("model_uri") if isinstance(raw.get("model_uri"), str) else None,
         )
         if ident and ident.repo:
-            counts[ident.repo] += 1
-    return dict(counts)
+            dq_by_repo[ident.repo].add(int(uid))
+
+    return evaled_by_repo, dq_by_repo
 
 
 def _build_repo_submission_stats(
     eval_runs: list[dict[str, Any]],
-    repo_dq_counts: dict[str, int],
+    dashboard: dict[str, Any],
     miner_lookup: MinerLookup | None,
 ) -> list[AlbedoRepoSubmissionStats]:
-    eval_counts: dict[str, int] = defaultdict(int)
-    for run in eval_runs:
-        ident = resolve_committed(
-            miner_lookup,
-            hotkey=run.get("hotkey"),
-            uid=int(run["uid"]) if run.get("uid") is not None else None,
-            model_uri=run.get("model_uri") if isinstance(run.get("model_uri"), str) else None,
-        )
-        if not ident or not ident.repo:
-            continue
-        eval_counts[ident.repo] += 1
+    evaled_by_repo, dq_by_repo = _repo_uid_sets_from_dashboard(
+        eval_runs, dashboard, miner_lookup=miner_lookup
+    )
 
     repo_coldkeys = build_repo_coldkeys_map(miner_lookup)
-    all_repos = set(eval_counts) | set(repo_dq_counts)
+    all_repos = set(evaled_by_repo) | set(dq_by_repo)
     rows: list[AlbedoRepoSubmissionStats] = []
     for repo in all_repos:
-        eval_subs = eval_counts.get(repo, 0)
-        recent_dq = repo_dq_counts.get(repo, 0)
-        total_attempts = eval_subs + recent_dq
+        evaled_uids = evaled_by_repo.get(repo, set())
+        dq_only_uids = dq_by_repo.get(repo, set()) - evaled_uids
+        evaled_count = len(evaled_uids)
+        dq_count = len(dq_only_uids)
+        total_uids = evaled_count + dq_count
         coldkeys = repo_coldkeys.get(repo, [])
         rows.append(
             AlbedoRepoSubmissionStats(
@@ -1362,10 +1377,10 @@ def _build_repo_submission_stats(
                 label=repo_entity_label(repo, coldkeys),
                 repo=repo,
                 coldkeys=coldkeys,
-                eval_submissions=eval_subs,
-                recent_dq=recent_dq,
-                total_attempts=total_attempts,
-                dq_rate_pct=round(recent_dq / total_attempts * 100, 1) if total_attempts else None,
+                eval_submissions=evaled_count,
+                recent_dq=dq_count,
+                total_attempts=total_uids,
+                dq_rate_pct=round(dq_count / total_uids * 100, 1) if total_uids else None,
             )
         )
     rows.sort(key=lambda r: (-r.recent_dq, -r.total_attempts, r.repo))
@@ -1505,9 +1520,8 @@ def build_analysis_overview(
         return rows
 
     judge_aggregates, judge_details, judge_consensus = _build_judge_details(eval_runs, judge_models)
-    repo_dq_counts = _repo_dq_counts_from_dashboard(dashboard, miner_lookup=miner_lookup)
     judge_analytics = _build_judge_analytics(eval_runs, judge_models, miner_lookup)
-    repo_submission_stats = _build_repo_submission_stats(eval_runs, repo_dq_counts, miner_lookup)
+    repo_submission_stats = _build_repo_submission_stats(eval_runs, dashboard, miner_lookup)
     reign_slot_holders = _build_reign_slot_holders(reign_members, miner_lookup)
     king_tenures = _build_king_tenures(eval_runs, reign_members, king_history, updated_at, miner_lookup)
     repo_crown_analysis, crowns_by_coldkey = _build_repo_crown_analysis(

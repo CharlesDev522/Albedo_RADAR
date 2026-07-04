@@ -343,9 +343,10 @@ class AlbedoRepoSubmissionStats(BaseModel):
     dq_rate_pct: float | None = None
     basis: str = "committed_chain_repo"
     note: str = (
-        "DQ rate = recent_dq / total_attempts. "
-        "Only on-chain committed repos (registry/commitments); Hippius model paths excluded. "
-        "total_attempts = completed eval duels + recent terminal-invalid DQs for that committed repo."
+        "Per committed repo: unique UIDs split into evaled vs DQ-only. "
+        "Repeated DQ rows for the same UID count once. "
+        "If a UID both DQ'd and completed eval, it counts as evaled. "
+        "DQ% = dq_only_uids / (evaled_uids + dq_only_uids)."
     )
 
 

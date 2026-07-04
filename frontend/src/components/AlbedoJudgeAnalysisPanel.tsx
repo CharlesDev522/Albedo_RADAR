@@ -364,17 +364,17 @@ function RepoDqStatsTable({ rows }: { rows: AlbedoRepoSubmissionStats[] }) {
     <section className="panel px-3 py-2">
       <h3 className="text-[11px] font-semibold text-zinc-200">Committed-repo DQ rate</h3>
       <p className="text-[9px] text-zinc-600 mt-0.5 mb-2">
-        Disqualification rate per on-chain committed repo (registry/commitments only — not Hippius model paths).
-        DQ% = recent DQ ÷ (completed evals + recent DQ).
+        Unique UIDs per committed repo: evaled vs DQ-only (deduped). Eval beats DQ for the same UID.
+        DQ% = DQ-only UIDs ÷ (evaled + DQ-only UIDs).
       </p>
       <div className="overflow-x-auto">
         <table className="w-full text-[10px] min-w-[520px]">
           <thead>
             <tr className="text-zinc-500 border-b border-zinc-800">
               <th className="text-left py-1 pr-2">Miner</th>
-              <th className="text-right py-1 px-1">Evals</th>
-              <th className="text-right py-1 px-1">DQ</th>
-              <th className="text-right py-1 px-1">Attempts</th>
+              <th className="text-right py-1 px-1">Evaled</th>
+              <th className="text-right py-1 px-1">DQ UIDs</th>
+              <th className="text-right py-1 px-1">Total UIDs</th>
               <th className="text-right py-1 pl-1">DQ%</th>
             </tr>
           </thead>

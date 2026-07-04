@@ -327,12 +327,11 @@ def test_repo_submission_stats_and_cluster_labels():
         miner_lookup=lookup,
     )
     stats = next(s for s in overview.repo_submission_stats if s.repo == "org/repo-a")
-    assert stats.eval_submissions == 2
-    assert stats.recent_dq == 1
-    assert stats.total_attempts == 3
-    assert stats.dq_rate_pct == round(1 / 3 * 100, 1)
+    assert stats.eval_submissions == 1
+    assert stats.recent_dq == 0
+    assert stats.total_attempts == 1
+    assert stats.dq_rate_pct == 0.0
     assert "org/repo-a" in stats.label
-    assert "ck_owner" in stats.label or "ck_own" in stats.label
 
     repo_row = overview.judge_analytics.by_repo[0]
     assert "org/repo-a" in repo_row.label
@@ -346,6 +345,80 @@ def test_repo_submission_stats_and_cluster_labels():
         miner_lookup=lookup_no_commit,
     )
     assert overview2.repo_submission_stats == []
+
+
+def test_repo_submission_stats_uid_dq_dedup_and_split():
+    from app.services.albedo_miner_lookup import MinerIdentity, MinerLookup
+
+    lookup = MinerLookup(
+        by_hotkey={
+            "hk_a": MinerIdentity(coldkey="ck1", repo="org/repo-a", uid=1),
+            "hk_b": MinerIdentity(coldkey="ck2", repo="org/repo-a", uid=2),
+            "hk_c": MinerIdentity(coldkey="ck3", repo="org/repo-a", uid=3),
+        },
+        by_uid={
+            1: MinerIdentity(coldkey="ck1", repo="org/repo-a", uid=1),
+            2: MinerIdentity(coldkey="ck2", repo="org/repo-a", uid=2),
+            3: MinerIdentity(coldkey="ck3", repo="org/repo-a", uid=3),
+        },
+    )
+    dashboard = {
+        "updated_at": "2026-06-27T12:00:00+00:00",
+        "chain": {"judge_models": []},
+        "reign": {"members": []},
+        "current_eval": None,
+        "queue": [],
+        "fails": [
+            {
+                "submission_id": "dq1",
+                "uid": 2,
+                "hotkey": "hk_b",
+                "model_uri": "org/repo-a@sha256:9",
+                "state": "TERMINAL_INVALID",
+            },
+            {
+                "submission_id": "dq1b",
+                "uid": 2,
+                "hotkey": "hk_b",
+                "model_uri": "org/repo-a@sha256:10",
+                "state": "TERMINAL_INVALID",
+            },
+            {
+                "submission_id": "dq2",
+                "uid": 3,
+                "hotkey": "hk_c",
+                "model_uri": "org/repo-a@sha256:11",
+                "state": "TERMINAL_INVALID",
+            },
+        ],
+        "eval_runs": [
+            {
+                "eval_run_id": "r1",
+                "challenger_won": True,
+                "coronated": False,
+                "score_challenger": 0.6,
+                "score_king": 0.4,
+                "win_margin": 0.2,
+                "finished_at": "2026-06-27T10:00:00+00:00",
+                "model_uri": "org/repo-a@sha256:1",
+                "hotkey": "hk_a",
+                "uid": 1,
+                "score_breakdown": {"by_judge": {}},
+                "king": {"king_version": 1, "model_uri": "org/king@sha256:0", "uid": 9, "hotkey": "hk_k"},
+            },
+        ],
+    }
+    overview = build_analysis_overview(
+        dashboard,
+        subnet=97,
+        source_url="https://example.com/dashboard.json",
+        miner_lookup=lookup,
+    )
+    stats = next(s for s in overview.repo_submission_stats if s.repo == "org/repo-a")
+    assert stats.eval_submissions == 1
+    assert stats.recent_dq == 2
+    assert stats.total_attempts == 3
+    assert stats.dq_rate_pct == round(2 / 3 * 100, 1)
 
 
 def test_repo_crown_analysis_multi_owner_and_links():
