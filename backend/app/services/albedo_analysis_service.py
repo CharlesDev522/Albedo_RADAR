@@ -54,6 +54,7 @@ from app.services.albedo_miner_lookup import (
     build_repo_coldkeys_map,
     coldkey_entity_label,
     repo_entity_label,
+    resolve_committed,
 )
 
 logger = logging.getLogger(__name__)
@@ -673,8 +674,6 @@ def _build_judge_analytics(
     eval_runs: list[dict[str, Any]],
     judge_models: list[str],
     miner_lookup: MinerLookup | None = None,
-    *,
-    repo_dq_counts: dict[str, int] | None = None,
 ) -> AlbedoJudgeAnalytics:
     repo_buckets: dict[str, dict[str, Any]] = defaultdict(_entity_judge_bucket)
     coldkey_buckets: dict[str, dict[str, Any]] = defaultdict(_entity_judge_bucket)
@@ -789,10 +788,6 @@ def _build_judge_analytics(
     total = len(eval_runs)
     coldkey_repos = build_coldkey_repos_map(miner_lookup)
     repo_coldkeys = build_repo_coldkeys_map(miner_lookup)
-
-    for repo_key, dq_count in (repo_dq_counts or {}).items():
-        if repo_key in repo_buckets:
-            repo_buckets[repo_key]["recent_dq"] = dq_count
 
     min_entity_duels = 2
     by_repo = [
@@ -1321,12 +1316,18 @@ def _repo_dq_counts_from_dashboard(
     *,
     miner_lookup: MinerLookup | None,
 ) -> dict[str, int]:
-    from app.services.albedo_eval_queue_service import parse_dashboard_fails
-
     counts: dict[str, int] = defaultdict(int)
-    for fail in parse_dashboard_fails(dashboard, lookup=miner_lookup, limit=500):
-        if fail.repo:
-            counts[fail.repo] += 1
+    for raw in dashboard.get("fails") or []:
+        if not isinstance(raw, dict):
+            continue
+        ident = resolve_committed(
+            miner_lookup,
+            hotkey=raw.get("hotkey"),
+            uid=int(raw["uid"]) if raw.get("uid") is not None else None,
+            model_uri=raw.get("model_uri") if isinstance(raw.get("model_uri"), str) else None,
+        )
+        if ident and ident.repo:
+            counts[ident.repo] += 1
     return dict(counts)
 
 
@@ -1337,9 +1338,15 @@ def _build_repo_submission_stats(
 ) -> list[AlbedoRepoSubmissionStats]:
     eval_counts: dict[str, int] = defaultdict(int)
     for run in eval_runs:
-        summary = _duel_summary(run, miner_lookup)
-        repo = summary.repo or f"{summary.namespace}/{summary.model_name}"
-        eval_counts[repo] += 1
+        ident = resolve_committed(
+            miner_lookup,
+            hotkey=run.get("hotkey"),
+            uid=int(run["uid"]) if run.get("uid") is not None else None,
+            model_uri=run.get("model_uri") if isinstance(run.get("model_uri"), str) else None,
+        )
+        if not ident or not ident.repo:
+            continue
+        eval_counts[ident.repo] += 1
 
     repo_coldkeys = build_repo_coldkeys_map(miner_lookup)
     all_repos = set(eval_counts) | set(repo_dq_counts)
@@ -1499,9 +1506,7 @@ def build_analysis_overview(
 
     judge_aggregates, judge_details, judge_consensus = _build_judge_details(eval_runs, judge_models)
     repo_dq_counts = _repo_dq_counts_from_dashboard(dashboard, miner_lookup=miner_lookup)
-    judge_analytics = _build_judge_analytics(
-        eval_runs, judge_models, miner_lookup, repo_dq_counts=repo_dq_counts
-    )
+    judge_analytics = _build_judge_analytics(eval_runs, judge_models, miner_lookup)
     repo_submission_stats = _build_repo_submission_stats(eval_runs, repo_dq_counts, miner_lookup)
     reign_slot_holders = _build_reign_slot_holders(reign_members, miner_lookup)
     king_tenures = _build_king_tenures(eval_runs, reign_members, king_history, updated_at, miner_lookup)

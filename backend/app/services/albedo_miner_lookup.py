@@ -204,6 +204,36 @@ async def load_historical_miner_lookup(db: AsyncSession, subnet: int) -> MinerLo
     )
 
 
+def resolve_committed(
+    lookup: MinerLookup | None,
+    *,
+    hotkey: str | None = None,
+    uid: int | None = None,
+    model_uri: str | None = None,
+    namespace: str | None = None,
+    model_name: str | None = None,
+) -> MinerIdentity | None:
+    """Return identity only when a chain-committed repo is known (no Hippius path fallback)."""
+    if not lookup:
+        return None
+    ident = lookup.resolve(
+        hotkey=hotkey or None,
+        uid=uid,
+        model_uri=model_uri,
+        namespace=namespace,
+        model_name=model_name,
+    )
+    if ident and ident.repo:
+        return ident
+    return None
+
+
+def committed_repos(lookup: MinerLookup | None) -> set[str]:
+    if not lookup:
+        return set()
+    return {ident.repo for ident in lookup.by_hotkey.values() if ident.repo}
+
+
 def build_coldkey_repos_map(lookup: MinerLookup | None) -> dict[str, list[str]]:
     """Map coldkey → Hippius repos (clusters-style, from commitment registry)."""
     if not lookup:

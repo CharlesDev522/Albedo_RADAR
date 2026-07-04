@@ -335,8 +335,17 @@ def test_repo_submission_stats_and_cluster_labels():
     assert "ck_owner" in stats.label or "ck_own" in stats.label
 
     repo_row = overview.judge_analytics.by_repo[0]
-    assert repo_row.recent_dq == 1
     assert "org/repo-a" in repo_row.label
+
+    # Hippius-only path without chain commit is excluded from DQ stats
+    lookup_no_commit = MinerLookup(by_hotkey={}, by_uid={})
+    overview2 = build_analysis_overview(
+        dashboard,
+        subnet=97,
+        source_url="https://example.com/dashboard.json",
+        miner_lookup=lookup_no_commit,
+    )
+    assert overview2.repo_submission_stats == []
 
 
 def test_repo_crown_analysis_multi_owner_and_links():

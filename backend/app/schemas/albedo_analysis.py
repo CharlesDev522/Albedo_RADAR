@@ -341,6 +341,12 @@ class AlbedoRepoSubmissionStats(BaseModel):
     recent_dq: int = 0
     total_attempts: int = 0
     dq_rate_pct: float | None = None
+    basis: str = "committed_chain_repo"
+    note: str = (
+        "DQ rate = recent_dq / total_attempts. "
+        "Only on-chain committed repos (registry/commitments); Hippius model paths excluded. "
+        "total_attempts = completed eval duels + recent terminal-invalid DQs for that committed repo."
+    )
 
 
 class AlbedoJudgePairwise(BaseModel):

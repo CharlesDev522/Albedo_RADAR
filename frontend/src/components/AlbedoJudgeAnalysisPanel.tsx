@@ -232,12 +232,6 @@ function EntityJudgeTable({
           <thead>
             <tr className="text-zinc-500 border-b border-zinc-800">
               <th className="text-left py-1 pr-2 sticky left-0 bg-zinc-900/95">Miner</th>
-              {groupBy === "repo" && (
-                <>
-                  <th className="text-right py-1 px-1">DQ</th>
-                  <th className="text-right py-1 px-1">DQ%</th>
-                </>
-              )}
               <th className="text-right py-1 px-1">Miners</th>
               <th className="text-right py-1 px-1">Duels</th>
               <th className="text-right py-1 px-1">Win%</th>
@@ -257,7 +251,6 @@ function EntityJudgeTable({
             </tr>
             <tr className="text-zinc-600 border-b border-zinc-800/50 text-[9px]">
               <th className="sticky left-0 bg-zinc-900/95" />
-              {groupBy === "repo" && <th colSpan={2} />}
               <th colSpan={7} />
               {judgeOrder.map((j) => (
                 <Fragment key={`hdr-${j}`}>
@@ -282,12 +275,6 @@ function EntityJudgeTable({
                       repos={row.repos}
                     />
                   </td>
-                  {groupBy === "repo" && (
-                    <>
-                      <td className="text-right py-1 px-1 mono text-rose-300">{row.recent_dq ?? 0}</td>
-                      <td className="text-right py-1 px-1 mono text-rose-300/80">{fmtPct(row.dq_rate_pct)}</td>
-                    </>
-                  )}
                   <td className="text-right py-1 px-1 mono text-zinc-500">{row.miner_count || "—"}</td>
                   <td className="text-right py-1 px-1 mono text-zinc-400">{row.duels}</td>
                   <td className="text-right py-1 px-1 mono text-emerald-300">{fmtPct(row.win_pct)}</td>
@@ -375,9 +362,10 @@ function RepoDqStatsTable({ rows }: { rows: AlbedoRepoSubmissionStats[] }) {
   if (!rows.length) return null;
   return (
     <section className="panel px-3 py-2">
-      <h3 className="text-[11px] font-semibold text-zinc-200">Repo DQ rate (recent)</h3>
+      <h3 className="text-[11px] font-semibold text-zinc-200">Committed-repo DQ rate</h3>
       <p className="text-[9px] text-zinc-600 mt-0.5 mb-2">
-        Recent terminal invalids vs total attempts (eval duels + recent DQ) per Hippius repo
+        Disqualification rate per on-chain committed repo (registry/commitments only — not Hippius model paths).
+        DQ% = recent DQ ÷ (completed evals + recent DQ).
       </p>
       <div className="overflow-x-auto">
         <table className="w-full text-[10px] min-w-[520px]">
@@ -385,7 +373,7 @@ function RepoDqStatsTable({ rows }: { rows: AlbedoRepoSubmissionStats[] }) {
             <tr className="text-zinc-500 border-b border-zinc-800">
               <th className="text-left py-1 pr-2">Miner</th>
               <th className="text-right py-1 px-1">Evals</th>
-              <th className="text-right py-1 px-1">Recent DQ</th>
+              <th className="text-right py-1 px-1">DQ</th>
               <th className="text-right py-1 px-1">Attempts</th>
               <th className="text-right py-1 pl-1">DQ%</th>
             </tr>
