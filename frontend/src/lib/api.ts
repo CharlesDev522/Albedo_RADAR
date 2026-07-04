@@ -488,6 +488,7 @@ export interface AlbedoEntityJudgeStats {
   uid?: number | null;
   miner_count: number;
   repos: string[];
+  coldkeys?: string[];
   duels: number;
   wins: number;
   losses: number;
@@ -497,6 +498,20 @@ export interface AlbedoEntityJudgeStats {
   avg_judge_spread?: number | null;
   unanimous_pct?: number | null;
   judges: AlbedoJudgeSlice[];
+  recent_dq?: number;
+  dq_rate_pct?: number | null;
+  total_attempts?: number;
+}
+
+export interface AlbedoRepoSubmissionStats {
+  key: string;
+  label: string;
+  repo: string;
+  coldkeys: string[];
+  eval_submissions: number;
+  recent_dq: number;
+  total_attempts: number;
+  dq_rate_pct?: number | null;
 }
 
 export interface AlbedoJudgePairwise {
@@ -594,6 +609,7 @@ export interface AlbedoEvalFail {
   uid?: number | null;
   hotkey?: string | null;
   repo?: string | null;
+  coldkey?: string | null;
   model_uri?: string | null;
   state?: string | null;
   fault_class?: string | null;
@@ -699,6 +715,7 @@ export interface AlbedoCrownLeaderboardRow {
   coldkeys: string[];
   hotkeys: string[];
   uids: number[];
+  repos?: string[];
   duel_count: number;
   challenger_wins: number;
   challenger_win_pct?: number | null;
@@ -779,6 +796,7 @@ export interface AlbedoAnalysisOverview {
   timeline: AlbedoTimelinePoint[];
   pipeline: AlbedoPipelineStage[];
   miner_lookup_coverage_pct?: number | null;
+  repo_submission_stats: AlbedoRepoSubmissionStats[];
   note: string;
 }
 

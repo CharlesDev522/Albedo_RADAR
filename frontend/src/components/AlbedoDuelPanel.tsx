@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import RepoCrownAnalysisPanel from "@/components/RepoCrownAnalysisPanel";
 import AlbedoJudgeAnalysisPanel from "@/components/AlbedoJudgeAnalysisPanel";
+import { EntityNameCell } from "@/lib/entityLabels";
 import AlbedoEvalQueueOverviewPanel from "@/components/AlbedoEvalQueueOverview";
 import AlbedoEvalFailsPanel from "@/components/AlbedoEvalFailsPanel";
 import {
@@ -390,6 +391,7 @@ export default function AlbedoDuelPanel() {
           judgeDetails={data.judge_details ?? []}
           judgeConsensus={data.judge_consensus ?? []}
           metricAggregates={data.metric_aggregates ?? []}
+          repoSubmissionStats={data.repo_submission_stats ?? []}
         />
       )}
 
@@ -457,8 +459,7 @@ export default function AlbedoDuelPanel() {
                   <tr className="text-zinc-500 border-b border-zinc-800">
                     <th className="text-left py-1 pr-2">Ver</th>
                     <th className="text-left py-1 pr-2">When</th>
-                    <th className="text-left py-1 pr-2">Repo</th>
-                    <th className="text-left py-1 pr-2">Coldkey</th>
+                    <th className="text-left py-1 pr-2">Miner</th>
                     <th className="text-left py-1 pr-2">Defeated</th>
                     <th className="text-left py-1 pr-2">Margin</th>
                   </tr>
@@ -468,10 +469,9 @@ export default function AlbedoDuelPanel() {
                     <tr key={entry.eval_run_id} className="border-b border-zinc-800/50">
                       <td className="py-1 pr-2 mono text-amber-300">v{entry.king_version}</td>
                       <td className="py-1 pr-2 text-zinc-500 whitespace-nowrap">{fmtTime(entry.finished_at)}</td>
-                      <td className="py-1 pr-2 text-zinc-300 truncate max-w-[140px]" title={entry.repo ?? ""}>
-                        {shortRepo(entry.repo ?? entry.model_name, 28)}
+                      <td className="py-1 pr-2 truncate max-w-[160px]" title={entry.repo ?? entry.model_name}>
+                        <EntityNameCell repo={entry.repo ?? entry.model_name} coldkey={entry.coldkey} />
                       </td>
-                      <td className="py-1 pr-2 mono text-zinc-500">{entry.coldkey ? shortAddr(entry.coldkey, 5) : "—"}</td>
                       <td className="py-1 pr-2 text-zinc-500">
                         {entry.defeated_model_name ? `v${entry.defeated_king_version}` : "—"}
                       </td>

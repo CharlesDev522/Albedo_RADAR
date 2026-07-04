@@ -43,11 +43,18 @@ from app.schemas.albedo_analysis import (
     AlbedoReignSlotHolder,
     AlbedoRepoColdkeyLink,
     AlbedoRepoCrownAnalysis,
+    AlbedoRepoSubmissionStats,
     AlbedoRewardBasis,
     AlbedoTimelinePoint,
     AlbedoWinRateRow,
 )
-from app.services.albedo_miner_lookup import MinerLookup
+from app.services.albedo_miner_lookup import (
+    MinerLookup,
+    build_coldkey_repos_map,
+    build_repo_coldkeys_map,
+    coldkey_entity_label,
+    repo_entity_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -541,7 +548,9 @@ def _entity_judge_bucket() -> dict[str, Any]:
         "hotkeys": set(),
         "uids": set(),
         "repos": set(),
+        "coldkeys": set(),
         "judges": defaultdict(lambda: {"scores": [], "pick_ch": 0, "agree": 0}),
+        "recent_dq": 0,
     }
 
 
@@ -577,6 +586,7 @@ def _touch_entity_bucket(
         b["repos"].add(repo)
     if coldkey:
         b["coldkey"] = coldkey
+        b["coldkeys"].add(coldkey)
     if hotkey:
         b["hotkey"] = hotkey
         b["hotkeys"].add(hotkey)
@@ -613,20 +623,37 @@ def _entity_judge_row(
     key: str,
     bucket: dict[str, Any],
     ordered_judges: list[str],
+    *,
+    group_type: str = "repo",
+    coldkey_repos: dict[str, list[str]] | None = None,
+    repo_coldkeys: dict[str, list[str]] | None = None,
 ) -> AlbedoEntityJudgeStats:
     duels = bucket["duels"]
     wins = bucket["wins"]
     margins = bucket["margins"]
     spreads = bucket["spreads"]
+    repos = sorted(bucket.get("repos") or [])
+    coldkeys = sorted(bucket.get("coldkeys") or [])
+    if group_type == "coldkey" and coldkey_repos:
+        repos = sorted(set(repos) | set(coldkey_repos.get(key, [])))
+    if group_type == "repo" and repo_coldkeys:
+        coldkeys = sorted(set(coldkeys) | set(repo_coldkeys.get(key, [])))
+    if group_type == "coldkey":
+        label = coldkey_entity_label(key, repos)
+    else:
+        label = repo_entity_label(key, coldkeys)
+    recent_dq = int(bucket.get("recent_dq") or 0)
+    total_attempts = duels + recent_dq
     return AlbedoEntityJudgeStats(
         key=key,
-        label=bucket["label"] or key,
-        repo=bucket.get("repo"),
-        coldkey=bucket.get("coldkey"),
+        label=label,
+        repo=bucket.get("repo") if group_type == "repo" else (repos[0] if len(repos) == 1 else None),
+        coldkey=bucket.get("coldkey") if group_type == "coldkey" else (coldkeys[0] if len(coldkeys) == 1 else None),
         hotkey=bucket.get("hotkey"),
         uid=bucket.get("uid"),
         miner_count=len(bucket.get("hotkeys") or ()),
-        repos=sorted(bucket.get("repos") or []),
+        repos=repos,
+        coldkeys=coldkeys,
         duels=duels,
         wins=wins,
         losses=duels - wins,
@@ -636,6 +663,9 @@ def _entity_judge_row(
         avg_judge_spread=round(mean(spreads), 4) if spreads else None,
         unanimous_pct=round(bucket["unanimous"] / duels * 100, 1) if duels else None,
         judges=_judge_slices(bucket["judges"], ordered_judges),
+        recent_dq=recent_dq,
+        dq_rate_pct=round(recent_dq / total_attempts * 100, 1) if total_attempts else None,
+        total_attempts=total_attempts,
     )
 
 
@@ -643,6 +673,8 @@ def _build_judge_analytics(
     eval_runs: list[dict[str, Any]],
     judge_models: list[str],
     miner_lookup: MinerLookup | None = None,
+    *,
+    repo_dq_counts: dict[str, int] | None = None,
 ) -> AlbedoJudgeAnalytics:
     repo_buckets: dict[str, dict[str, Any]] = defaultdict(_entity_judge_bucket)
     coldkey_buckets: dict[str, dict[str, Any]] = defaultdict(_entity_judge_bucket)
@@ -755,10 +787,23 @@ def _build_judge_analytics(
         {j for b in repo_buckets.values() for j in b["judges"]}
     )
     total = len(eval_runs)
+    coldkey_repos = build_coldkey_repos_map(miner_lookup)
+    repo_coldkeys = build_repo_coldkeys_map(miner_lookup)
+
+    for repo_key, dq_count in (repo_dq_counts or {}).items():
+        if repo_key in repo_buckets:
+            repo_buckets[repo_key]["recent_dq"] = dq_count
 
     min_entity_duels = 2
     by_repo = [
-        _entity_judge_row(key, bucket, ordered_judges)
+        _entity_judge_row(
+            key,
+            bucket,
+            ordered_judges,
+            group_type="repo",
+            coldkey_repos=coldkey_repos,
+            repo_coldkeys=repo_coldkeys,
+        )
         for key, bucket in sorted(
             repo_buckets.items(),
             key=lambda item: (-item[1]["duels"], -item[1]["wins"]),
@@ -766,7 +811,14 @@ def _build_judge_analytics(
         if bucket["duels"] >= min_entity_duels
     ]
     by_coldkey = [
-        _entity_judge_row(key, bucket, ordered_judges)
+        _entity_judge_row(
+            key,
+            bucket,
+            ordered_judges,
+            group_type="coldkey",
+            coldkey_repos=coldkey_repos,
+            repo_coldkeys=repo_coldkeys,
+        )
         for key, bucket in sorted(
             coldkey_buckets.items(),
             key=lambda item: (-item[1]["duels"], -item[1]["wins"]),
@@ -1163,6 +1215,7 @@ def _build_repo_crown_analysis(
                     coldkeys=coldkeys,
                     hotkeys=sorted(data["hotkeys"]),
                     uids=sorted(data["uids"]),
+                    repos=repos,
                     duel_count=duel_count if group_type == "repo" else 0,
                     challenger_wins=challenger_wins if group_type == "repo" else 0,
                     challenger_win_pct=(
@@ -1261,6 +1314,73 @@ def _build_repo_crown_analysis(
         grand_total_estimated_tao=round(grand_tao, 6) if grand_tao is not None else None,
     )
     return analysis, crowns_by_coldkey
+
+
+def _repo_dq_counts_from_dashboard(
+    dashboard: dict[str, Any],
+    *,
+    miner_lookup: MinerLookup | None,
+) -> dict[str, int]:
+    from app.services.albedo_eval_queue_service import parse_dashboard_fails
+
+    counts: dict[str, int] = defaultdict(int)
+    for fail in parse_dashboard_fails(dashboard, lookup=miner_lookup, limit=500):
+        if fail.repo:
+            counts[fail.repo] += 1
+    return dict(counts)
+
+
+def _build_repo_submission_stats(
+    eval_runs: list[dict[str, Any]],
+    repo_dq_counts: dict[str, int],
+    miner_lookup: MinerLookup | None,
+) -> list[AlbedoRepoSubmissionStats]:
+    eval_counts: dict[str, int] = defaultdict(int)
+    for run in eval_runs:
+        summary = _duel_summary(run, miner_lookup)
+        repo = summary.repo or f"{summary.namespace}/{summary.model_name}"
+        eval_counts[repo] += 1
+
+    repo_coldkeys = build_repo_coldkeys_map(miner_lookup)
+    all_repos = set(eval_counts) | set(repo_dq_counts)
+    rows: list[AlbedoRepoSubmissionStats] = []
+    for repo in all_repos:
+        eval_subs = eval_counts.get(repo, 0)
+        recent_dq = repo_dq_counts.get(repo, 0)
+        total_attempts = eval_subs + recent_dq
+        coldkeys = repo_coldkeys.get(repo, [])
+        rows.append(
+            AlbedoRepoSubmissionStats(
+                key=repo,
+                label=repo_entity_label(repo, coldkeys),
+                repo=repo,
+                coldkeys=coldkeys,
+                eval_submissions=eval_subs,
+                recent_dq=recent_dq,
+                total_attempts=total_attempts,
+                dq_rate_pct=round(recent_dq / total_attempts * 100, 1) if total_attempts else None,
+            )
+        )
+    rows.sort(key=lambda r: (-r.recent_dq, -r.total_attempts, r.repo))
+    return rows
+
+
+def _enrich_crown_cluster_labels(
+    analysis: AlbedoRepoCrownAnalysis,
+    miner_lookup: MinerLookup | None,
+) -> None:
+    coldkey_repos = build_coldkey_repos_map(miner_lookup)
+    repo_coldkeys = build_repo_coldkeys_map(miner_lookup)
+
+    for row in analysis.crowns_by_repo:
+        cks = sorted(set(row.coldkeys) | set(repo_coldkeys.get(row.key, [])))
+        row.coldkeys = cks
+        row.label = repo_entity_label(row.key, cks)
+
+    for row in analysis.crowns_by_coldkey:
+        repos = sorted(set(row.repos) | set(coldkey_repos.get(row.key, [])))
+        row.repos = repos
+        row.label = coldkey_entity_label(row.key, repos)
 
 
 def build_analysis_overview(
@@ -1378,7 +1498,11 @@ def build_analysis_overview(
         return rows
 
     judge_aggregates, judge_details, judge_consensus = _build_judge_details(eval_runs, judge_models)
-    judge_analytics = _build_judge_analytics(eval_runs, judge_models, miner_lookup)
+    repo_dq_counts = _repo_dq_counts_from_dashboard(dashboard, miner_lookup=miner_lookup)
+    judge_analytics = _build_judge_analytics(
+        eval_runs, judge_models, miner_lookup, repo_dq_counts=repo_dq_counts
+    )
+    repo_submission_stats = _build_repo_submission_stats(eval_runs, repo_dq_counts, miner_lookup)
     reign_slot_holders = _build_reign_slot_holders(reign_members, miner_lookup)
     king_tenures = _build_king_tenures(eval_runs, reign_members, king_history, updated_at, miner_lookup)
     repo_crown_analysis, crowns_by_coldkey = _build_repo_crown_analysis(
@@ -1389,6 +1513,7 @@ def build_analysis_overview(
     repo_crown_analysis.latest_crown_version = versions[-1] if versions else None
     repo_crown_analysis.archived_crown_count = archived_crown_count
     crowns_by_repo = repo_crown_analysis.crowns_by_repo
+    _enrich_crown_cluster_labels(repo_crown_analysis, miner_lookup)
 
     metric_aggregates = [
         AlbedoMetricAggregate(
@@ -1472,6 +1597,7 @@ def build_analysis_overview(
         timeline=timeline,
         pipeline=_build_pipeline(state),
         miner_lookup_coverage_pct=miner_lookup.coverage_pct if miner_lookup else None,
+        repo_submission_stats=repo_submission_stats,
         note=(
             "Live duel data from Hippius Albedo dashboard JSON (eval_runs + reign chain)."
             + lookup_note

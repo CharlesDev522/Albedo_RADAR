@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { hippiusModelUrl, shortAddr, shortRepo, type AlbedoEvalFail, type AlbedoEvalQueueOverview } from "@/lib/api";
+import { EntityNameCell } from "@/lib/entityLabels";
+import { hippiusModelUrl, shortAddr, type AlbedoEvalFail, type AlbedoEvalQueueOverview } from "@/lib/api";
 
 type FaultFilter = "all" | "MINER_FAULT" | "INFRA_FAULT";
 
@@ -27,21 +28,19 @@ function faultBadge(faultClass: string | null | undefined): string {
 
 function FailRow({ row }: { row: AlbedoEvalFail }) {
   const url = row.model_uri ? hippiusModelUrl(row.model_uri.split("@")[0]) : null;
-  const repo = shortRepo(
-    row.repo ?? (row.model_uri ? row.model_uri.split("@")[0] : "—"),
-    32
-  );
 
   return (
     <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/20 align-top">
       <td className="py-1.5 pr-2 text-zinc-500 whitespace-nowrap">{fmtTime(row.updated_at)}</td>
       <td className="py-1.5 pr-2">
         {url ? (
-          <a href={url} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline block truncate max-w-[150px]">
-            {repo}
+          <a href={url} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline block truncate max-w-[180px]">
+            <EntityNameCell repo={row.repo ?? undefined} coldkey={row.coldkey} />
           </a>
         ) : (
-          <span className="text-zinc-300 block truncate max-w-[150px]">{repo}</span>
+          <span className="block truncate max-w-[180px]">
+            <EntityNameCell repo={row.repo ?? undefined} coldkey={row.coldkey} />
+          </span>
         )}
         <span className="text-[9px] text-zinc-600">uid {row.uid ?? "—"}</span>
       </td>
@@ -122,7 +121,7 @@ export default function AlbedoEvalFailsPanel({ data }: { data: AlbedoEvalQueueOv
             <thead>
               <tr className="text-zinc-500 border-b border-zinc-800">
                 <th className="text-left py-1 pr-2">When</th>
-                <th className="text-left py-1 pr-2">Model</th>
+                <th className="text-left py-1 pr-2">Miner</th>
                 <th className="text-left py-1 pr-2">Hotkey</th>
                 <th className="text-left py-1 pr-2">Fault</th>
                 <th className="text-left py-1 pr-2">State</th>

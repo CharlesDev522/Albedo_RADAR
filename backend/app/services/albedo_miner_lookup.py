@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -201,3 +202,47 @@ async def load_historical_miner_lookup(db: AsyncSession, subnet: int) -> MinerLo
         hotkey_records=list(hotkey_records),
         miners=list(miners),
     )
+
+
+def build_coldkey_repos_map(lookup: MinerLookup | None) -> dict[str, list[str]]:
+    """Map coldkey → Hippius repos (clusters-style, from commitment registry)."""
+    if not lookup:
+        return {}
+    grouped: dict[str, set[str]] = defaultdict(set)
+    for ident in lookup.by_hotkey.values():
+        if ident.coldkey and ident.repo:
+            grouped[ident.coldkey].add(ident.repo)
+    return {ck: sorted(repos) for ck, repos in grouped.items()}
+
+
+def build_repo_coldkeys_map(lookup: MinerLookup | None) -> dict[str, list[str]]:
+    """Map repo → coldkeys operating that repo."""
+    if not lookup:
+        return {}
+    grouped: dict[str, set[str]] = defaultdict(set)
+    for ident in lookup.by_hotkey.values():
+        if ident.coldkey and ident.repo:
+            grouped[ident.repo].add(ident.coldkey)
+    return {repo: sorted(cks) for repo, cks in grouped.items()}
+
+
+def short_coldkey(coldkey: str, n: int = 8) -> str:
+    return coldkey if len(coldkey) <= n + 2 else f"{coldkey[:n]}…"
+
+
+def repo_entity_label(repo: str, coldkeys: list[str] | None = None) -> str:
+    cks = coldkeys or []
+    if len(cks) == 1:
+        return f"{repo} ({short_coldkey(cks[0])})"
+    if len(cks) > 1:
+        return f"{repo} ({len(cks)} coldkeys)"
+    return repo
+
+
+def coldkey_entity_label(coldkey: str, repos: list[str] | None = None) -> str:
+    linked = repos or []
+    if len(linked) == 1:
+        return f"{linked[0]} ({short_coldkey(coldkey)})"
+    if len(linked) > 1:
+        return f"{linked[0]} +{len(linked) - 1} ({short_coldkey(coldkey)})"
+    return short_coldkey(coldkey, 12)

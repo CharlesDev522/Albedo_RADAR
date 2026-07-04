@@ -28,22 +28,24 @@ def _resolve_repo(
     raw: dict[str, Any],
     *,
     lookup: MinerLookup | None,
-) -> tuple[str | None, str | None, str | None, int | None]:
+) -> tuple[str | None, str | None, str | None, int | None, str | None]:
     model_uri = raw.get("model_uri")
     hotkey = raw.get("hotkey")
     uid = raw.get("uid")
     uid_i = int(uid) if uid is not None else None
     ns, name, uri = parse_model_uri(model_uri if isinstance(model_uri, str) else None)
     repo = None
+    coldkey = None
     commit_block = None
     if lookup and hotkey:
         ident = lookup.resolve(hotkey=str(hotkey), uid=uid_i, model_uri=model_uri if isinstance(model_uri, str) else None)
         if ident:
             repo = ident.repo
+            coldkey = ident.coldkey
             commit_block = ident.commit_block
     if not repo and ns:
         repo = f"{ns}/{name}" if name else ns
-    return repo, ns or None, name or None, commit_block
+    return repo, ns or None, name or None, commit_block, coldkey
 
 
 def _participant_from_raw(
@@ -52,7 +54,7 @@ def _participant_from_raw(
     lookup: MinerLookup | None,
     position: int | None = None,
 ) -> AlbedoEvalParticipant:
-    repo, ns, name, commit_block = _resolve_repo(raw, lookup=lookup)
+    repo, ns, name, commit_block, _coldkey = _resolve_repo(raw, lookup=lookup)
     model_uri = raw.get("model_uri")
     return AlbedoEvalParticipant(
         position=position,
@@ -137,7 +139,7 @@ def _parse_fails(
     for raw in dashboard.get("fails") or []:
         if not isinstance(raw, dict):
             continue
-        repo, _, _, _ = _resolve_repo(raw, lookup=lookup)
+        repo, _, _, _, coldkey = _resolve_repo(raw, lookup=lookup)
         rows.append(
             AlbedoEvalFail(
                 submission_id=raw.get("submission_id"),
@@ -145,6 +147,7 @@ def _parse_fails(
                 uid=int(raw["uid"]) if raw.get("uid") is not None else None,
                 hotkey=raw.get("hotkey"),
                 repo=repo,
+                coldkey=coldkey,
                 model_uri=raw.get("model_uri"),
                 state=raw.get("state"),
                 fault_class=raw.get("fault_class"),

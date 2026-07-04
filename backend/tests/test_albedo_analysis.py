@@ -262,6 +262,83 @@ def test_judge_analytics_aggregates_by_coldkey_across_hotkeys():
     assert len(analytics.by_repo) == 0
 
 
+def test_repo_submission_stats_and_cluster_labels():
+    from app.services.albedo_miner_lookup import MinerIdentity, MinerLookup
+
+    lookup = MinerLookup(
+        by_hotkey={
+            "hk_a": MinerIdentity(coldkey="ck_owner", repo="org/repo-a", uid=1),
+        },
+        by_uid={1: MinerIdentity(coldkey="ck_owner", repo="org/repo-a", uid=1)},
+    )
+    dashboard = {
+        "updated_at": "2026-06-27T12:00:00+00:00",
+        "chain": {"judge_models": ["z-ai/glm-5.1"]},
+        "reign": {"members": []},
+        "current_eval": None,
+        "queue": [],
+        "fails": [
+            {
+                "submission_id": "dq1",
+                "uid": 1,
+                "hotkey": "hk_a",
+                "model_uri": "org/repo-a@sha256:9",
+                "state": "TERMINAL_INVALID",
+                "fault_class": "MINER_FAULT",
+                "updated_at": "2026-06-27T11:00:00+00:00",
+            }
+        ],
+        "eval_runs": [
+            {
+                "eval_run_id": "r1",
+                "challenger_won": True,
+                "coronated": False,
+                "score_challenger": 0.6,
+                "score_king": 0.4,
+                "win_margin": 0.2,
+                "finished_at": "2026-06-27T10:00:00+00:00",
+                "model_uri": "org/repo-a@sha256:1",
+                "hotkey": "hk_a",
+                "uid": 1,
+                "score_breakdown": {"by_judge": {"z-ai/glm-5.1": 0.6}},
+                "king": {"king_version": 1, "model_uri": "org/king@sha256:0", "uid": 9, "hotkey": "hk_k"},
+            },
+            {
+                "eval_run_id": "r2",
+                "challenger_won": False,
+                "coronated": False,
+                "score_challenger": 0.4,
+                "score_king": 0.6,
+                "win_margin": -0.2,
+                "finished_at": "2026-06-27T10:30:00+00:00",
+                "model_uri": "org/repo-a@sha256:2",
+                "hotkey": "hk_a",
+                "uid": 1,
+                "score_breakdown": {"by_judge": {"z-ai/glm-5.1": 0.4}},
+                "king": {"king_version": 1, "model_uri": "org/king@sha256:0", "uid": 9, "hotkey": "hk_k"},
+            },
+        ],
+    }
+
+    overview = build_analysis_overview(
+        dashboard,
+        subnet=97,
+        source_url="https://example.com/dashboard.json",
+        miner_lookup=lookup,
+    )
+    stats = next(s for s in overview.repo_submission_stats if s.repo == "org/repo-a")
+    assert stats.eval_submissions == 2
+    assert stats.recent_dq == 1
+    assert stats.total_attempts == 3
+    assert stats.dq_rate_pct == round(1 / 3 * 100, 1)
+    assert "org/repo-a" in stats.label
+    assert "ck_owner" in stats.label or "ck_own" in stats.label
+
+    repo_row = overview.judge_analytics.by_repo[0]
+    assert repo_row.recent_dq == 1
+    assert "org/repo-a" in repo_row.label
+
+
 def test_repo_crown_analysis_multi_owner_and_links():
     from app.services.albedo_miner_lookup import MinerIdentity, MinerLookup
 

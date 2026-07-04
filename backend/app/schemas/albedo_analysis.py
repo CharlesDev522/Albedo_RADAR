@@ -257,6 +257,7 @@ class AlbedoCrownLeaderboardRow(BaseModel):
     coldkeys: list[str] = Field(default_factory=list)
     hotkeys: list[str] = Field(default_factory=list)
     uids: list[int] = Field(default_factory=list)
+    repos: list[str] = Field(default_factory=list)
     duel_count: int = 0
     challenger_wins: int = 0
     challenger_win_pct: float | None = None
@@ -325,6 +326,21 @@ class AlbedoEntityJudgeStats(BaseModel):
     avg_judge_spread: float | None = None
     unanimous_pct: float | None = None
     judges: list[AlbedoJudgeSlice] = Field(default_factory=list)
+    coldkeys: list[str] = Field(default_factory=list)
+    recent_dq: int = 0
+    dq_rate_pct: float | None = None
+    total_attempts: int = 0
+
+
+class AlbedoRepoSubmissionStats(BaseModel):
+    key: str
+    label: str
+    repo: str
+    coldkeys: list[str] = Field(default_factory=list)
+    eval_submissions: int = 0
+    recent_dq: int = 0
+    total_attempts: int = 0
+    dq_rate_pct: float | None = None
 
 
 class AlbedoJudgePairwise(BaseModel):
@@ -404,4 +420,5 @@ class AlbedoAnalysisOverview(BaseModel):
     timeline: list[AlbedoTimelinePoint] = Field(default_factory=list)
     pipeline: list[AlbedoPipelineStage] = Field(default_factory=list)
     miner_lookup_coverage_pct: float | None = None
+    repo_submission_stats: list[AlbedoRepoSubmissionStats] = Field(default_factory=list)
     note: str = ""

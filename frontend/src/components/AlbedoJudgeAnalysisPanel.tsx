@@ -1,8 +1,8 @@
 "use client";
 
 import { Fragment } from "react";
+import { EntityNameCell } from "@/lib/entityLabels";
 import {
-  shortAddr,
   shortRepo,
   type AlbedoEntityJudgeStats,
   type AlbedoJudgeAnalytics,
@@ -11,6 +11,7 @@ import {
   type AlbedoJudgePairwise,
   type AlbedoJudgeSlice,
   type AlbedoMetricAggregate,
+  type AlbedoRepoSubmissionStats,
 } from "@/lib/api";
 
 const JUDGE_COLORS: Record<string, string> = {
@@ -230,10 +231,13 @@ function EntityJudgeTable({
         <table className="w-full text-[10px] min-w-[720px]">
           <thead>
             <tr className="text-zinc-500 border-b border-zinc-800">
-              <th className="text-left py-1 pr-2 sticky left-0 bg-zinc-900/95">
-                {groupBy === "repo" ? "Repo" : "Coldkey"}
-              </th>
-              {groupBy === "coldkey" && <th className="text-left py-1 pr-2">Repos</th>}
+              <th className="text-left py-1 pr-2 sticky left-0 bg-zinc-900/95">Miner</th>
+              {groupBy === "repo" && (
+                <>
+                  <th className="text-right py-1 px-1">DQ</th>
+                  <th className="text-right py-1 px-1">DQ%</th>
+                </>
+              )}
               <th className="text-right py-1 px-1">Miners</th>
               <th className="text-right py-1 px-1">Duels</th>
               <th className="text-right py-1 px-1">Win%</th>
@@ -253,7 +257,7 @@ function EntityJudgeTable({
             </tr>
             <tr className="text-zinc-600 border-b border-zinc-800/50 text-[9px]">
               <th className="sticky left-0 bg-zinc-900/95" />
-              {groupBy === "coldkey" && <th />}
+              {groupBy === "repo" && <th colSpan={2} />}
               <th colSpan={7} />
               {judgeOrder.map((j) => (
                 <Fragment key={`hdr-${j}`}>
@@ -269,17 +273,20 @@ function EntityJudgeTable({
               const judges = sliceMap(row.judges);
               return (
                 <tr key={row.key} className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
-                  <td className="py-1 pr-2 text-zinc-300 sticky left-0 bg-zinc-900/90 truncate max-w-[160px]" title={row.label}>
-                    {groupBy === "coldkey"
-                      ? shortAddr(row.coldkey ?? row.label, 6)
-                      : shortRepo(row.repo ?? row.label, 28)}
+                  <td className="py-1 pr-2 sticky left-0 bg-zinc-900/90 truncate max-w-[200px]" title={row.label}>
+                    <EntityNameCell
+                      label={row.label}
+                      repo={row.repo}
+                      coldkey={row.coldkey}
+                      coldkeys={row.coldkeys}
+                      repos={row.repos}
+                    />
                   </td>
-                  {groupBy === "coldkey" && (
-                    <td className="py-1 pr-2 text-zinc-500 truncate max-w-[140px]" title={(row.repos ?? []).join(", ")}>
-                      {(row.repos ?? []).length <= 1
-                        ? shortRepo(row.repos?.[0] ?? row.repo ?? "—", 22)
-                        : `${row.repos.length} repos`}
-                    </td>
+                  {groupBy === "repo" && (
+                    <>
+                      <td className="text-right py-1 px-1 mono text-rose-300">{row.recent_dq ?? 0}</td>
+                      <td className="text-right py-1 px-1 mono text-rose-300/80">{fmtPct(row.dq_rate_pct)}</td>
+                    </>
                   )}
                   <td className="text-right py-1 px-1 mono text-zinc-500">{row.miner_count || "—"}</td>
                   <td className="text-right py-1 px-1 mono text-zinc-400">{row.duels}</td>
@@ -364,16 +371,56 @@ function OutcomeComparison({
   );
 }
 
+function RepoDqStatsTable({ rows }: { rows: AlbedoRepoSubmissionStats[] }) {
+  if (!rows.length) return null;
+  return (
+    <section className="panel px-3 py-2">
+      <h3 className="text-[11px] font-semibold text-zinc-200">Repo DQ rate (recent)</h3>
+      <p className="text-[9px] text-zinc-600 mt-0.5 mb-2">
+        Recent terminal invalids vs total attempts (eval duels + recent DQ) per Hippius repo
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[10px] min-w-[520px]">
+          <thead>
+            <tr className="text-zinc-500 border-b border-zinc-800">
+              <th className="text-left py-1 pr-2">Miner</th>
+              <th className="text-right py-1 px-1">Evals</th>
+              <th className="text-right py-1 px-1">Recent DQ</th>
+              <th className="text-right py-1 px-1">Attempts</th>
+              <th className="text-right py-1 pl-1">DQ%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 20).map((row) => (
+              <tr key={row.key} className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
+                <td className="py-1 pr-2 truncate max-w-[220px]" title={row.label}>
+                  <EntityNameCell label={row.label} repo={row.repo} coldkeys={row.coldkeys} />
+                </td>
+                <td className="text-right py-1 px-1 mono text-zinc-400">{row.eval_submissions}</td>
+                <td className="text-right py-1 px-1 mono text-rose-300">{row.recent_dq}</td>
+                <td className="text-right py-1 px-1 mono text-zinc-500">{row.total_attempts}</td>
+                <td className="text-right py-1 pl-1 mono text-rose-300/90">{fmtPct(row.dq_rate_pct)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export default function AlbedoJudgeAnalysisPanel({
   analytics,
   judgeDetails,
   judgeConsensus,
   metricAggregates,
+  repoSubmissionStats = [],
 }: {
   analytics: AlbedoJudgeAnalytics;
   judgeDetails: AlbedoJudgeDetail[];
   judgeConsensus: AlbedoJudgeConsensus[];
   metricAggregates: AlbedoMetricAggregate[];
+  repoSubmissionStats?: AlbedoRepoSubmissionStats[];
 }) {
   const judgeOrder =
     judgeDetails.length > 0
@@ -440,9 +487,11 @@ export default function AlbedoJudgeAnalysisPanel({
         <OutcomeComparison slices={analytics.by_outcome} judgeOrder={judgeOrder} />
       </section>
 
+      <RepoDqStatsTable rows={repoSubmissionStats} />
+
       <EntityJudgeTable
         title="Per-repo judge analysis"
-        subtitle="All submissions rolled up by Hippius repo — win rate and GLM · Qwen · DeepSeek splits"
+        subtitle="Repo name with coldkey — win rate, DQ%, GLM · Qwen · DeepSeek splits"
         rows={analytics.by_repo}
         judgeOrder={judgeOrder}
         groupBy="repo"
@@ -450,7 +499,7 @@ export default function AlbedoJudgeAnalysisPanel({
 
       <EntityJudgeTable
         title="Per-coldkey judge analysis"
-        subtitle="All submissions rolled up by miner coldkey — spans repos and hotkeys under the same owner"
+        subtitle="Primary repo(s) with coldkey — spans hotkeys under same owner"
         rows={analytics.by_coldkey}
         judgeOrder={judgeOrder}
         groupBy="coldkey"

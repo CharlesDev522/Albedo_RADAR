@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
+import { EntityNameCell } from "@/lib/entityLabels";
 import {
   shortAddr,
   shortRepo,
@@ -344,7 +345,7 @@ export default function RepoCrownAnalysisPanel({
               <thead>
                 <tr className="text-zinc-500 border-b border-zinc-800">
                   <th className="text-left py-1 pr-2 w-6" />
-                  <th className="text-left py-1 pr-2">{view === "coldkeys" ? "Coldkey" : "Repo"}</th>
+                  <th className="text-left py-1 pr-2">Miner</th>
                   <th className="text-right py-1 px-1">Total α</th>
                   <th className="text-right py-1 px-1">Total τ</th>
                   <th className="text-right py-1 px-1">Daily α</th>
@@ -368,8 +369,13 @@ export default function RepoCrownAnalysisPanel({
                       >
                         <td className="py-1.5 pr-1 text-zinc-600">{isOpen ? "▼" : "▶"}</td>
                         <td className="py-1.5 pr-2">
-                          <p className="text-zinc-200 truncate max-w-[200px]" title={row.label}>
-                            {view === "coldkeys" ? shortAddr(row.label, 10) : shortRepo(row.label, 34)}
+                          <p className="truncate max-w-[240px]" title={row.label}>
+                            <EntityNameCell
+                              label={row.label}
+                              repo={view === "repos" ? row.key : row.repos?.[0]}
+                              coldkeys={row.coldkeys}
+                              repos={row.repos}
+                            />
                           </p>
                           {view === "repos" && row.multi_owner && (
                             <span className="inline-block mt-0.5 text-[8px] px-1 rounded border border-sky-500/40 text-sky-300 bg-sky-500/10">
@@ -402,8 +408,8 @@ export default function RepoCrownAnalysisPanel({
                                 <ul className="space-y-1">
                                   {linksForRepo.map((link) => (
                                     <li key={`${link.repo}:${link.coldkey}`} className="flex justify-between gap-2">
-                                      <span className="text-zinc-300" title={view === "repos" ? link.coldkey : link.repo}>
-                                        {view === "repos" ? shortAddr(link.coldkey, 8) : shortRepo(link.repo, 22)}
+                                      <span title={`${link.repo} · ${link.coldkey}`}>
+                                        <EntityNameCell repo={link.repo} coldkey={link.coldkey} />
                                         {link.in_reign && <span className="ml-1 text-amber-400">reign</span>}
                                       </span>
                                       <span className="mono text-zinc-500">
@@ -480,8 +486,7 @@ export default function RepoCrownAnalysisPanel({
             <table className="w-full text-[10px]">
               <thead>
                 <tr className="text-zinc-500 border-b border-zinc-800">
-                  <th className="text-left py-1 pr-2">Repo</th>
-                  <th className="text-left py-1 pr-2">Coldkey</th>
+                  <th className="text-left py-1 pr-2">Miner</th>
                   <th className="text-right py-1 px-1">Total α</th>
                   <th className="text-right py-1 px-1">Daily α</th>
                   <th className="text-right py-1 px-1">👑</th>
@@ -492,11 +497,8 @@ export default function RepoCrownAnalysisPanel({
               <tbody>
                 {filteredLinks.slice(0, displayLimit).map((link) => (
                   <tr key={`${link.repo}:${link.coldkey}`} className="border-b border-zinc-800/50">
-                    <td className="py-1 pr-2 text-zinc-300 truncate max-w-[140px]" title={link.repo}>
-                      {shortRepo(link.repo, 28)}
-                    </td>
-                    <td className="py-1 pr-2 text-zinc-400" title={link.coldkey}>
-                      {shortAddr(link.coldkey, 8)}
+                    <td className="py-1 pr-2 truncate max-w-[200px]" title={`${link.repo} · ${link.coldkey}`}>
+                      <EntityNameCell repo={link.repo} coldkey={link.coldkey} />
                       {link.in_reign && <span className="ml-1 text-[8px] text-amber-400">reign</span>}
                     </td>
                     <td className="text-right py-1 px-1 mono text-violet-300">{fmtAlpha(link.total_estimated_alpha)}</td>

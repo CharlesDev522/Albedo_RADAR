@@ -38,6 +38,7 @@ class AlbedoEvalFail(BaseModel):
     uid: int | None = None
     hotkey: str | None = None
     repo: str | None = None
+    coldkey: str | None = None
     model_uri: str | None = None
     state: str | None = None
     fault_class: str | None = None
