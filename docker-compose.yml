@@ -1,6 +1,8 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
+    shm_size: 256mb
     environment:
       POSTGRES_USER: minerwatch
       POSTGRES_PASSWORD: minerwatch
@@ -12,10 +14,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U minerwatch"]
+      test: ["CMD-SHELL", "pg_isready -U minerwatch -d minerwatch"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 12
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
