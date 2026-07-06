@@ -1,3 +1,7 @@
+# Docker Compose — MinerWatch stack
+# REQUIRED: cp .env.example .env and set SLACK_WEBHOOK_URL (see NOTIFICATIONS.md)
+# Notification secrets are loaded from .env via env_file only (not overridden below).
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -7,10 +11,6 @@ services:
       POSTGRES_USER: minerwatch
       POSTGRES_PASSWORD: minerwatch
       POSTGRES_DB: minerwatch
-    # No host port mapping — api/collector reach postgres via Docker network.
-    # If you need host access (psql/pgAdmin), uncomment and pick a free port:
-    # ports:
-    #   - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,9 +22,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    # Internal only; uncomment if you need host Redis access:
-    # ports:
-    #   - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -37,6 +34,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
       REDIS_URL: redis://redis:6379/0
@@ -51,12 +50,26 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 90s
     restart: unless-stopped
 
   collector:
     build:
       context: ./backend
       dockerfile: Dockerfile.collector
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
       REDIS_URL: redis://redis:6379/0
@@ -89,13 +102,13 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Server-side fetch from inside Docker network
       API_URL: http://api:8000/api/v1
-      # Optional: set if browser also needs direct API access
+      INTERNAL_API_PROXY: http://127.0.0.1:3000/api/v1
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
       NEXT_PUBLIC_LIVE_URL: http://localhost:8000/api/v1/live/stream
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

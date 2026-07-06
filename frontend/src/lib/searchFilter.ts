@@ -72,3 +72,75 @@ export function matchesGroup(
     })
   );
 }
+
+/** Match repo activity track rows (repos table). */
+export function matchesRepoTrack(
+  query: string,
+  track: {
+    uid?: number | null;
+    hotkey?: string | null;
+    coldkey?: string | null;
+    repo?: string | null;
+    chain_digest?: string | null;
+    hub_digest?: string | null;
+    model_family?: string | null;
+    repo_host?: string | null;
+    track_source?: string | null;
+    hub_commit_message?: string | null;
+  }
+): boolean {
+  const q = normalizeSearchQuery(query);
+  if (!q) return true;
+
+  return matchesMinerFields(q, {
+    uid: track.uid,
+    hotkey: track.hotkey,
+    coldkey: track.coldkey,
+    repo: track.repo,
+    digest: track.chain_digest ?? track.hub_digest,
+    modelFamily: track.model_family,
+  }) ||
+    haystack(
+      track.repo_host,
+      track.track_source,
+      track.hub_commit_message,
+      track.chain_digest,
+      track.hub_digest
+    ).includes(q);
+}
+
+/** Match repo activity feed events. */
+export function matchesRepoActivityEvent(
+  query: string,
+  event: {
+    uid?: number | null;
+    hotkey?: string | null;
+    coldkey?: string | null;
+    repo?: string | null;
+    chain_digest?: string | null;
+    hub_digest?: string | null;
+    model_family?: string | null;
+    event_type?: string | null;
+    commit_message?: string | null;
+  }
+): boolean {
+  const q = normalizeSearchQuery(query);
+  if (!q) return true;
+
+  return (
+    matchesMinerFields(q, {
+      uid: event.uid,
+      hotkey: event.hotkey,
+      coldkey: event.coldkey,
+      repo: event.repo,
+      digest: event.chain_digest ?? event.hub_digest,
+      modelFamily: event.model_family,
+    }) ||
+    haystack(
+      event.event_type,
+      event.commit_message,
+      event.chain_digest,
+      event.hub_digest
+    ).includes(q)
+  );
+}

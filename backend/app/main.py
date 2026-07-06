@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
 from app.api.routes import (
+    albedo_analysis,
     coldkeys,
     commitments,
     encrypted_commitments,
@@ -20,6 +22,8 @@ from app.api.routes import (
     live,
     market,
     miners,
+    notifications,
+    repo_activity,
     slot_status,
 )
 from app.config import get_settings
@@ -29,11 +33,18 @@ from app.db.session import engine, get_db
 from app.schemas.miner import HealthResponse
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db(engine)
+    try:
+        await init_db(engine)
+    except Exception:
+        logger.exception(
+            "Database init failed — API will start but DB endpoints may error. "
+            "Check: docker compose logs api"
+        )
     yield
     await engine.dispose()
 
@@ -65,6 +76,9 @@ app.include_router(coldkeys.router, prefix=api_prefix)
 app.include_router(events.router, prefix=api_prefix)
 app.include_router(incentives.router, prefix=api_prefix)
 app.include_router(market.router, prefix=api_prefix)
+app.include_router(repo_activity.router, prefix=api_prefix)
+app.include_router(albedo_analysis.router, prefix=api_prefix)
+app.include_router(notifications.router, prefix=api_prefix)
 app.include_router(github_watch.router, prefix=api_prefix)
 
 

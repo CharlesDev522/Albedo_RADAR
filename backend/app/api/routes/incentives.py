@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.db.models import Miner, MinerCommitment, MinerStatus
 from app.db.session import get_db
 from app.schemas.incentives import IncentiveOverviewResponse, MinerIncentiveEntry
+from app.rewards.champion import build_champion_reward
 
 router = APIRouter(prefix="/incentives", tags=["incentives"])
 settings = get_settings()
@@ -90,6 +91,7 @@ async def incentive_overview(
         )
 
     entries.sort(key=lambda e: (-e.incentive, e.uid))
+    champion = await build_champion_reward(subnet, entries)
     entries = entries[:limit]
     top = entries[0].incentive if entries else 0.0
     return IncentiveOverviewResponse(
@@ -98,6 +100,7 @@ async def incentive_overview(
         incentivized_count=sum(1 for e in entries if e.receiving_incentive),
         top_incentive=top,
         miners=entries,
+        champion=champion,
     )
 
 

@@ -28,33 +28,43 @@ async function proxyRequest(req: NextRequest, pathSegments: string[]) {
     body = await req.arrayBuffer();
   }
 
-  try {
-    const upstream = await fetch(target, {
-      method: req.method,
-      headers,
-      body,
-      cache: "no-store",
-    });
+  const maxAttempts = 3;
+  let lastError: unknown;
 
-    const responseHeaders = new Headers();
-    for (const key of ["content-type", "cache-control", "connection", "x-accel-buffering"]) {
-      const value = upstream.headers.get(key);
-      if (value) responseHeaders.set(key, value);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const upstream = await fetch(target, {
+        method: req.method,
+        headers,
+        body,
+        cache: "no-store",
+      });
+
+      const responseHeaders = new Headers();
+      for (const key of ["content-type", "cache-control", "connection", "x-accel-buffering"]) {
+        const value = upstream.headers.get(key);
+        if (value) responseHeaders.set(key, value);
+      }
+
+      return new NextResponse(upstream.body, {
+        status: upstream.status,
+        headers: responseHeaders,
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, attempt * 500));
+      }
     }
-
-    return new NextResponse(upstream.body, {
-      status: upstream.status,
-      headers: responseHeaders,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json(
-      {
-        detail: `Cannot reach API at ${backendOrigin()}/api/v1/${path}: ${message}`,
-      },
-      { status: 502 },
-    );
   }
+
+  const message = lastError instanceof Error ? lastError.message : String(lastError);
+  return NextResponse.json(
+    {
+      detail: `Cannot reach API at ${target}: ${message}. Check: docker compose ps api && docker compose logs api --tail 40 && curl -sf http://localhost:8000/health`,
+    },
+    { status: 502 },
+  );
 }
 
 type RouteContext = { params: Promise<{ path: string[] }> };

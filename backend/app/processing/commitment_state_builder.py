@@ -16,6 +16,8 @@ from app.chain_reader.subnet_commit_rules import (
     normalize_stored_version,
 )
 from app.collectors.event_publisher import EventPublisher
+from app.notifications.dispatcher import NotificationDispatcher
+from app.notifications.messages import build_commit_new_alert, build_commit_updated_alert
 from app.collectors.subtensor_client import MetagraphSnapshot, SubtensorClient
 from app.db.models import (
     CommitmentHistory,
@@ -32,8 +34,13 @@ logger = logging.getLogger(__name__)
 class CommitmentStateBuilder:
     """Upserts latest model commitments and records history on changes."""
 
-    def __init__(self, publisher: EventPublisher | None = None) -> None:
+    def __init__(
+        self,
+        publisher: EventPublisher | None = None,
+        notifier: NotificationDispatcher | None = None,
+    ) -> None:
         self.publisher = publisher
+        self.notifier = notifier
 
     async def process_commits(
         self,
@@ -70,6 +77,10 @@ class CommitmentStateBuilder:
                     {"model_uri": commit.model_uri, "commit_block": commit.block_number},
                     stats,
                 )
+                if self.notifier:
+                    await self.notifier.notify_content(
+                        session, build_commit_new_alert(commit)
+                    )
                 stats["new"] += 1
             elif existing.payload_hash != commit.payload_hash:
                 previous_hash = existing.payload_hash
@@ -102,6 +113,11 @@ class CommitmentStateBuilder:
                     },
                     stats,
                 )
+                if self.notifier:
+                    await self.notifier.notify_content(
+                        session,
+                        build_commit_updated_alert(commit, previous_hash=previous_hash),
+                    )
                 stats["updated"] += 1
             else:
                 existing.uid = commit.uid

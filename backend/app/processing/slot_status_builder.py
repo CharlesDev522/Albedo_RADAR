@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chain_reader.slot_commitment_scanner import SlotStatus
 from app.db.models import MinerSlotStatus
+from app.notifications.dispatcher import NotificationDispatcher
+from app.notifications.messages import build_slot_changed_alert, build_slot_new_alert
+from app.notifications.slot_rules import is_slot_purchase, should_notify_slot_new
 
 
 class SlotStatusBuilder:
+    def __init__(self, notifier: NotificationDispatcher | None = None) -> None:
+        self.notifier = notifier
+
     async def process_slots(
         self,
         session: AsyncSession,
@@ -50,14 +57,27 @@ class SlotStatusBuilder:
                         last_updated=now,
                     )
                 )
+                if self.notifier and should_notify_slot_new(slot):
+                    await self.notifier.notify_content(
+                        session, build_slot_new_alert(slot, netuid)
+                    )
                 stats["updated"] += 1
             else:
+                previous: dict[str, Any] | None = None
                 changed = (
                     row.hotkey != slot.hotkey
                     or row.commitment_type != ctype
                     or row.payload_hash != slot.payload_hash
                     or row.commit_block != slot.commit_block
                 )
+                if changed:
+                    previous = {
+                        "hotkey": row.hotkey,
+                        "commitment_type": row.commitment_type,
+                        "commit_block": row.commit_block,
+                        "payload_hash": row.payload_hash,
+                        "detail": row.detail,
+                    }
                 row.hotkey = slot.hotkey
                 row.coldkey = slot.coldkey
                 row.registered_at_block = slot.registered_at_block
@@ -71,6 +91,11 @@ class SlotStatusBuilder:
                 row.encrypted_hash = slot.encrypted_hash
                 row.last_updated = now
                 if changed:
+                    if self.notifier and previous is not None and is_slot_purchase(previous, slot):
+                        await self.notifier.notify_content(
+                            session,
+                            build_slot_changed_alert(slot, netuid, previous=previous),
+                        )
                     stats["updated"] += 1
                 else:
                     stats["unchanged"] += 1

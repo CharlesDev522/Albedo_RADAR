@@ -7,11 +7,7 @@ import {
   shortRepo,
   modelCommitUrl,
 } from "@/lib/api";
-import {
-  sortCommits,
-  sortRegistry,
-  type DashboardSortKey,
-} from "@/lib/dashboardSort";
+import { sortCommits, type DashboardSortKey } from "@/lib/dashboardSort";
 import { getSubnetProfile } from "@/lib/subnets";
 import { getSubnetTheme } from "@/lib/subnetTheme";
 import { DASHBOARD_POLL_MS, useDashboardSync } from "@/lib/DashboardSyncContext";
@@ -37,7 +33,6 @@ export default function LiveDashboard() {
   const {
     stats,
     commits,
-    registry,
     syncStatus,
     lastRefresh,
     latencyMs,
@@ -47,15 +42,12 @@ export default function LiveDashboard() {
     feed,
   } = useDashboardSync();
   const [commitSort, setCommitSort] = useState<DashboardSortKey>("commit_desc");
-  const [registrySort, setRegistrySort] = useState<DashboardSortKey>("committed_first");
   const [feedSearch, setFeedSearch] = useState("");
   const [commitSearch, setCommitSearch] = useState("");
-  const [registrySearch, setRegistrySearch] = useState("");
 
   useEffect(() => {
     setFeedSearch("");
     setCommitSearch("");
-    setRegistrySearch("");
   }, [subnet]);
 
   const commitLabel = theme.commitLabel;
@@ -83,25 +75,6 @@ export default function LiveDashboard() {
     );
   }, [sortedCommits, commitSearch]);
 
-  const sortedRegistry = useMemo(
-    () => sortRegistry(registry?.miners ?? [], registrySort),
-    [registry?.miners, registrySort]
-  );
-  const filteredRegistry = useMemo(() => {
-    if (!isSearchActive(registrySearch)) return sortedRegistry;
-    return sortedRegistry.filter((m) =>
-      matchesMinerFields(registrySearch, {
-        uid: m.uid,
-        hotkey: m.hotkey,
-        coldkey: m.coldkey,
-        repo: m.repo,
-        modelUri: m.model_uri,
-        version: m.version,
-        modelFamily: m.model_family ?? inferAlbedoModelFamily(m.repo),
-      })
-    );
-  }, [sortedRegistry, registrySearch]);
-
   const filteredFeed = useMemo(() => {
     if (!isSearchActive(feedSearch)) return subnetFeed;
     return subnetFeed.filter((e) =>
@@ -116,15 +89,7 @@ export default function LiveDashboard() {
     );
   }, [subnetFeed, feedSearch]);
 
-  const fmtIncentive = (n: number | null | undefined) => {
-    if (n == null || n <= 0) return "—";
-    if (n >= 0.999) return "100%";
-    return `${(n * 100).toFixed(1)}%`;
-  };
-
-  const waiting = registry?.miners.filter((m) => !m.has_v6) ?? [];
-  const committedCount = registry?.v6_count ?? commits.length;
-  const unpublishedCount = stats?.uncommitted_miners ?? waiting.length;
+  const unpublishedCount = stats?.uncommitted_miners ?? 0;
 
   return (
     <div className="space-y-3">
@@ -185,18 +150,12 @@ export default function LiveDashboard() {
         </span>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
         <Kpi label="miners" value={String(stats?.total_neurons ?? "—")} />
-        <Kpi label={`${commitLabel} committed`} value={String(stats?.committed_miners ?? "—")} accentClass={theme.kpiAccent} />
-        <Kpi label={`${commitLabel} active`} value={String(committedCount)} accentClass={theme.kpiAccent} />
-        <Kpi
-          label="unpublished"
-          value={String(unpublishedCount)}
-          warn={unpublishedCount > 0}
-        />
+        <Kpi label={`${commitLabel} committed`} value={String(stats?.committed_miners ?? commits.length)} accentClass={theme.kpiAccent} />
+        <Kpi label="unpublished" value={String(unpublishedCount)} warn={unpublishedCount > 0} />
         <Kpi label="coverage" value={stats ? `${stats.coverage_pct}%` : "—"} />
         <Kpi label="latest blk" value={stats?.latest_commit_block?.toLocaleString() ?? "—"} mono />
-        <Kpi label="scan" value={stats?.last_scan_at ? fmtTime(stats.last_scan_at) : "—"} small />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
@@ -258,7 +217,7 @@ export default function LiveDashboard() {
                 {profile.name} {commitLabel} commits · SN{subnet}
               </h2>
               <p className="text-[10px] text-zinc-500">
-                {profile.tagline} · new rows flash green
+                {profile.tagline} · new rows flash green · full 256-uid grid is in slots above
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -353,115 +312,6 @@ export default function LiveDashboard() {
           <TableSortBar sort={commitSort} onSort={setCommitSort} />
         </section>
       </div>
-
-      <section className="panel">
-        <div className="panel-head flex-wrap gap-2">
-          <div>
-            <h2 className="text-[12px] font-semibold text-zinc-100">
-              {profile.name} miner registry · SN{subnet}
-            </h2>
-            <p className="text-[10px] text-zinc-500">{profile.tagline}</p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <SearchBar
-              value={registrySearch}
-              onChange={setRegistrySearch}
-              placeholder="uid, hotkey, coldkey, repo…"
-              resultCount={filteredRegistry.length}
-              totalCount={sortedRegistry.length}
-            />
-            <span className="text-[10px] text-zinc-500">
-              {registry?.total ?? 0} miners · {registry?.v6_count ?? 0} {commitLabel}
-            </span>
-          </div>
-        </div>
-        <div className="scroll-pane overflow-x-auto max-h-[360px] overflow-y-auto">
-          <table className="tbl">
-            <thead className="sticky top-0 z-10 bg-zinc-950">
-              <tr>
-                <th>uid</th>
-                <th>commit</th>
-                <th>reg</th>
-                {profile.features.incentiveColumn && <th>incentive</th>}
-                <th>st</th>
-                <th>hotkey</th>
-                <th>coldkey</th>
-                <th>model</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRegistry.length === 0 ? (
-                <tr>
-                  <td colSpan={profile.features.incentiveColumn ? 8 : 7} className="text-center text-zinc-500 py-8 text-[10px]">
-                    {registry
-                      ? isSearchActive(registrySearch)
-                        ? "no miners match search"
-                        : `no miners on SN${subnet}`
-                      : "loading registry…"}
-                  </td>
-                </tr>
-              ) : (
-              filteredRegistry.map((m) => (
-                <tr
-                  key={m.uid}
-                  className={`${m.has_v6 ? "" : "opacity-50"} ${
-                    flashUids.has(m.uid) ? theme.rowFlashSubtle : ""
-                  }`}
-                >
-                  <td className="mono text-zinc-200">{m.uid}</td>
-                  <td className="mono text-zinc-400 tabular-nums">
-                    {m.commit_block?.toLocaleString() ?? "—"}
-                  </td>
-                  <td className="mono text-zinc-500 tabular-nums">{m.registered_at_block?.toLocaleString() ?? "—"}</td>
-                  {profile.features.incentiveColumn && (
-                    <td
-                      className={`mono tabular-nums ${
-                        m.receiving_incentive ? theme.textAccent : "text-zinc-600"
-                      }`}
-                    >
-                      {fmtIncentive(m.incentive)}
-                    </td>
-                  )}
-                  <td>
-                    {m.has_v6 ? (
-                      <ModelFamilyBadge
-                        repo={m.repo}
-                        family={m.model_family ?? inferAlbedoModelFamily(m.repo)}
-                      />
-                    ) : (
-                      <span className="pill-none">—</span>
-                    )}
-                  </td>
-                  <td className="mono text-zinc-400">{shortAddr(m.hotkey, 6)}</td>
-                  <td className="mono text-zinc-500">{shortAddr(m.coldkey, 4)}</td>
-                  <td className="text-[10px] truncate max-w-[180px]">
-                    {m.repo ? (
-                      <a
-                        href={modelCommitUrl(m.repo, m.model_uri?.split("@")[1] ?? "", modelHost)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-zinc-500 hover:text-sky-400 hover:underline"
-                        title={modelCommitUrl(m.repo, m.model_uri?.split("@")[1] ?? "", modelHost)}
-                      >
-                        {shortRepo(m.repo)}
-                      </a>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                </tr>
-              ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        <TableSortBar sort={registrySort} onSort={setRegistrySort} showStatus />
-        {waiting.length > 0 && (
-          <div className="px-3 py-2 border-t border-zinc-800/80 text-[10px] text-zinc-600">
-            {waiting.length} miners on SN{subnet} without {commitLabel} commit
-          </div>
-        )}
-      </section>
     </div>
   );
 }
@@ -502,22 +352,18 @@ function Kpi({
   accentClass,
   warn,
   mono,
-  small,
 }: {
   label: string;
   value: string;
   accentClass?: string;
   warn?: boolean;
   mono?: boolean;
-  small?: boolean;
 }) {
   return (
     <div className="stat">
       <p className="stat-label">{label}</p>
       <p
-        className={`${small ? "text-[11px] font-normal text-zinc-400" : "stat-value"} ${
-          mono ? "mono" : ""
-        } ${accentClass ?? ""} ${warn ? "text-amber-400" : ""}`}
+        className={`stat-value ${mono ? "mono" : ""} ${accentClass ?? ""} ${warn ? "text-amber-400" : ""}`}
       >
         {value}
       </p>

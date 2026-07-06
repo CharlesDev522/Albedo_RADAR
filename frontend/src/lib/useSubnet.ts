@@ -1,32 +1,37 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useSyncExternalStore } from "react";
+import { usePathname } from "next/navigation";
 import { DEFAULT_SUBNET, type DashboardView } from "@/lib/subnets";
+import {
+  getDashboardViewSnapshot,
+  setDashboardView,
+  subscribeDashboardView,
+} from "@/lib/dashboardView";
 
 export function useSubnet() {
-  const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-
-  const view: DashboardView = useMemo(
-    () => (searchParams.get("view") === "clusters" ? "clusters" : "dashboard"),
-    [searchParams]
+  const view = useSyncExternalStore(
+    subscribeDashboardView,
+    getDashboardViewSnapshot,
+    () => "dashboard" as DashboardView
   );
 
   const setView = useCallback(
     (next: DashboardView) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (next === "clusters") {
-        params.set("view", "clusters");
-      } else {
+      setDashboardView(next);
+      const params = new URLSearchParams(window.location.search);
+      if (next === "dashboard") {
         params.delete("view");
+      } else {
+        params.set("view", next);
       }
       params.delete("subnet");
       const qs = params.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      const url = qs ? `${pathname}?${qs}` : pathname;
+      window.history.replaceState(window.history.state, "", url);
     },
-    [pathname, router, searchParams]
+    [pathname]
   );
 
   return {
