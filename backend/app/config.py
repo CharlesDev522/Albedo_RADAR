@@ -31,6 +31,21 @@ class Settings(BaseSettings):
     market_subnet_cache_seconds: int = 30
     market_http_timeout_seconds: float = 10.0
 
+    # GitHub repo tracking
+    github_repo_tracking_enabled: bool = True
+    github_api_url: str = "https://api.github.com"
+    github_token: str | None = None
+    github_repo_watches: list[str] = [
+        "https://github.com/tony-dendrite/albedo/tree/dev",
+    ]
+    github_poll_interval_seconds: int = 120
+
+    # Notifications (Slack)
+    notifications_enabled: bool = True
+    slack_webhook_url: str | None = None
+    slack_channel: str | None = None
+    slack_app_name: str = "Albedo_Notification"
+
     # Database
     database_url: str = "postgresql+asyncpg://minerwatch:minerwatch@localhost:5432/minerwatch"
 

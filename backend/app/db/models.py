@@ -346,3 +346,55 @@ class SubnetSnapshot(Base):
     neuron_count: Mapped[int] = mapped_column(Integer, default=0)
     total_stake: Mapped[float] = mapped_column(Float, default=0.0)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GithubRepoWatchState(Base):
+    """Last seen commit per tracked GitHub repo branch."""
+
+    __tablename__ = "github_repo_watch_state"
+    __table_args__ = (
+        UniqueConstraint("owner", "repo", "branch", name="uq_github_repo_watch"),
+        Index("ix_github_repo_watch_checked", "last_checked_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner: Mapped[str] = mapped_column(String(128), nullable=False)
+    repo: Mapped[str] = mapped_column(String(128), nullable=False)
+    branch: Mapped[str] = mapped_column(String(128), nullable=False)
+    tree_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    seeded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    seeded_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_seen_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_commit_subject: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    last_commit_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class GithubCommitAlert(Base):
+    """Persisted GitHub commit notifications."""
+
+    __tablename__ = "github_commit_alerts"
+    __table_args__ = (
+        UniqueConstraint("source_key", name="uq_github_commit_alert_source_key"),
+        Index("ix_github_commit_alerts_created", "created_at"),
+        Index("ix_github_commit_alerts_repo", "owner", "repo", "branch"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner: Mapped[str] = mapped_column(String(128), nullable=False)
+    repo: Mapped[str] = mapped_column(String(128), nullable=False)
+    branch: Mapped[str] = mapped_column(String(128), nullable=False)
+    commit_sha: Mapped[str] = mapped_column(String(64), nullable=False)
+    commit_subject: Mapped[str] = mapped_column(String(512), nullable=False)
+    commit_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    commit_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    source_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    message: Mapped[str] = mapped_column(String(1024), nullable=False)
+    detail: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    slack_sent: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -13,6 +13,7 @@ from app.api.routes import (
     commitments,
     encrypted_commitments,
     events,
+    github_watch,
     hotkeys,
     incentives,
     leaderboards,
@@ -64,6 +65,7 @@ app.include_router(coldkeys.router, prefix=api_prefix)
 app.include_router(events.router, prefix=api_prefix)
 app.include_router(incentives.router, prefix=api_prefix)
 app.include_router(market.router, prefix=api_prefix)
+app.include_router(github_watch.router, prefix=api_prefix)
 
 
 @app.get("/health", response_model=HealthResponse)

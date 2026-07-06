@@ -65,6 +65,14 @@ services:
       POLL_INTERVAL_SECONDS: "3"
       METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
       FULL_SCAN_INTERVAL_SECONDS: "300"
+      GITHUB_REPO_TRACKING_ENABLED: "true"
+      GITHUB_REPO_WATCHES: '["https://github.com/tony-dendrite/albedo/tree/dev"]'
+      GITHUB_POLL_INTERVAL_SECONDS: "120"
+      NOTIFICATIONS_ENABLED: "true"
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SLACK_CHANNEL: ${SLACK_CHANNEL:-}
+      SLACK_APP_NAME: "Albedo_Notification"
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy

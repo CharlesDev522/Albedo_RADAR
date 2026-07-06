@@ -27,6 +27,7 @@ from app.db.models import Miner, MinerCommitment, MinerStatus
 from app.db.session import AsyncSessionLocal, engine
 from app.processing.commitment_state_builder import CommitmentStateBuilder
 from app.processing.encrypted_commitment_state_builder import EncryptedCommitmentStateBuilder
+from app.processing.github_repo_watcher import GithubRepoWatcher
 from app.processing.incentive_sync import sync_metagraph_incentives
 from app.processing.slot_status_builder import SlotStatusBuilder
 from sqlalchemy import func, select
@@ -45,12 +46,14 @@ class CommitmentPoller:
         self.state_builder = CommitmentStateBuilder(publisher=self.publisher)
         self.encrypted_state_builder = EncryptedCommitmentStateBuilder()
         self.slot_status_builder = SlotStatusBuilder()
+        self.github_watcher = GithubRepoWatcher(self.settings)
         self._running = False
         self._neurons: dict[int, dict[str, dict]] = {}
         self._last_full_scan: dict[int, float] = {}
         self._last_slot_scan: dict[int, float] = {}
         self._last_metagraph_sync: dict[int, float] = {}
         self._last_incentive_sync: dict[int, float] = {}
+        self._last_github_sync: float = 0.0
         self._poll_lock = asyncio.Lock()
         self._seen_hotkeys: dict[int, set[str]] = {}
 
@@ -104,7 +107,25 @@ class CommitmentPoller:
     async def teardown(self) -> None:
         await self.subtensor_client.disconnect()
         await self.publisher.disconnect()
+        await self.github_watcher.close()
         await engine.dispose()
+
+    async def _github_poll(self) -> dict[str, int]:
+        if not self.github_watcher.enabled:
+            return {"targets": 0}
+        async with AsyncSessionLocal() as session:
+            stats = await self.github_watcher.sync_once(session)
+            await session.commit()
+        if stats.get("new_commits") or stats.get("seeded") or stats.get("errors"):
+            logger.info(
+                "GITHUB targets=%d new=%d seeded=%d slack=%d errors=%d",
+                stats.get("targets", 0),
+                stats.get("new_commits", 0),
+                stats.get("seeded", 0),
+                stats.get("slack_sent", 0),
+                stats.get("errors", 0),
+            )
+        return stats
 
     async def _sync_miners_from_cache(self, netuid: int, commits: list) -> None:
         if not commits:
@@ -318,6 +339,16 @@ class CommitmentPoller:
             if run_slot:
                 await self._slot_poll(netuid, snapshot)
                 self._last_slot_scan[netuid] = now
+
+            if (
+                self.github_watcher.enabled
+                and now - self._last_github_sync >= self.settings.github_poll_interval_seconds
+            ):
+                try:
+                    await self._github_poll()
+                except Exception:
+                    logger.exception("GitHub repo watch failed")
+                self._last_github_sync = now
 
             return stats
 
