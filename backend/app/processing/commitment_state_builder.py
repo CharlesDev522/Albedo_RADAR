@@ -17,7 +17,7 @@ from app.chain_reader.subnet_commit_rules import (
 )
 from app.collectors.event_publisher import EventPublisher
 from app.notifications.dispatcher import NotificationDispatcher
-from app.notifications.messages import build_commit_new_alert, build_commit_updated_alert
+from app.notifications.messages import build_commit_new_alert
 from app.collectors.subtensor_client import MetagraphSnapshot, SubtensorClient
 from app.db.models import (
     CommitmentHistory,
@@ -113,11 +113,6 @@ class CommitmentStateBuilder:
                     },
                     stats,
                 )
-                if self.notifier:
-                    await self.notifier.notify_content(
-                        session,
-                        build_commit_updated_alert(commit, previous_hash=previous_hash),
-                    )
                 stats["updated"] += 1
             else:
                 existing.uid = commit.uid

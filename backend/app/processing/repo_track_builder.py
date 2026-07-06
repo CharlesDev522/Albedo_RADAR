@@ -42,7 +42,7 @@ from app.processing.repo_watch_targets import (
     parse_hub_watch_hotkey,
 )
 from app.notifications.dispatcher import NotificationDispatcher
-from app.notifications.messages import build_repo_new_alert, build_repo_updated_alert
+from app.notifications.messages import build_repo_new_alert
 
 logger = logging.getLogger(__name__)
 
@@ -584,38 +584,21 @@ class RepoTrackBuilder:
                 meta=meta or {},
             )
         )
-        if self.notifier and event_type in ("hub_repo_added", "hub_manifest_update"):
-            if event_type == "hub_repo_added":
-                alert = build_repo_new_alert(
-                    netuid=netuid,
-                    repo=repo,
-                    event_type=event_type,
-                    source_key=source_key,
-                    uid=uid,
-                    hotkey=hotkey,
-                    coldkey=coldkey,
-                    model_family=model_family,
-                    hub_digest=hub_digest,
-                    revision=revision,
-                    commit_message=commit_message,
-                    meta=meta,
-                )
-            else:
-                alert = build_repo_updated_alert(
-                    netuid=netuid,
-                    repo=repo,
-                    event_type=event_type,
-                    source_key=source_key,
-                    uid=uid,
-                    hotkey=hotkey,
-                    coldkey=coldkey,
-                    model_family=model_family,
-                    hub_digest=hub_digest,
-                    previous_digest=previous_digest,
-                    revision=revision,
-                    commit_message=commit_message,
-                    meta=meta,
-                )
+        if self.notifier and event_type == "hub_repo_added":
+            alert = build_repo_new_alert(
+                netuid=netuid,
+                repo=repo,
+                event_type=event_type,
+                source_key=source_key,
+                uid=uid,
+                hotkey=hotkey,
+                coldkey=coldkey,
+                model_family=model_family,
+                hub_digest=hub_digest,
+                revision=revision,
+                commit_message=commit_message,
+                meta=meta,
+            )
             await self.notifier.notify_content(session, alert)
         return True
 

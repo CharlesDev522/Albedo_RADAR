@@ -11,7 +11,7 @@ def _coerce_reg_fee_thresholds_env(v: object) -> str:
     if isinstance(v, (list, tuple)):
         return ",".join(str(x) for x in v)
     if v is None:
-        return "1.0,0.75,0.6"
+        return "0.55"
     return str(v)
 
 
@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     # Comma-separated in .env e.g. 1.0,0.75,0.6 (must be str — list type breaks pydantic env JSON parse).
     notification_reg_fee_thresholds_tao: Annotated[
         str, BeforeValidator(_coerce_reg_fee_thresholds_env)
-    ] = "1.0,0.75,0.6"
+    ] = "0.55"
     albedo_notification_poll_seconds: int = 1
     notification_reg_fee_poll_seconds: int = 30
     notification_http_timeout_seconds: float = 8.0

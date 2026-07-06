@@ -9,7 +9,7 @@ REG_FEE_TIER_EMOJI: dict[float, str] = {
     0.6: ":fire:",
 }
 
-DEFAULT_REG_FEE_THRESHOLDS_TAO: tuple[float, ...] = (1.0, 0.75, 0.6)
+DEFAULT_REG_FEE_THRESHOLDS_TAO: tuple[float, ...] = (0.55,)
 
 
 def normalize_reg_fee_thresholds(raw: object) -> list[float]:

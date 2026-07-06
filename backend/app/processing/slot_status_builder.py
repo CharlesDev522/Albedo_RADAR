@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chain_reader.slot_commitment_scanner import SlotStatus
 from app.db.models import MinerSlotStatus
 from app.notifications.dispatcher import NotificationDispatcher
-from app.notifications.messages import build_slot_changed_alert, build_slot_new_alert
-from app.notifications.slot_rules import is_slot_purchase, should_notify_slot_new
+from app.notifications.messages import build_slot_changed_alert
+from app.notifications.slot_rules import is_slot_purchase
 
 
 class SlotStatusBuilder:
@@ -57,10 +57,6 @@ class SlotStatusBuilder:
                         last_updated=now,
                     )
                 )
-                if self.notifier and should_notify_slot_new(slot):
-                    await self.notifier.notify_content(
-                        session, build_slot_new_alert(slot, netuid)
-                    )
                 stats["updated"] += 1
             else:
                 previous: dict[str, Any] | None = None

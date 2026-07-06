@@ -79,7 +79,7 @@ curl -X POST http://localhost:8000/api/v1/notifications/test-slack
 | New repo | `repo_new` |
 | New duel | `duel_new` |
 | New on-chain commit | `commit_new` |
-| Reg fee crosses below tier (1.0 / 0.75 / 0.6 τ) | `reg_fee_low` |
+| Reg fee crosses below 0.55 τ | `reg_fee_low` |
 | Crowned | `crown_won` |
 | King defended | `king_defended` |
 | Crown lost | `crown_lost` |
