@@ -113,7 +113,7 @@ export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: strin
         <button
           type="button"
           onClick={() => void handleDownload()}
-          disabled={downloading}
+          disabled={downloading || data.total_dual_zero_questions === 0}
           className="rounded border border-emerald-500/35 bg-emerald-500/10 px-2 py-1 text-[9px] text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50 shrink-0"
         >
           {downloading ? "Preparing…" : "Download JSONL"}

@@ -15,7 +15,7 @@ from app.services.albedo_eval_queue_service import get_eval_queue_overview
 from app.services.albedo_live_duel_service import get_live_duel
 from app.services.albedo_miner_lookup import load_historical_miner_lookup
 from app.services.albedo_scoring_analysis_service import (
-    get_dual_zero_export_jsonl,
+    get_dual_zero_export,
     get_scoring_analysis_for_eval,
 )
 
@@ -128,16 +128,16 @@ async def albedo_scoring_analysis_export(
         raise HTTPException(status_code=400, detail="Albedo scoring export is only available for SN97")
     settings = get_settings()
     try:
-        body, filename = await get_dual_zero_export_jsonl(
+        payload = await get_dual_zero_export(
             eval_run_id,
             subnet=subnet,
             settings=settings,
             fresh=fresh,
         )
         return Response(
-            content=body,
-            media_type="application/x-ndjson",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            content=payload.content,
+            media_type=payload.media_type,
+            headers={"Content-Disposition": f'attachment; filename="{payload.filename}"'},
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

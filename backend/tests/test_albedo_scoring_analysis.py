@@ -1,12 +1,15 @@
 """Tests for Albedo scoring-results dual-zero analysis."""
 
 import json
+import zipfile
+from io import BytesIO
 
 from app.integrations.albedo_scoring_results import parse_scoring_results_jsonl
 from app.services.albedo_scoring_analysis_service import (
     analyze_dual_zero_questions,
-    build_dual_zero_export_jsonl,
-    dual_zero_export_filename,
+    build_dual_zero_export,
+    build_sample_export_json,
+    safe_sample_filename,
 )
 
 
@@ -108,12 +111,14 @@ def test_analyze_dual_zero_skips_when_any_side_not_zero():
     assert analysis.samples_with_dual_zeros == 0
 
 
-def test_build_dual_zero_export_jsonl_minimal_shape():
+def test_safe_sample_filename():
+    assert safe_sample_filename("dataset/a:1:1") == "dataset__a_1_1.jsonl"
+
+
+def test_build_sample_export_json_minimal_shape():
     rows = [_sample_row(sample_id="dataset/a:1:1")]
     analysis = analyze_dual_zero_questions(rows)
-
-    payload = build_dual_zero_export_jsonl(analysis)
-    record = json.loads(payload.strip())
+    record = json.loads(build_sample_export_json(analysis.samples[0]))
 
     assert set(record.keys()) == {"sample_id", "questions"}
     assert record["sample_id"] == "dataset/a:1:1"
@@ -124,4 +129,27 @@ def test_build_dual_zero_export_jsonl_minimal_shape():
         "king_glm",
         "king_qwen",
     }
-    assert dual_zero_export_filename("fabc90bf-3871-46ef-ac7b-51d2e3b7039b") == "dual-zero-both-fabc90bf.jsonl"
+
+
+def test_build_dual_zero_export_uses_sample_id_filename():
+    rows = [_sample_row(sample_id="dataset/a:1:1")]
+    analysis = analyze_dual_zero_questions(rows)
+    payload = build_dual_zero_export(analysis)
+
+    assert payload.filename == "dataset__a_1_1.jsonl"
+    assert payload.media_type == "application/x-ndjson"
+    assert json.loads(payload.content.decode().strip())["sample_id"] == "dataset/a:1:1"
+
+
+def test_build_dual_zero_export_zip_for_multiple_samples():
+    rows = [
+        _sample_row(sample_id="dataset/a:1:1"),
+        _sample_row(sample_id="dataset/e:5:5"),
+    ]
+    analysis = analyze_dual_zero_questions(rows)
+    payload = build_dual_zero_export(analysis)
+
+    assert payload.media_type == "application/zip"
+    with zipfile.ZipFile(BytesIO(payload.content)) as archive:
+        names = sorted(archive.namelist())
+    assert names == ["dataset__a_1_1.jsonl", "dataset__e_5_5.jsonl"]

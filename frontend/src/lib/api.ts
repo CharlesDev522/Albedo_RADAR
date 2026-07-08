@@ -968,7 +968,7 @@ export const api = {
     }
     const blob = await res.blob();
     const header = res.headers.get("Content-Disposition");
-    const fallback = `dual-zero-both-${evalRunId.replace(/-/g, "").slice(0, 8)}.jsonl`;
+    const fallback = "dual-zero-export.jsonl";
     const match = header?.match(/filename="?([^";\n]+)"?/i);
     const filename = match?.[1] ?? fallback;
     const objectUrl = URL.createObjectURL(blob);

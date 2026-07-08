@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import json
 import logging
+import zipfile
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -23,6 +26,20 @@ GLM_JUDGE_HINT = "glm"
 QWEN_JUDGE_HINT = "qwen"
 CHALLENGER_SIDE = "challenger"
 KING_SIDE_RAW = "previous_king"
+
+
+@dataclass(frozen=True)
+class ExportPayload:
+    content: bytes
+    filename: str
+    media_type: str
+
+
+def safe_sample_filename(sample_id: str) -> str:
+    """Filesystem-safe JSONL name derived from sample_id."""
+    safe = sample_id.replace("/", "__").replace(":", "_").replace("\\", "_")
+    safe = "".join(ch if ch.isalnum() or ch in "._-@" else "_" for ch in safe)
+    return f"{safe}.jsonl"
 
 
 def _is_glm_judge(model: str | None) -> bool:
@@ -154,43 +171,65 @@ async def get_scoring_analysis_for_eval(
     return analyze_dual_zero_questions(rows)
 
 
-def dual_zero_export_filename(eval_run_id: str) -> str:
-    short = eval_run_id.replace("-", "")[:8]
-    return f"dual-zero-both-{short}.jsonl"
+def build_sample_export_record(sample: AlbedoSampleDualZeros) -> dict[str, Any]:
+    return {
+        "sample_id": sample.sample_id,
+        "questions": [
+            {
+                "question_id": q.question_id,
+                "challenger_glm": q.challenger_glm,
+                "challenger_qwen": q.challenger_qwen,
+                "king_glm": q.king_glm,
+                "king_qwen": q.king_qwen,
+            }
+            for q in sample.questions
+        ],
+    }
 
 
-def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
-    """Minimal JSONL: sample_id + question_id + four judge reasons per dual-zero question."""
-    lines: list[str] = []
-    for sample in analysis.samples:
-        record = {
-            "sample_id": sample.sample_id,
-            "questions": [
-                {
-                    "question_id": q.question_id,
-                    "challenger_glm": q.challenger_glm,
-                    "challenger_qwen": q.challenger_qwen,
-                    "king_glm": q.king_glm,
-                    "king_qwen": q.king_qwen,
-                }
-                for q in sample.questions
-            ],
-        }
-        lines.append(json.dumps(record, ensure_ascii=False))
-    return "\n".join(lines) + ("\n" if lines else "")
+def build_sample_export_json(sample: AlbedoSampleDualZeros) -> str:
+    return json.dumps(build_sample_export_record(sample), ensure_ascii=False) + "\n"
 
 
-async def get_dual_zero_export_jsonl(
+def build_dual_zero_export(analysis: AlbedoScoringAnalysis) -> ExportPayload:
+    """One JSONL per sample_id; zip when multiple samples qualify."""
+    if not analysis.samples:
+        raise LookupError("No dual-zero samples to export")
+
+    if len(analysis.samples) == 1:
+        sample = analysis.samples[0]
+        return ExportPayload(
+            content=build_sample_export_json(sample).encode("utf-8"),
+            filename=safe_sample_filename(sample.sample_id),
+            media_type="application/x-ndjson",
+        )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as archive:
+        for sample in analysis.samples:
+            archive.writestr(
+                safe_sample_filename(sample.sample_id),
+                build_sample_export_json(sample),
+            )
+    zip_name = safe_sample_filename(analysis.samples[0].sample_id).removesuffix(".jsonl") + "-samples.zip"
+    return ExportPayload(
+        content=buf.getvalue(),
+        filename=zip_name,
+        media_type="application/zip",
+    )
+
+
+async def get_dual_zero_export(
     eval_run_id: str,
     *,
     subnet: int = 97,
     settings: Settings | None = None,
     fresh: bool = False,
-) -> tuple[str, str]:
+) -> ExportPayload:
     analysis = await get_scoring_analysis_for_eval(
         eval_run_id,
         subnet=subnet,
         settings=settings,
         fresh=fresh,
     )
-    return build_dual_zero_export_jsonl(analysis), dual_zero_export_filename(eval_run_id)
+    return build_dual_zero_export(analysis)
