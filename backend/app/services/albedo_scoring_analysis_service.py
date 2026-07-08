@@ -34,15 +34,24 @@ class ExportPayload:
     media_type: str
 
 
-def duel_export_filename(eval_run_id: str, challenger_repo: str | None = None) -> str:
-    """Duel-identifiable JSONL filename (eval id + challenger repo slug)."""
-    short = eval_run_id.replace("-", "")[:8]
-    if challenger_repo:
-        slug = challenger_repo.lower().replace("/", "-")
-        slug = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in slug)
-        slug = "-".join(part for part in slug.split("-") if part)[:48]
-        return f"dual-zero-{short}-{slug}.jsonl"
-    return f"dual-zero-{short}.jsonl"
+def _filename_slug(name: str, max_len: int = 48) -> str:
+    slug = name.split("@", 1)[0].lower().replace("/", "-")
+    slug = "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in slug)
+    slug = "-".join(part for part in slug.split("-") if part)
+    return (slug[:max_len] if slug else "unknown")
+
+
+def duel_export_filename(
+    *,
+    king_name: str | None,
+    challenger_name: str | None,
+    challenger_uid: int | None,
+) -> str:
+    """Filename: king name vs challenger name vs challenger uid."""
+    king = _filename_slug(king_name or "king")
+    challenger = _filename_slug(challenger_name or "challenger")
+    uid = challenger_uid if challenger_uid is not None else "uid"
+    return f"{king} vs {challenger} vs {uid}.jsonl"
 
 
 def _is_glm_judge(model: str | None) -> bool:
@@ -148,6 +157,15 @@ def _scoring_results_url(eval_run: dict[str, Any]) -> str | None:
     return str(url) if url else None
 
 
+def _duel_export_labels(eval_run: dict[str, Any]) -> tuple[str | None, str | None, int | None]:
+    _, challenger_name, _ = parse_model_uri(eval_run.get("model_uri"))
+    king = eval_run.get("king") or {}
+    _, king_name, _ = parse_model_uri(king.get("model_uri"))
+    uid_raw = eval_run.get("uid")
+    challenger_uid = int(uid_raw) if uid_raw is not None else None
+    return king_name or None, challenger_name or None, challenger_uid
+
+
 async def get_scoring_analysis_for_eval(
     eval_run_id: str,
     *,
@@ -172,9 +190,15 @@ async def get_scoring_analysis_for_eval(
         rows = await fetch_scoring_results_jsonl(url, settings=settings, client=client, fresh=fresh)
 
     analysis = analyze_dual_zero_questions(rows)
-    _, challenger_name, _ = parse_model_uri(eval_run.get("model_uri"))
+    king_name, challenger_name, challenger_uid = _duel_export_labels(eval_run)
     return analysis.model_copy(
-        update={"export_filename": duel_export_filename(eval_run_id, challenger_name or None)}
+        update={
+            "export_filename": duel_export_filename(
+                king_name=king_name,
+                challenger_name=challenger_name,
+                challenger_uid=challenger_uid,
+            )
+        }
     )
 
 
@@ -184,6 +208,7 @@ def build_sample_export_record(sample: AlbedoSampleDualZeros) -> dict[str, Any]:
         "questions": [
             {
                 "question_id": q.question_id,
+                "text": q.text,
                 "challenger_glm": q.challenger_glm,
                 "challenger_qwen": q.challenger_qwen,
                 "king_glm": q.king_glm,
@@ -210,13 +235,18 @@ def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
 def build_dual_zero_export(
     analysis: AlbedoScoringAnalysis,
     *,
-    eval_run_id: str,
-    challenger_repo: str | None = None,
+    king_name: str | None,
+    challenger_name: str | None,
+    challenger_uid: int | None,
 ) -> ExportPayload:
     if not analysis.samples:
         raise LookupError("No dual-zero samples to export")
 
-    filename = duel_export_filename(eval_run_id, challenger_repo)
+    filename = duel_export_filename(
+        king_name=king_name,
+        challenger_name=challenger_name,
+        challenger_uid=challenger_uid,
+    )
     return ExportPayload(
         content=build_dual_zero_export_jsonl(analysis).encode("utf-8"),
         filename=filename,
@@ -248,9 +278,10 @@ async def get_dual_zero_export(
         rows = await fetch_scoring_results_jsonl(url, settings=settings, client=client, fresh=fresh)
 
     analysis = analyze_dual_zero_questions(rows)
-    _, challenger_name, _ = parse_model_uri(eval_run.get("model_uri"))
+    king_name, challenger_name, challenger_uid = _duel_export_labels(eval_run)
     return build_dual_zero_export(
         analysis,
-        eval_run_id=eval_run_id,
-        challenger_repo=challenger_name or None,
+        king_name=king_name,
+        challenger_name=challenger_name,
+        challenger_uid=challenger_uid,
     )

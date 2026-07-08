@@ -95,8 +95,12 @@ def test_analyze_dual_zero_requires_both_sides():
 
 
 def test_duel_export_filename():
-    name = duel_export_filename("fabc90bf-3871-46ef-ac7b-51d2e3b7039b", "org/trainer07")
-    assert name == "dual-zero-fabc90bf-org-trainer07.jsonl"
+    name = duel_export_filename(
+        king_name="albedo-qwen3.6-35b-alac",
+        challenger_name="trainer07",
+        challenger_uid=205,
+    )
+    assert name == "albedo-qwen3.6-35b-alac vs trainer07 vs 205.jsonl"
 
 
 def test_build_dual_zero_export_jsonl_is_multiline_jsonl():
@@ -116,23 +120,26 @@ def test_build_dual_zero_export_single_jsonl_file():
     analysis = analyze_dual_zero_questions(rows)
     payload = build_dual_zero_export(
         analysis,
-        eval_run_id="fabc90bf-3871-46ef-ac7b-51d2e3b7039b",
-        challenger_repo="trainer07",
+        king_name="albedo-qwen3.6-35b-alac",
+        challenger_name="trainer07",
+        challenger_uid=205,
     )
 
     assert payload.media_type == "application/x-ndjson"
-    assert payload.filename == "dual-zero-fabc90bf-trainer07.jsonl"
+    assert payload.filename == "albedo-qwen3.6-35b-alac vs trainer07 vs 205.jsonl"
     lines = payload.content.decode().strip().splitlines()
     assert len(lines) == 1
     record = json.loads(lines[0])
     assert set(record.keys()) == {"sample_id", "questions"}
     assert set(record["questions"][0].keys()) == {
         "question_id",
+        "text",
         "challenger_glm",
         "challenger_qwen",
         "king_glm",
         "king_qwen",
     }
+    assert record["questions"][0]["text"] == "Runs test suite?"
 
 
 def test_build_sample_export_json_minimal_shape():
