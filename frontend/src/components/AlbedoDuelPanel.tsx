@@ -177,19 +177,99 @@ function KingTenureCard({ tenure }: { tenure: AlbedoKingTenure }) {
   );
 }
 
-function JudgeScoreCell({ vote }: { vote: AlbedoDuelJudgeVote | undefined }) {
-  if (!vote) return <td className="py-1.5 px-1 text-center text-zinc-700 border-l border-zinc-800/50">—</td>;
+function judgeShortHeader(name: string): string {
+  if (name.startsWith("glm")) return "GLM";
+  if (name.startsWith("qwen")) return "Qwen";
+  if (name.startsWith("deepseek")) return "DS";
+  return name.split("-")[0];
+}
+
+function judgePickMargin(vote: AlbedoDuelJudgeVote): number {
+  return Math.abs(vote.margin_from_neutral);
+}
+
+function judgeStrengthLabel(margin: number): string | null {
+  if (margin < 0.02) return "slim";
+  if (margin < 0.05) return "narrow";
+  if (margin >= 0.1) return "decisive";
+  return null;
+}
+
+function soloDissenterJudge(votes: AlbedoDuelJudgeVote[]): string | null {
+  const dissenters = votes.filter((v) => !v.agrees_with_verdict);
+  return dissenters.length === 1 ? dissenters[0].short_name : null;
+}
+
+function ScoreCompareBar({ ch, k }: { ch: number; k: number }) {
+  const scale = Math.max(ch, k, 0.01);
+  return (
+    <div className="space-y-0.5 mx-auto max-w-[52px]">
+      <div className="h-0.5 bg-zinc-800/80 rounded overflow-hidden" title={`challenger ${fmtScore(ch)}`}>
+        <div className="h-full bg-rose-400/80 rounded-r" style={{ width: `${(ch / scale) * 100}%` }} />
+      </div>
+      <div className="h-0.5 bg-zinc-800/80 rounded overflow-hidden" title={`king ${fmtScore(k)}`}>
+        <div className="h-full bg-emerald-400/80 rounded-r" style={{ width: `${(k / scale) * 100}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function JudgeScoreCell({
+  vote,
+  soloDissenter,
+}: {
+  vote: AlbedoDuelJudgeVote | undefined;
+  soloDissenter: string | null;
+}) {
+  if (!vote) {
+    return <td className="py-1.5 px-1 text-center text-zinc-700 border-l border-zinc-800/50">—</td>;
+  }
+
   const pickCh = vote.pick_challenger;
+  const margin = judgePickMargin(vote);
+  const strength = judgeStrengthLabel(margin);
+  const isSolo = soloDissenter === vote.short_name;
+  const dissents = !vote.agrees_with_verdict;
+  const pickLabel = pickCh ? "ch" : "k";
+  const diagnosis = `${pickLabel} ${fmtMargin(pickCh ? vote.margin_from_neutral : -vote.margin_from_neutral)}`;
+
+  let sublabel: string | null = null;
+  let subClass = "text-zinc-500";
+  if (isSolo) {
+    sublabel = "lone dissent";
+    subClass = "text-amber-300";
+  } else if (dissents) {
+    sublabel = "dissent";
+    subClass = "text-amber-300/90";
+  } else if (strength) {
+    sublabel = strength;
+    subClass = "text-zinc-500";
+  }
+
   return (
     <td
-      className={`py-1.5 px-1 text-center mono text-[10px] border-l border-zinc-800/50 ${
-        pickCh ? "text-rose-300 bg-rose-500/10" : "text-emerald-300 bg-emerald-500/10"
+      className={`py-1.5 px-1 text-center mono text-[10px] border-l border-zinc-800/50 min-w-[68px] ${
+        pickCh ? "bg-rose-500/8" : "bg-emerald-500/8"
       }`}
-      title={`${vote.judge}\nch ${fmtScore(vote.challenger_score)} · k ${fmtScore(vote.king_score)}\nΔ ${fmtMargin(vote.margin_from_neutral)}\npick ${pickCh ? "challenger" : "king"}`}
+      title={[
+        vote.judge,
+        `challenger ${fmtScore(vote.challenger_score)}`,
+        `king ${fmtScore(vote.king_score)}`,
+        `Δ ${fmtMargin(vote.margin_from_neutral)}`,
+        `pick ${pickCh ? "challenger" : "king"}`,
+        dissents ? (isSolo ? "lone dissenter" : "dissents from verdict") : "agrees with verdict",
+      ].join("\n")}
     >
-      <div className="text-rose-200">{fmtScore(vote.challenger_score)}</div>
-      <div className="text-emerald-200/90">{fmtScore(vote.king_score)}</div>
-      <div className="text-[8px] font-medium opacity-80">{pickCh ? "ch" : "k"}</div>
+      <ScoreCompareBar ch={vote.challenger_score} k={vote.king_score} />
+      <div className="mt-1 leading-tight">
+        <span className="text-rose-200/90">{fmtScore(vote.challenger_score)}</span>
+        <span className="text-zinc-600 mx-0.5">/</span>
+        <span className="text-emerald-200/90">{fmtScore(vote.king_score)}</span>
+      </div>
+      <div className={`text-[9px] font-semibold mt-0.5 ${pickCh ? "text-rose-300" : "text-emerald-300"}`}>
+        {diagnosis}
+      </div>
+      {sublabel && <div className={`text-[8px] mt-0.5 font-medium ${subClass}`}>{sublabel}</div>}
     </td>
   );
 }
@@ -207,6 +287,8 @@ const JUDGE_COLUMNS = ["glm-5.1", "qwen3.5-397b-a17b", "deepseek-v3.2"];
 function DuelRow({ duel, judgeOrder }: { duel: AlbedoDuelSummary; judgeOrder: string[] }) {
   const won = duel.challenger_won;
   const votes = judgeVoteMap(duel);
+  const voteList = duel.judge_votes ?? [];
+  const soloDissenter = soloDissenterJudge(voteList);
   const req = duel.required_win_margin;
   const marginBelowBar =
     req != null && duel.win_margin > 0 && duel.win_margin < req && !won;
@@ -233,7 +315,7 @@ function DuelRow({ duel, judgeOrder }: { duel: AlbedoDuelSummary; judgeOrder: st
         vs {duel.king_model_name ? shortRepo(duel.king_model_name, 12) : "—"}
       </td>
       {judgeOrder.map((name) => (
-        <JudgeScoreCell key={name} vote={votes[name]} />
+        <JudgeScoreCell key={name} vote={votes[name]} soloDissenter={soloDissenter} />
       ))}
       <td className="py-1.5 px-1 mono text-zinc-400 text-center">{duel.judge_spread != null ? fmtScore(duel.judge_spread) : "—"}</td>
       <td className="py-1.5 pr-2 mono text-[10px]">
@@ -547,20 +629,20 @@ export default function AlbedoDuelPanel() {
         <section className="panel px-3 py-2">
           <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge duel scores</h3>
           <p className="text-[9px] text-zinc-600 mb-2">
-            Binary rubric: each judge cell shows challenger win-rate (red) vs king win-rate (green); pick = higher side.
-            Duel margin must clear the win bar (typically 6%) to dethrone. Result: green challenger · grey defended.
+            Each judge cell: ch/k win-rates, pick with margin (e.g. k +2.8%), and verdict alignment
+            (dissent / lone dissent / slim / decisive). Duel margin must clear the win bar (typically 6%).
           </p>
           <div className="overflow-x-auto">
-            <table className="w-full text-[10px] min-w-[860px]">
+            <table className="w-full text-[10px] min-w-[920px]">
               <thead>
                 <tr className="text-zinc-500 border-b border-zinc-800">
                   <th className="text-left py-1 pr-2">When</th>
                   <th className="text-left py-1 pr-2">Challenger repo</th>
                   <th className="text-left py-1 pr-2">King</th>
                   {judgeOrder.map((name) => (
-                    <th key={name} className="text-center py-1 px-1 border-l border-zinc-800/50 text-zinc-400">
-                      <div>{name.split("-")[0]}</div>
-                      <div className="text-[8px] font-normal text-zinc-600">ch / k</div>
+                    <th key={name} className="text-center py-1 px-1 border-l border-zinc-800/50 text-zinc-400 min-w-[68px]">
+                      <div>{judgeShortHeader(name)}</div>
+                      <div className="text-[8px] font-normal text-zinc-600">pick / Δ</div>
                     </th>
                   ))}
                   <th className="text-center py-1 px-1 text-zinc-600">σ spread</th>
