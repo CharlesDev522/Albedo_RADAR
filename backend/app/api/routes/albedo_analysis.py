@@ -1,6 +1,7 @@
 """Albedo duel and king-of-the-hill analysis from Hippius dashboard JSON."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -13,7 +14,10 @@ from app.services.albedo_analysis_service import get_albedo_analysis_overview
 from app.services.albedo_eval_queue_service import get_eval_queue_overview
 from app.services.albedo_live_duel_service import get_live_duel
 from app.services.albedo_miner_lookup import load_historical_miner_lookup
-from app.services.albedo_scoring_analysis_service import get_scoring_analysis_for_eval
+from app.services.albedo_scoring_analysis_service import (
+    get_dual_zero_export_jsonl,
+    get_scoring_analysis_for_eval,
+)
 
 router = APIRouter(prefix="/albedo", tags=["albedo"])
 
@@ -110,4 +114,35 @@ async def albedo_scoring_analysis(
         raise HTTPException(
             status_code=502,
             detail=f"Failed to analyze scoring results: {exc}",
+        ) from exc
+
+
+@router.get("/scoring-analysis/export")
+async def albedo_scoring_analysis_export(
+    eval_run_id: str = Query(..., min_length=8),
+    subnet: int = Query(default=97, ge=0),
+    fresh: bool = Query(default=False),
+) -> Response:
+    """Download GLM + Qwen dual-zero questions as JSONL (one object per sample_id)."""
+    if subnet != 97:
+        raise HTTPException(status_code=400, detail="Albedo scoring export is only available for SN97")
+    settings = get_settings()
+    try:
+        body, filename = await get_dual_zero_export_jsonl(
+            eval_run_id,
+            subnet=subnet,
+            settings=settings,
+            fresh=fresh,
+        )
+        return Response(
+            content=body,
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to export scoring results: {exc}",
         ) from exc

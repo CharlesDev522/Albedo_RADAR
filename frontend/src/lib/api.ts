@@ -961,6 +961,33 @@ export const api = {
       `/albedo/scoring-analysis?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}`,
       { forceRefresh }
     ),
+  downloadAlbedoScoringExport: async (evalRunId: string, subnet = DEFAULT_SUBNET) => {
+    const res = await fetch(
+      `${apiBase()}/albedo/scoring-analysis/export?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) {
+      let detail = `Download failed: HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        if (body && typeof body.detail === "string") detail = body.detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail);
+    }
+    const blob = await res.blob();
+    const header = res.headers.get("Content-Disposition");
+    const fallback = `dual-zero-${evalRunId.replace(/-/g, "").slice(0, 8)}.jsonl`;
+    const match = header?.match(/filename="?([^";\n]+)"?/i);
+    const filename = match?.[1] ?? fallback;
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
+  },
 };
 
 export function hippiusModelUrl(repo: string, branch = "main"): string {

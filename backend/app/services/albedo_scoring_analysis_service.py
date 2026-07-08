@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -185,3 +186,59 @@ async def get_scoring_analysis_for_eval(
     analysis.king_model_name = king_name or None
     analysis.finished_at = eval_run.get("finished_at")
     return analysis
+
+
+def dual_zero_export_filename(eval_run_id: str) -> str:
+    short = eval_run_id.replace("-", "")[:8]
+    return f"dual-zero-{short}.jsonl"
+
+
+def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
+    """Serialize dual-zero samples as JSONL — one JSON object per sample_id."""
+    lines: list[str] = []
+    for sample in analysis.samples:
+        record = {
+            "eval_run_id": analysis.eval_run_id,
+            "finished_at": analysis.finished_at,
+            "challenger_repo": analysis.challenger_repo,
+            "king_model_name": analysis.king_model_name,
+            "glm_judge": analysis.glm_judge,
+            "qwen_judge": analysis.qwen_judge,
+            "side": analysis.side,
+            "scoring_results_url": analysis.scoring_results_url,
+            "sample_id": sample.sample_id,
+            "sample_label": sample.sample_label,
+            "challenger_score": sample.challenger_score,
+            "king_score": sample.king_score,
+            "dual_zero_count": sample.dual_zero_count,
+            "questions": [
+                {
+                    "question_id": q.question_id,
+                    "category": q.category,
+                    "text": q.text,
+                    "glm_score": 0,
+                    "qwen_score": 0,
+                    "glm_explanation": q.glm_explanation,
+                    "qwen_explanation": q.qwen_explanation,
+                }
+                for q in sample.questions
+            ],
+        }
+        lines.append(json.dumps(record, ensure_ascii=False))
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+async def get_dual_zero_export_jsonl(
+    eval_run_id: str,
+    *,
+    subnet: int = 97,
+    settings: Settings | None = None,
+    fresh: bool = False,
+) -> tuple[str, str]:
+    analysis = await get_scoring_analysis_for_eval(
+        eval_run_id,
+        subnet=subnet,
+        settings=settings,
+        fresh=fresh,
+    )
+    return build_dual_zero_export_jsonl(analysis), dual_zero_export_filename(eval_run_id)

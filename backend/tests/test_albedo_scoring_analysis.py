@@ -3,7 +3,11 @@
 import json
 
 from app.integrations.albedo_scoring_results import parse_scoring_results_jsonl
-from app.services.albedo_scoring_analysis_service import analyze_dual_zero_questions
+from app.services.albedo_scoring_analysis_service import (
+    analyze_dual_zero_questions,
+    build_dual_zero_export_jsonl,
+    dual_zero_export_filename,
+)
 
 
 def _sample_row(
@@ -92,3 +96,26 @@ def test_analyze_dual_zero_skips_when_only_one_judge_is_zero():
     analysis = analyze_dual_zero_questions(rows)
     assert analysis.samples_with_dual_zeros == 0
     assert analysis.total_dual_zero_questions == 0
+
+
+def test_build_dual_zero_export_jsonl_writes_one_line_per_sample():
+    rows = [_sample_row(sample_id="dataset/a:1:1")]
+    analysis = analyze_dual_zero_questions(rows)
+    analysis.eval_run_id = "fabc90bf-3871-46ef-ac7b-51d2e3b7039b"
+    analysis.finished_at = "2026-07-08T06:45:09+00:00"
+    analysis.challenger_repo = "trainer07"
+    analysis.king_model_name = "alac"
+    analysis.scoring_results_url = "https://example.com/scoring-results.jsonl"
+
+    payload = build_dual_zero_export_jsonl(analysis)
+    lines = [line for line in payload.splitlines() if line.strip()]
+    assert len(lines) == 1
+
+    record = json.loads(lines[0])
+    assert record["eval_run_id"] == analysis.eval_run_id
+    assert record["sample_id"] == "dataset/a:1:1"
+    assert record["dual_zero_count"] == 1
+    assert record["questions"][0]["glm_score"] == 0
+    assert record["questions"][0]["qwen_score"] == 0
+    assert "glm_explanation" in record["questions"][0]
+    assert dual_zero_export_filename(analysis.eval_run_id) == "dual-zero-fabc90bf.jsonl"

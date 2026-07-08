@@ -75,6 +75,7 @@ export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: strin
   const { subnet } = useSubnet();
   const [data, setData] = useState<AlbedoScoringAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -95,6 +96,18 @@ export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: strin
     void load();
   }, [load]);
 
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      await api.downloadAlbedoScoringExport(evalRunId, subnet);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to download JSONL export");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   if (loading) {
     return <div className="py-3 px-2 text-[10px] text-zinc-500">Loading scoring-results.jsonl analysis…</div>;
   }
@@ -113,16 +126,26 @@ export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: strin
             {data.total_dual_zero_questions} questions where both judges scored 0
           </p>
         </div>
-        {data.scoring_results_url && (
-          <a
-            href={data.scoring_results_url}
-            target="_blank"
-            rel="noreferrer"
-            className="text-[9px] text-sky-400 hover:underline shrink-0"
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => void handleDownload()}
+            disabled={downloading}
+            className="rounded border border-emerald-500/35 bg-emerald-500/10 px-2 py-1 text-[9px] text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
           >
-            scoring-results.jsonl
-          </a>
-        )}
+            {downloading ? "Preparing…" : "Download JSONL"}
+          </button>
+          {data.scoring_results_url && (
+            <a
+              href={data.scoring_results_url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[9px] text-sky-400 hover:underline"
+            >
+              source jsonl
+            </a>
+          )}
+        </div>
       </div>
 
       {data.total_dual_zero_questions === 0 ? (
