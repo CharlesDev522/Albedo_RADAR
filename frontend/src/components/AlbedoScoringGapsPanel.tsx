@@ -27,7 +27,8 @@ function SampleBlock({ sample }: { sample: AlbedoSampleDualZeros }) {
               <tr className="text-zinc-500 border-b border-zinc-800/80">
                 <th className="text-left py-1 px-2 w-10">Q</th>
                 <th className="text-left py-1 px-2">Question</th>
-                <th className="text-left py-1 px-2 w-[18%]">Ch · GLM</th>
+                <th className="text-left py-1 px-2 w-[16%]">Example bad</th>
+                <th className="text-left py-1 px-2 w-[14%]">Ch · GLM</th>
                 <th className="text-left py-1 px-2 w-[18%]">Ch · Qwen</th>
                 <th className="text-left py-1 px-2 w-[18%]">King · GLM</th>
                 <th className="text-left py-1 px-2 w-[18%]">King · Qwen</th>
@@ -38,6 +39,7 @@ function SampleBlock({ sample }: { sample: AlbedoSampleDualZeros }) {
                 <tr key={q.question_id} className="border-b border-zinc-800/50 align-top">
                   <td className="py-1.5 px-2 mono text-zinc-500">{q.question_id.replace("q_", "")}</td>
                   <td className="py-1.5 px-2 text-zinc-300">{q.text}</td>
+                  <td className="py-1.5 px-2 text-zinc-500">{q.example_bad ?? "—"}</td>
                   <td className="py-1.5 px-2 text-rose-200/90">{q.challenger_glm ?? "—"}</td>
                   <td className="py-1.5 px-2 text-rose-200/70">{q.challenger_qwen ?? "—"}</td>
                   <td className="py-1.5 px-2 text-emerald-200/90">{q.king_glm ?? "—"}</td>

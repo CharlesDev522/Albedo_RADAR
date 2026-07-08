@@ -782,6 +782,7 @@ export interface AlbedoSampleDualZeros {
 export interface AlbedoDualZeroQuestion {
   question_id: string;
   text: string;
+  example_bad?: string | null;
   challenger_glm?: string | null;
   challenger_qwen?: string | null;
   king_glm?: string | null;

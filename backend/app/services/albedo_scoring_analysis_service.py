@@ -113,6 +113,7 @@ def analyze_dual_zero_questions(rows: list[dict[str, Any]]) -> AlbedoScoringAnal
                 AlbedoDualZeroQuestion(
                     question_id=str(qid),
                     text=str(question.get("text") or ""),
+                    example_bad=question.get("example_bad"),
                     challenger_glm=ch_glm_expl.get(qid),
                     challenger_qwen=ch_qwen_expl.get(qid),
                     king_glm=k_glm_expl.get(qid),
@@ -201,6 +202,7 @@ def build_sample_export_record(sample: AlbedoSampleDualZeros) -> dict[str, Any]:
             {
                 "question_id": q.question_id,
                 "text": q.text,
+                "example_bad": q.example_bad,
                 "challenger_glm": q.challenger_glm,
                 "challenger_qwen": q.challenger_qwen,
                 "king_glm": q.king_glm,

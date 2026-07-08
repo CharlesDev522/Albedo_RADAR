@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class AlbedoDualZeroQuestion(BaseModel):
     question_id: str
     text: str
+    example_bad: str | None = None
     challenger_glm: str | None = None
     challenger_qwen: str | None = None
     king_glm: str | None = None

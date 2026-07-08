@@ -25,7 +25,7 @@ def _sample_row(
     return {
         "sample_id": sample_id,
         "questions": [
-            {"id": "q_01", "category": "overall", "text": "Runs test suite?"},
+            {"id": "q_01", "category": "overall", "text": "Runs test suite?", "example_bad": "Only runs git diff."},
             {"id": "q_02", "category": "pytest", "text": "Uses pytest -x?"},
         ],
         "judge_results": [
@@ -133,12 +133,14 @@ def test_build_dual_zero_export_single_jsonl_file():
     assert set(record["questions"][0].keys()) == {
         "question_id",
         "text",
+        "example_bad",
         "challenger_glm",
         "challenger_qwen",
         "king_glm",
         "king_qwen",
     }
     assert record["questions"][0]["text"] == "Runs test suite?"
+    assert record["questions"][0]["example_bad"] == "Only runs git diff."
 
 
 def test_build_sample_export_json_minimal_shape():
