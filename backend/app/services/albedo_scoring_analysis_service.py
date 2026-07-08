@@ -17,7 +17,6 @@ from app.schemas.albedo_scoring_analysis import (
     AlbedoSampleDualZeros,
     AlbedoScoringAnalysis,
 )
-from app.services.albedo_analysis_service import parse_model_uri
 
 logger = logging.getLogger(__name__)
 
@@ -34,24 +33,16 @@ class ExportPayload:
     media_type: str
 
 
-def _filename_slug(name: str, max_len: int = 48) -> str:
-    slug = name.split("@", 1)[0].lower().replace("/", "-")
-    slug = "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in slug)
-    slug = "-".join(part for part in slug.split("-") if part)
-    return (slug[:max_len] if slug else "unknown")
-
-
 def duel_export_filename(
     *,
-    king_name: str | None,
-    challenger_name: str | None,
+    king_uid: int | None,
     challenger_uid: int | None,
+    winner: str,
 ) -> str:
-    """Filename: king name vs challenger name vs challenger uid."""
-    king = _filename_slug(king_name or "king")
-    challenger = _filename_slug(challenger_name or "challenger")
-    uid = challenger_uid if challenger_uid is not None else "uid"
-    return f"{king} vs {challenger} vs {uid}.jsonl"
+    """Filename: king uid vs challenger uid + who won."""
+    k = king_uid if king_uid is not None else "k"
+    c = challenger_uid if challenger_uid is not None else "c"
+    return f"{k} vs {c} {winner}.jsonl"
 
 
 def _is_glm_judge(model: str | None) -> bool:
@@ -157,13 +148,14 @@ def _scoring_results_url(eval_run: dict[str, Any]) -> str | None:
     return str(url) if url else None
 
 
-def _duel_export_labels(eval_run: dict[str, Any]) -> tuple[str | None, str | None, int | None]:
-    _, challenger_name, _ = parse_model_uri(eval_run.get("model_uri"))
+def _duel_export_labels(eval_run: dict[str, Any]) -> tuple[int | None, int | None, str]:
     king = eval_run.get("king") or {}
-    _, king_name, _ = parse_model_uri(king.get("model_uri"))
-    uid_raw = eval_run.get("uid")
-    challenger_uid = int(uid_raw) if uid_raw is not None else None
-    return king_name or None, challenger_name or None, challenger_uid
+    king_uid_raw = king.get("uid")
+    challenger_uid_raw = eval_run.get("uid")
+    king_uid = int(king_uid_raw) if king_uid_raw is not None else None
+    challenger_uid = int(challenger_uid_raw) if challenger_uid_raw is not None else None
+    winner = "challenger" if eval_run.get("challenger_won") else "king"
+    return king_uid, challenger_uid, winner
 
 
 async def get_scoring_analysis_for_eval(
@@ -190,13 +182,13 @@ async def get_scoring_analysis_for_eval(
         rows = await fetch_scoring_results_jsonl(url, settings=settings, client=client, fresh=fresh)
 
     analysis = analyze_dual_zero_questions(rows)
-    king_name, challenger_name, challenger_uid = _duel_export_labels(eval_run)
+    king_uid, challenger_uid, winner = _duel_export_labels(eval_run)
     return analysis.model_copy(
         update={
             "export_filename": duel_export_filename(
-                king_name=king_name,
-                challenger_name=challenger_name,
+                king_uid=king_uid,
                 challenger_uid=challenger_uid,
+                winner=winner,
             )
         }
     )
@@ -235,17 +227,17 @@ def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
 def build_dual_zero_export(
     analysis: AlbedoScoringAnalysis,
     *,
-    king_name: str | None,
-    challenger_name: str | None,
+    king_uid: int | None,
     challenger_uid: int | None,
+    winner: str,
 ) -> ExportPayload:
     if not analysis.samples:
         raise LookupError("No dual-zero samples to export")
 
     filename = duel_export_filename(
-        king_name=king_name,
-        challenger_name=challenger_name,
+        king_uid=king_uid,
         challenger_uid=challenger_uid,
+        winner=winner,
     )
     return ExportPayload(
         content=build_dual_zero_export_jsonl(analysis).encode("utf-8"),
@@ -278,10 +270,10 @@ async def get_dual_zero_export(
         rows = await fetch_scoring_results_jsonl(url, settings=settings, client=client, fresh=fresh)
 
     analysis = analyze_dual_zero_questions(rows)
-    king_name, challenger_name, challenger_uid = _duel_export_labels(eval_run)
+    king_uid, challenger_uid, winner = _duel_export_labels(eval_run)
     return build_dual_zero_export(
         analysis,
-        king_name=king_name,
-        challenger_name=challenger_name,
+        king_uid=king_uid,
         challenger_uid=challenger_uid,
+        winner=winner,
     )

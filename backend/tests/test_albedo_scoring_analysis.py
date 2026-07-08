@@ -95,12 +95,11 @@ def test_analyze_dual_zero_requires_both_sides():
 
 
 def test_duel_export_filename():
-    name = duel_export_filename(
-        king_name="albedo-qwen3.6-35b-alac",
-        challenger_name="trainer07",
-        challenger_uid=205,
+    assert duel_export_filename(king_uid=50, challenger_uid=205, winner="king") == "50 vs 205 king.jsonl"
+    assert (
+        duel_export_filename(king_uid=50, challenger_uid=205, winner="challenger")
+        == "50 vs 205 challenger.jsonl"
     )
-    assert name == "albedo-qwen3.6-35b-alac vs trainer07 vs 205.jsonl"
 
 
 def test_build_dual_zero_export_jsonl_is_multiline_jsonl():
@@ -120,13 +119,13 @@ def test_build_dual_zero_export_single_jsonl_file():
     analysis = analyze_dual_zero_questions(rows)
     payload = build_dual_zero_export(
         analysis,
-        king_name="albedo-qwen3.6-35b-alac",
-        challenger_name="trainer07",
+        king_uid=50,
         challenger_uid=205,
+        winner="king",
     )
 
     assert payload.media_type == "application/x-ndjson"
-    assert payload.filename == "albedo-qwen3.6-35b-alac vs trainer07 vs 205.jsonl"
+    assert payload.filename == "50 vs 205 king.jsonl"
     lines = payload.content.decode().strip().splitlines()
     assert len(lines) == 1
     record = json.loads(lines[0])
