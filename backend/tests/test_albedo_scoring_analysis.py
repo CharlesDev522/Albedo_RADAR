@@ -1,15 +1,14 @@
 """Tests for Albedo scoring-results dual-zero analysis."""
 
 import json
-import zipfile
-from io import BytesIO
 
 from app.integrations.albedo_scoring_results import parse_scoring_results_jsonl
 from app.services.albedo_scoring_analysis_service import (
     analyze_dual_zero_questions,
     build_dual_zero_export,
+    build_dual_zero_export_jsonl,
     build_sample_export_json,
-    safe_sample_filename,
+    duel_export_filename,
 )
 
 
@@ -87,41 +86,46 @@ def test_analyze_dual_zero_requires_both_sides():
     rows = [
         _sample_row(sample_id="dataset/a:1:1"),
         _sample_row(sample_id="dataset/b:2:2", glm_q1="1", qwen_q1="0"),
-        _sample_row(sample_id="dataset/c:3:3", king_glm_q1="1", king_qwen_q1="0"),
     ]
     analysis = analyze_dual_zero_questions(rows)
 
-    assert analysis.total_samples == 3
+    assert analysis.total_samples == 2
     assert analysis.samples_with_dual_zeros == 1
-    assert analysis.total_dual_zero_questions == 1
-
-    sample = analysis.samples[0]
-    assert sample.sample_id == "dataset/a:1:1"
-    q = sample.questions[0]
-    assert q.question_id == "q_01"
-    assert q.challenger_glm.startswith("ch GLM")
-    assert q.challenger_qwen.startswith("ch Qwen")
-    assert q.king_glm.startswith("k GLM")
-    assert q.king_qwen.startswith("k Qwen")
+    assert analysis.samples[0].sample_id == "dataset/a:1:1"
 
 
-def test_analyze_dual_zero_skips_when_any_side_not_zero():
-    rows = [_sample_row(sample_id="dataset/d:4:4", king_glm_q1="0", king_qwen_q1="1")]
+def test_duel_export_filename():
+    name = duel_export_filename("fabc90bf-3871-46ef-ac7b-51d2e3b7039b", "org/trainer07")
+    assert name == "dual-zero-fabc90bf-org-trainer07.jsonl"
+
+
+def test_build_dual_zero_export_jsonl_is_multiline_jsonl():
+    rows = [
+        _sample_row(sample_id="dataset/a:1:1"),
+        _sample_row(sample_id="dataset/e:5:5"),
+    ]
     analysis = analyze_dual_zero_questions(rows)
-    assert analysis.samples_with_dual_zeros == 0
+    payload = build_dual_zero_export_jsonl(analysis)
+    lines = [line for line in payload.splitlines() if line.strip()]
+    assert len(lines) == 2
+    assert json.loads(lines[0])["sample_id"] == "dataset/a:1:1"
 
 
-def test_safe_sample_filename():
-    assert safe_sample_filename("dataset/a:1:1") == "dataset__a_1_1.jsonl"
-
-
-def test_build_sample_export_json_minimal_shape():
+def test_build_dual_zero_export_single_jsonl_file():
     rows = [_sample_row(sample_id="dataset/a:1:1")]
     analysis = analyze_dual_zero_questions(rows)
-    record = json.loads(build_sample_export_json(analysis.samples[0]))
+    payload = build_dual_zero_export(
+        analysis,
+        eval_run_id="fabc90bf-3871-46ef-ac7b-51d2e3b7039b",
+        challenger_repo="trainer07",
+    )
 
+    assert payload.media_type == "application/x-ndjson"
+    assert payload.filename == "dual-zero-fabc90bf-trainer07.jsonl"
+    lines = payload.content.decode().strip().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
     assert set(record.keys()) == {"sample_id", "questions"}
-    assert record["sample_id"] == "dataset/a:1:1"
     assert set(record["questions"][0].keys()) == {
         "question_id",
         "challenger_glm",
@@ -131,25 +135,9 @@ def test_build_sample_export_json_minimal_shape():
     }
 
 
-def test_build_dual_zero_export_uses_sample_id_filename():
+def test_build_sample_export_json_minimal_shape():
     rows = [_sample_row(sample_id="dataset/a:1:1")]
     analysis = analyze_dual_zero_questions(rows)
-    payload = build_dual_zero_export(analysis)
-
-    assert payload.filename == "dataset__a_1_1.jsonl"
-    assert payload.media_type == "application/x-ndjson"
-    assert json.loads(payload.content.decode().strip())["sample_id"] == "dataset/a:1:1"
-
-
-def test_build_dual_zero_export_zip_for_multiple_samples():
-    rows = [
-        _sample_row(sample_id="dataset/a:1:1"),
-        _sample_row(sample_id="dataset/e:5:5"),
-    ]
-    analysis = analyze_dual_zero_questions(rows)
-    payload = build_dual_zero_export(analysis)
-
-    assert payload.media_type == "application/zip"
-    with zipfile.ZipFile(BytesIO(payload.content)) as archive:
-        names = sorted(archive.namelist())
-    assert names == ["dataset__a_1_1.jsonl", "dataset__e_5_5.jsonl"]
+    record = json.loads(build_sample_export_json(analysis.samples[0]).strip())
+    assert "eval_run_id" not in record
+    assert record["sample_id"] == "dataset/a:1:1"

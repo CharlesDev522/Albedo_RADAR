@@ -137,7 +137,10 @@ async def albedo_scoring_analysis_export(
         return Response(
             content=payload.content,
             media_type=payload.media_type,
-            headers={"Content-Disposition": f'attachment; filename="{payload.filename}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{payload.filename}"',
+                "X-Export-Filename": payload.filename,
+            },
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

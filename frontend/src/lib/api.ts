@@ -766,6 +766,7 @@ export interface AlbedoRepoCrownAnalysis {
 }
 
 export interface AlbedoScoringAnalysis {
+  export_filename?: string | null;
   total_samples: number;
   samples_with_dual_zeros: number;
   total_dual_zero_questions: number;
@@ -951,7 +952,11 @@ export const api = {
       `/albedo/scoring-analysis?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}`,
       { forceRefresh }
     ),
-  downloadAlbedoScoringExport: async (evalRunId: string, subnet = DEFAULT_SUBNET) => {
+  downloadAlbedoScoringExport: async (
+    evalRunId: string,
+    subnet = DEFAULT_SUBNET,
+    filenameHint?: string | null
+  ) => {
     const res = await fetch(
       `${apiBase()}/albedo/scoring-analysis/export?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}`,
       { cache: "no-store" }
@@ -967,10 +972,12 @@ export const api = {
       throw new Error(detail);
     }
     const blob = await res.blob();
+    const duelSlug = evalRunId.replace(/-/g, "").slice(0, 8);
+    const fallback = filenameHint ?? `dual-zero-${duelSlug}.jsonl`;
     const header = res.headers.get("Content-Disposition");
-    const fallback = "dual-zero-export.jsonl";
+    const exportHeader = res.headers.get("X-Export-Filename");
     const match = header?.match(/filename="?([^";\n]+)"?/i);
-    const filename = match?.[1] ?? fallback;
+    const filename = exportHeader ?? match?.[1] ?? fallback;
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;

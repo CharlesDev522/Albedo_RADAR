@@ -21,6 +21,7 @@ class AlbedoSampleDualZeros(BaseModel):
 
 
 class AlbedoScoringAnalysis(BaseModel):
+    export_filename: str | None = None
     total_samples: int = 0
     samples_with_dual_zeros: int = 0
     total_dual_zero_questions: int = 0

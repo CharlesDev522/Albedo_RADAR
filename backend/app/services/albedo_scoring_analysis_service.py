@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import io
 import json
 import logging
-import zipfile
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +17,7 @@ from app.schemas.albedo_scoring_analysis import (
     AlbedoSampleDualZeros,
     AlbedoScoringAnalysis,
 )
+from app.services.albedo_analysis_service import parse_model_uri
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +34,15 @@ class ExportPayload:
     media_type: str
 
 
-def safe_sample_filename(sample_id: str) -> str:
-    """Filesystem-safe JSONL name derived from sample_id."""
-    safe = sample_id.replace("/", "__").replace(":", "_").replace("\\", "_")
-    safe = "".join(ch if ch.isalnum() or ch in "._-@" else "_" for ch in safe)
-    return f"{safe}.jsonl"
+def duel_export_filename(eval_run_id: str, challenger_repo: str | None = None) -> str:
+    """Duel-identifiable JSONL filename (eval id + challenger repo slug)."""
+    short = eval_run_id.replace("-", "")[:8]
+    if challenger_repo:
+        slug = challenger_repo.lower().replace("/", "-")
+        slug = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in slug)
+        slug = "-".join(part for part in slug.split("-") if part)[:48]
+        return f"dual-zero-{short}-{slug}.jsonl"
+    return f"dual-zero-{short}.jsonl"
 
 
 def _is_glm_judge(model: str | None) -> bool:
@@ -168,7 +171,11 @@ async def get_scoring_analysis_for_eval(
     async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:
         rows = await fetch_scoring_results_jsonl(url, settings=settings, client=client, fresh=fresh)
 
-    return analyze_dual_zero_questions(rows)
+    analysis = analyze_dual_zero_questions(rows)
+    _, challenger_name, _ = parse_model_uri(eval_run.get("model_uri"))
+    return analysis.model_copy(
+        update={"export_filename": duel_export_filename(eval_run_id, challenger_name or None)}
+    )
 
 
 def build_sample_export_record(sample: AlbedoSampleDualZeros) -> dict[str, Any]:
@@ -191,31 +198,29 @@ def build_sample_export_json(sample: AlbedoSampleDualZeros) -> str:
     return json.dumps(build_sample_export_record(sample), ensure_ascii=False) + "\n"
 
 
-def build_dual_zero_export(analysis: AlbedoScoringAnalysis) -> ExportPayload:
-    """One JSONL per sample_id; zip when multiple samples qualify."""
+def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
+    """One JSON line per dual-zero sample in a single JSONL file."""
+    lines = [
+        json.dumps(build_sample_export_record(sample), ensure_ascii=False)
+        for sample in analysis.samples
+    ]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def build_dual_zero_export(
+    analysis: AlbedoScoringAnalysis,
+    *,
+    eval_run_id: str,
+    challenger_repo: str | None = None,
+) -> ExportPayload:
     if not analysis.samples:
         raise LookupError("No dual-zero samples to export")
 
-    if len(analysis.samples) == 1:
-        sample = analysis.samples[0]
-        return ExportPayload(
-            content=build_sample_export_json(sample).encode("utf-8"),
-            filename=safe_sample_filename(sample.sample_id),
-            media_type="application/x-ndjson",
-        )
-
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as archive:
-        for sample in analysis.samples:
-            archive.writestr(
-                safe_sample_filename(sample.sample_id),
-                build_sample_export_json(sample),
-            )
-    zip_name = safe_sample_filename(analysis.samples[0].sample_id).removesuffix(".jsonl") + "-samples.zip"
+    filename = duel_export_filename(eval_run_id, challenger_repo)
     return ExportPayload(
-        content=buf.getvalue(),
-        filename=zip_name,
-        media_type="application/zip",
+        content=build_dual_zero_export_jsonl(analysis).encode("utf-8"),
+        filename=filename,
+        media_type="application/x-ndjson",
     )
 
 
@@ -226,10 +231,26 @@ async def get_dual_zero_export(
     settings: Settings | None = None,
     fresh: bool = False,
 ) -> ExportPayload:
-    analysis = await get_scoring_analysis_for_eval(
-        eval_run_id,
-        subnet=subnet,
-        settings=settings,
-        fresh=fresh,
+    settings = settings or get_settings()
+    dashboard = await fetch_dashboard(settings=settings, fresh=fresh)
+    eval_run = next(
+        (r for r in dashboard.get("eval_runs") or [] if r.get("eval_run_id") == eval_run_id),
+        None,
     )
-    return build_dual_zero_export(analysis)
+    if eval_run is None:
+        raise LookupError(f"eval_run_id not found: {eval_run_id}")
+
+    url = _scoring_results_url(eval_run)
+    if not url:
+        raise LookupError(f"No SCORING_RESULTS artifact for eval_run_id {eval_run_id}")
+
+    async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:
+        rows = await fetch_scoring_results_jsonl(url, settings=settings, client=client, fresh=fresh)
+
+    analysis = analyze_dual_zero_questions(rows)
+    _, challenger_name, _ = parse_model_uri(eval_run.get("model_uri"))
+    return build_dual_zero_export(
+        analysis,
+        eval_run_id=eval_run_id,
+        challenger_repo=challenger_name or None,
+    )

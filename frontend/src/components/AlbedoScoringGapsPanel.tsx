@@ -80,7 +80,7 @@ export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: strin
   const handleDownload = async () => {
     setDownloading(true);
     try {
-      await api.downloadAlbedoScoringExport(evalRunId, subnet);
+      await api.downloadAlbedoScoringExport(evalRunId, subnet, data?.export_filename);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to download JSONL export");
@@ -116,7 +116,7 @@ export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: strin
           disabled={downloading || data.total_dual_zero_questions === 0}
           className="rounded border border-emerald-500/35 bg-emerald-500/10 px-2 py-1 text-[9px] text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50 shrink-0"
         >
-          {downloading ? "Preparing…" : "Download JSONL"}
+          {downloading ? "Preparing…" : data.export_filename ? `Download ${data.export_filename}` : "Download JSONL"}
         </button>
       </div>
 

@@ -41,7 +41,15 @@ async function proxyRequest(req: NextRequest, pathSegments: string[]) {
       });
 
       const responseHeaders = new Headers();
-      for (const key of ["content-type", "cache-control", "connection", "x-accel-buffering"]) {
+      for (const key of [
+        "content-type",
+        "content-disposition",
+        "content-length",
+        "x-export-filename",
+        "cache-control",
+        "connection",
+        "x-accel-buffering",
+      ]) {
         const value = upstream.headers.get(key);
         if (value) responseHeaders.set(key, value);
       }
