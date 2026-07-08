@@ -598,8 +598,8 @@ export default function AlbedoDuelPanel() {
         <section className="panel px-3 py-2">
           <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge duel scores</h3>
           <p className="text-[9px] text-zinc-600 mb-2">
-            Each judge cell: ch/k win-rates and pick with margin. Click scoring gaps to see rubric
-            questions where both GLM and Qwen scored 0, grouped by sample id.
+            Each judge cell: ch/k win-rates and pick with margin. Click scoring gaps for rubric
+            questions where GLM and Qwen both score 0 on challenger and king sides.
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-[10px] min-w-[920px]">

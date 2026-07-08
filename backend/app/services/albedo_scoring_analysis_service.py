@@ -1,4 +1,4 @@
-"""Analyze Albedo scoring-results.jsonl for GLM + Qwen dual-zero rubric questions."""
+"""Analyze Albedo scoring-results.jsonl for GLM + Qwen dual-zero on both duel sides."""
 
 from __future__ import annotations
 
@@ -25,29 +25,6 @@ QWEN_JUDGE_HINT = "qwen"
 CHALLENGER_SIDE = "challenger"
 KING_SIDE_RAW = "previous_king"
 
-SIDE_DESCRIPTIONS = {
-    CHALLENGER_SIDE: "Rubric questions scored against the challenger's answer for each duel sample.",
-    KING_SIDE_RAW: "Rubric questions scored against the king's answer for each duel sample.",
-}
-
-
-def normalize_side_param(side: str | None) -> tuple[str, str]:
-    """Map API side (challenger|king) to JSONL judge_results.side value."""
-    raw = (side or CHALLENGER_SIDE).strip().lower()
-    if raw in {"king", "previous_king", "k"}:
-        return "king", KING_SIDE_RAW
-    return CHALLENGER_SIDE, CHALLENGER_SIDE
-
-
-def side_label(api_side: str) -> str:
-    if api_side == "king":
-        return "King model output"
-    return "Challenger model output"
-
-
-def side_description(raw_side: str) -> str:
-    return SIDE_DESCRIPTIONS.get(raw_side, SIDE_DESCRIPTIONS[CHALLENGER_SIDE])
-
 
 def _is_glm_judge(model: str | None) -> bool:
     return GLM_JUDGE_HINT in (model or "").lower()
@@ -57,21 +34,11 @@ def _is_qwen_judge(model: str | None) -> bool:
     return QWEN_JUDGE_HINT in (model or "").lower()
 
 
-def _sample_label(sample_id: str) -> str:
-    if ":" in sample_id:
-        tail = sample_id.rsplit(":", 2)
-        if len(tail) >= 2:
-            return ":".join(tail[-2:])
-    if "/" in sample_id:
-        return sample_id.rsplit("/", 1)[-1]
-    return sample_id
-
-
 def _judge_entry(
     sample: dict[str, Any],
     *,
     predicate,
-    side: str = CHALLENGER_SIDE,
+    side: str,
 ) -> dict[str, Any] | None:
     for entry in sample.get("judge_results") or []:
         if entry.get("side") != side:
@@ -96,42 +63,51 @@ def analyze_dual_zero_questions(
     *,
     glm_judge: str | None = None,
     qwen_judge: str | None = None,
-    side: str = CHALLENGER_SIDE,
-    api_side: str | None = None,
 ) -> AlbedoScoringAnalysis:
-    """Find rubric questions where GLM and Qwen both scored 0 for one duel side."""
-    resolved_api_side = api_side or ("king" if side == KING_SIDE_RAW else CHALLENGER_SIDE)
+    """Questions where GLM and Qwen both score 0 on challenger AND king sides."""
     resolved_glm = glm_judge
     resolved_qwen = qwen_judge
     samples_out: list[AlbedoSampleDualZeros] = []
     total_dual_zero = 0
 
     for row in rows:
-        glm_entry = _judge_entry(row, predicate=_is_glm_judge, side=side)
-        qwen_entry = _judge_entry(row, predicate=_is_qwen_judge, side=side)
-        if glm_entry is None or qwen_entry is None:
+        ch_glm = _judge_entry(row, predicate=_is_glm_judge, side=CHALLENGER_SIDE)
+        ch_qwen = _judge_entry(row, predicate=_is_qwen_judge, side=CHALLENGER_SIDE)
+        k_glm = _judge_entry(row, predicate=_is_glm_judge, side=KING_SIDE_RAW)
+        k_qwen = _judge_entry(row, predicate=_is_qwen_judge, side=KING_SIDE_RAW)
+        if not (ch_glm and ch_qwen and k_glm and k_qwen):
             continue
-        resolved_glm = resolved_glm or glm_entry.get("judge_model")
-        resolved_qwen = resolved_qwen or qwen_entry.get("judge_model")
 
-        glm_answers: dict[str, Any] = glm_entry.get("answers") or {}
-        qwen_answers: dict[str, Any] = qwen_entry.get("answers") or {}
-        glm_expl: dict[str, str] = glm_entry.get("explanations") or {}
-        qwen_expl: dict[str, str] = qwen_entry.get("explanations") or {}
+        resolved_glm = resolved_glm or ch_glm.get("judge_model")
+        resolved_qwen = resolved_qwen or ch_qwen.get("judge_model")
+
+        ch_glm_ans: dict[str, Any] = ch_glm.get("answers") or {}
+        ch_qwen_ans: dict[str, Any] = ch_qwen.get("answers") or {}
+        k_glm_ans: dict[str, Any] = k_glm.get("answers") or {}
+        k_qwen_ans: dict[str, Any] = k_qwen.get("answers") or {}
+        ch_glm_expl: dict[str, str] = ch_glm.get("explanations") or {}
+        ch_qwen_expl: dict[str, str] = ch_qwen.get("explanations") or {}
+        k_glm_expl: dict[str, str] = k_glm.get("explanations") or {}
+        k_qwen_expl: dict[str, str] = k_qwen.get("explanations") or {}
         question_map = {q.get("id"): q for q in (row.get("questions") or []) if q.get("id")}
 
         dual_questions: list[AlbedoDualZeroQuestion] = []
         for qid, question in sorted(question_map.items()):
-            if not (_answer_is_zero(glm_answers.get(qid)) and _answer_is_zero(qwen_answers.get(qid))):
+            if not (
+                _answer_is_zero(ch_glm_ans.get(qid))
+                and _answer_is_zero(ch_qwen_ans.get(qid))
+                and _answer_is_zero(k_glm_ans.get(qid))
+                and _answer_is_zero(k_qwen_ans.get(qid))
+            ):
                 continue
             dual_questions.append(
                 AlbedoDualZeroQuestion(
                     question_id=str(qid),
-                    category=question.get("category"),
                     text=str(question.get("text") or ""),
-                    side=resolved_api_side,
-                    glm_explanation=glm_expl.get(qid),
-                    qwen_explanation=qwen_expl.get(qid),
+                    challenger_glm=ch_glm_expl.get(qid),
+                    challenger_qwen=ch_qwen_expl.get(qid),
+                    king_glm=k_glm_expl.get(qid),
+                    king_qwen=k_qwen_expl.get(qid),
                 )
             )
 
@@ -143,10 +119,6 @@ def analyze_dual_zero_questions(
         samples_out.append(
             AlbedoSampleDualZeros(
                 sample_id=sample_id,
-                sample_label=_sample_label(sample_id),
-                side=resolved_api_side,
-                challenger_score=_optional_float(row.get("challenger_score")),
-                king_score=_optional_float(row.get("king_score")),
                 dual_zero_count=len(dual_questions),
                 questions=dual_questions,
             )
@@ -157,24 +129,11 @@ def analyze_dual_zero_questions(
         eval_run_id="",
         glm_judge=resolved_glm,
         qwen_judge=resolved_qwen,
-        side=resolved_api_side,
-        side_raw=side,
-        side_label=side_label(resolved_api_side),
-        side_description=side_description(side),
         total_samples=len(rows),
         samples_with_dual_zeros=len(samples_out),
         total_dual_zero_questions=total_dual_zero,
         samples=samples_out,
     )
-
-
-def _optional_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _scoring_results_url(eval_run: dict[str, Any]) -> str | None:
@@ -189,10 +148,8 @@ async def get_scoring_analysis_for_eval(
     subnet: int = 97,
     settings: Settings | None = None,
     fresh: bool = False,
-    side: str | None = None,
 ) -> AlbedoScoringAnalysis:
     settings = settings or get_settings()
-    api_side, raw_side = normalize_side_param(side)
     dashboard = await fetch_dashboard(settings=settings, fresh=fresh)
     eval_run = next(
         (r for r in dashboard.get("eval_runs") or [] if r.get("eval_run_id") == eval_run_id),
@@ -212,7 +169,7 @@ async def get_scoring_analysis_for_eval(
     king = eval_run.get("king") or {}
     _, king_name, _ = parse_model_uri(king.get("model_uri"))
 
-    analysis = analyze_dual_zero_questions(rows, side=raw_side, api_side=api_side)
+    analysis = analyze_dual_zero_questions(rows)
     analysis.eval_run_id = eval_run_id
     analysis.scoring_results_url = url
     analysis.challenger_repo = challenger_name or None
@@ -221,43 +178,25 @@ async def get_scoring_analysis_for_eval(
     return analysis
 
 
-def dual_zero_export_filename(eval_run_id: str, side: str = CHALLENGER_SIDE) -> str:
+def dual_zero_export_filename(eval_run_id: str) -> str:
     short = eval_run_id.replace("-", "")[:8]
-    api_side, _ = normalize_side_param(side)
-    return f"dual-zero-{api_side}-{short}.jsonl"
+    return f"dual-zero-both-{short}.jsonl"
 
 
 def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
-    """Serialize dual-zero samples as JSONL — one JSON object per sample_id."""
+    """Minimal JSONL export: sample_id + dual-zero questions with 4 judge reasons."""
     lines: list[str] = []
     for sample in analysis.samples:
         record = {
-            "eval_run_id": analysis.eval_run_id,
-            "finished_at": analysis.finished_at,
-            "challenger_repo": analysis.challenger_repo,
-            "king_model_name": analysis.king_model_name,
-            "glm_judge": analysis.glm_judge,
-            "qwen_judge": analysis.qwen_judge,
-            "side": analysis.side,
-            "side_raw": analysis.side_raw,
-            "side_label": analysis.side_label,
-            "side_description": analysis.side_description,
-            "scoring_results_url": analysis.scoring_results_url,
             "sample_id": sample.sample_id,
-            "sample_label": sample.sample_label,
-            "challenger_score": sample.challenger_score,
-            "king_score": sample.king_score,
-            "dual_zero_count": sample.dual_zero_count,
             "questions": [
                 {
                     "question_id": q.question_id,
-                    "category": q.category,
                     "text": q.text,
-                    "side": q.side,
-                    "glm_score": 0,
-                    "qwen_score": 0,
-                    "glm_explanation": q.glm_explanation,
-                    "qwen_explanation": q.qwen_explanation,
+                    "challenger_glm": q.challenger_glm,
+                    "challenger_qwen": q.challenger_qwen,
+                    "king_glm": q.king_glm,
+                    "king_qwen": q.king_qwen,
                 }
                 for q in sample.questions
             ],
@@ -272,13 +211,11 @@ async def get_dual_zero_export_jsonl(
     subnet: int = 97,
     settings: Settings | None = None,
     fresh: bool = False,
-    side: str | None = None,
 ) -> tuple[str, str]:
     analysis = await get_scoring_analysis_for_eval(
         eval_run_id,
         subnet=subnet,
         settings=settings,
         fresh=fresh,
-        side=side,
     )
-    return build_dual_zero_export_jsonl(analysis), dual_zero_export_filename(eval_run_id, side or CHALLENGER_SIDE)
+    return build_dual_zero_export_jsonl(analysis), dual_zero_export_filename(eval_run_id)
