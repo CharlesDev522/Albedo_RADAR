@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import RepoCrownAnalysisPanel from "@/components/RepoCrownAnalysisPanel";
 import AlbedoJudgeAnalysisPanel from "@/components/AlbedoJudgeAnalysisPanel";
 import { EntityNameCell } from "@/lib/entityLabels";
@@ -178,6 +178,11 @@ function KingTenureCard({ tenure }: { tenure: AlbedoKingTenure }) {
   );
 }
 
+function judgeShortFromModel(judge: string): string {
+  const slash = judge.lastIndexOf("/");
+  return slash >= 0 ? judge.slice(slash + 1) : judge;
+}
+
 function judgeShortHeader(name: string): string {
   if (name.startsWith("glm")) return "GLM";
   if (name.startsWith("qwen")) return "Qwen";
@@ -197,7 +202,7 @@ function JudgeScoreCell({ vote }: { vote: AlbedoDuelJudgeVote | undefined }) {
   return (
     <td
       className={`py-1.5 px-1 text-center mono text-[10px] border-l border-zinc-800/50 min-w-[68px] ${
-        pickCh ? "bg-rose-500/8" : "bg-emerald-500/8"
+        pickCh ? "text-rose-300 bg-rose-500/15" : "text-emerald-300 bg-emerald-500/15"
       }`}
       title={[
         vote.judge,
@@ -223,7 +228,9 @@ function JudgeScoreCell({ vote }: { vote: AlbedoDuelJudgeVote | undefined }) {
 function judgeVoteMap(duel: AlbedoDuelSummary): Record<string, AlbedoDuelJudgeVote> {
   const map: Record<string, AlbedoDuelJudgeVote> = {};
   for (const v of duel.judge_votes ?? []) {
-    map[v.short_name] = v;
+    for (const key of [v.short_name, v.judge, judgeShortFromModel(v.judge)]) {
+      if (key) map[key] = v;
+    }
   }
   return map;
 }
@@ -250,7 +257,7 @@ function DuelRow({
     req != null && duel.win_margin > 0 && duel.win_margin < req && !won;
   const hasScoring = scoringResultsAvailable(duel);
   return (
-    <>
+    <Fragment>
     <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
       <td className="py-1.5 pr-2 text-zinc-500 whitespace-nowrap">
         <div>{fmtTime(duel.finished_at)}</div>
@@ -281,7 +288,7 @@ function DuelRow({
       </td>
       <td
         className={`py-1.5 pr-2 mono ${
-          won ? "text-emerald-300" : marginBelowBar ? "text-amber-300" : "text-zinc-400"
+          won ? "text-rose-300" : marginBelowBar ? "text-amber-300" : "text-emerald-300"
         }`}
         title={
           req != null
@@ -300,8 +307,8 @@ function DuelRow({
             duel.coronated
               ? "text-amber-200 border-amber-500/40 bg-amber-500/15"
               : won
-                ? "text-emerald-200 border-emerald-500/30 bg-emerald-500/10"
-                : "text-zinc-400 border-zinc-600 bg-zinc-800/50"
+                ? "text-rose-200 border-rose-500/30 bg-rose-500/10"
+                : "text-emerald-200 border-emerald-500/30 bg-emerald-500/10"
           }`}
         >
           {duel.coronated ? "crowned" : won ? "challenger" : "defended"}
@@ -335,7 +342,7 @@ function DuelRow({
         </td>
       </tr>
     )}
-    </>
+    </Fragment>
   );
 }
 
@@ -387,8 +394,17 @@ export default function AlbedoDuelPanel() {
   }, [queuePollActive, refreshQueue]);
 
   const judgeOrder = useMemo(() => {
-    const fromApi = (data?.judge_details ?? []).map((j) => j.short_name);
-    return fromApi.length ? fromApi : JUDGE_COLUMNS;
+    const fromDetails = (data?.judge_details ?? []).map((j) => j.short_name).filter(Boolean);
+    if (fromDetails.length > 0) return fromDetails;
+    const fromChain = (data?.judge_models ?? []).map(judgeShortFromModel).filter(Boolean);
+    if (fromChain.length > 0) return fromChain;
+    const seen = new Set<string>();
+    for (const duel of data?.recent_duels ?? []) {
+      for (const v of duel.judge_votes ?? []) {
+        if (v.short_name) seen.add(v.short_name);
+      }
+    }
+    return seen.size > 0 ? [...seen] : JUDGE_COLUMNS;
   }, [data]);
 
   const duelColSpan = 7 + judgeOrder.length;
@@ -445,8 +461,8 @@ export default function AlbedoDuelPanel() {
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {[
-              { label: "Challenger wins", value: String(data.challenger_wins), accent: "text-emerald-300" },
-              { label: "King defenses", value: String(data.king_wins), accent: "text-rose-300" },
+              { label: "Challenger wins", value: String(data.challenger_wins), accent: "text-rose-300" },
+              { label: "King defenses", value: String(data.king_wins), accent: "text-emerald-300" },
               { label: "Challenger win %", value: fmtPct(data.challenger_win_pct) },
               { label: "Avg margin", value: fmtMargin(data.avg_win_margin) },
               {
@@ -598,8 +614,9 @@ export default function AlbedoDuelPanel() {
         <section className="panel px-3 py-2">
           <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge duel scores</h3>
           <p className="text-[9px] text-zinc-600 mb-2">
-            Each judge cell: ch/k win-rates and pick with margin. Click scoring gaps for rubric
-            questions where GLM and Qwen both score 0 on challenger and king sides.
+            Each judge cell: ch/k win-rates and pick with margin. Red = judge picks challenger,
+            green = judge picks king. Click scoring gaps for rubric questions where GLM and Qwen
+            both score 0 on challenger and king sides.
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-[10px] min-w-[920px]">
@@ -621,7 +638,7 @@ export default function AlbedoDuelPanel() {
                 </tr>
               </thead>
               <tbody>
-                {data.recent_duels.map((duel) => (
+                {(data.recent_duels ?? []).map((duel) => (
                   <DuelRow
                     key={duel.eval_run_id}
                     duel={duel}
