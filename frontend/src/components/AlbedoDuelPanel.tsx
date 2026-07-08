@@ -61,6 +61,25 @@ function modelLink(modelUri: string): string {
   return hippiusModelUrl(modelUri.split("@")[0]);
 }
 
+function scoringModeLabel(mode: string | null | undefined): string {
+  if (!mode) return "legacy";
+  if (mode === "binary") return "binary rubric";
+  if (mode === "glm_categories") return "GLM categories";
+  if (mode === "mixed") return "mixed";
+  return mode.replace(/_/g, " ");
+}
+
+function scoringModeClass(mode: string | null | undefined): string {
+  if (mode === "binary") return "text-cyan-300 border-cyan-500/30 bg-cyan-500/10";
+  if (mode === "glm_categories") return "text-violet-300 border-violet-500/30 bg-violet-500/10";
+  if (mode === "mixed") return "text-amber-300 border-amber-500/30 bg-amber-500/10";
+  return "text-zinc-400 border-zinc-600 bg-zinc-800/50";
+}
+
+function verdictUrl(duel: AlbedoDuelSummary): string | null {
+  return duel.artifacts?.EVAL_VERDICT ?? duel.artifacts?.eval_verdict ?? null;
+}
+
 function SectionTabs({
   section,
   onChange,
@@ -166,9 +185,10 @@ function JudgeScoreCell({ vote }: { vote: AlbedoDuelJudgeVote | undefined }) {
       className={`py-1.5 px-1 text-center mono text-[10px] border-l border-zinc-800/50 ${
         pickCh ? "text-rose-300 bg-rose-500/10" : "text-emerald-300 bg-emerald-500/10"
       }`}
-      title={`${vote.judge}\nch ${fmtScore(vote.challenger_score)} · k ${fmtScore(vote.king_score)}\npick ${pickCh ? "challenger" : "king"}`}
+      title={`${vote.judge}\nch ${fmtScore(vote.challenger_score)} · k ${fmtScore(vote.king_score)}\nΔ ${fmtMargin(vote.margin_from_neutral)}\npick ${pickCh ? "challenger" : "king"}`}
     >
-      <div>{fmtScore(vote.challenger_score)}</div>
+      <div className="text-rose-200">{fmtScore(vote.challenger_score)}</div>
+      <div className="text-emerald-200/90">{fmtScore(vote.king_score)}</div>
       <div className="text-[8px] font-medium opacity-80">{pickCh ? "ch" : "k"}</div>
     </td>
   );
@@ -187,9 +207,22 @@ const JUDGE_COLUMNS = ["glm-5.1", "qwen3.5-397b-a17b", "deepseek-v3.2"];
 function DuelRow({ duel, judgeOrder }: { duel: AlbedoDuelSummary; judgeOrder: string[] }) {
   const won = duel.challenger_won;
   const votes = judgeVoteMap(duel);
+  const req = duel.required_win_margin;
+  const marginBelowBar =
+    req != null && duel.win_margin > 0 && duel.win_margin < req && !won;
+  const verdict = verdictUrl(duel);
   return (
     <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
-      <td className="py-1.5 pr-2 text-zinc-500 whitespace-nowrap">{fmtTime(duel.finished_at)}</td>
+      <td className="py-1.5 pr-2 text-zinc-500 whitespace-nowrap">
+        <div>{fmtTime(duel.finished_at)}</div>
+        {duel.scoring_mode && (
+          <span
+            className={`inline-block mt-0.5 px-1 py-0.5 rounded text-[8px] border ${scoringModeClass(duel.scoring_mode)}`}
+          >
+            {scoringModeLabel(duel.scoring_mode)}
+          </span>
+        )}
+      </td>
       <td className="py-1.5 pr-2">
         <a href={modelLink(duel.model_uri)} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline block truncate max-w-[130px]">
           {shortRepo(duel.repo ?? `${duel.namespace}/${duel.model_name}`, 26)}
@@ -203,13 +236,24 @@ function DuelRow({ duel, judgeOrder }: { duel: AlbedoDuelSummary; judgeOrder: st
         <JudgeScoreCell key={name} vote={votes[name]} />
       ))}
       <td className="py-1.5 px-1 mono text-zinc-400 text-center">{duel.judge_spread != null ? fmtScore(duel.judge_spread) : "—"}</td>
-      <td className="py-1.5 pr-2 mono text-zinc-300">{fmtScore(duel.score_challenger)}</td>
+      <td className="py-1.5 pr-2 mono text-[10px]">
+        <div className="text-rose-200">{fmtScore(duel.score_challenger)}</div>
+        <div className="text-emerald-200/90">{fmtScore(duel.score_king)}</div>
+      </td>
       <td
         className={`py-1.5 pr-2 mono ${
-          won ? "text-emerald-300" : "text-zinc-400"
+          won ? "text-emerald-300" : marginBelowBar ? "text-amber-300" : "text-zinc-400"
         }`}
+        title={
+          req != null
+            ? `Win bar ${fmtScore(req)}${marginBelowBar ? " — challenger led but below bar" : ""}`
+            : undefined
+        }
       >
         {fmtMargin(duel.win_margin)}
+        {req != null && (
+          <span className="block text-[8px] text-zinc-600">bar {fmtScore(req)}</span>
+        )}
       </td>
       <td className="py-1.5">
         <span
@@ -225,6 +269,22 @@ function DuelRow({ duel, judgeOrder }: { duel: AlbedoDuelSummary; judgeOrder: st
         </span>
         {duel.panel_pattern && !duel.unanimous_panel && (
           <span className="block text-[8px] text-zinc-600 mt-0.5">{duel.panel_pattern.replace(/_/g, " ")}</span>
+        )}
+        {(duel.scored_sample_count != null || duel.judge_errors != null) && (
+          <span className="block text-[8px] text-zinc-600 mt-0.5">
+            {duel.scored_sample_count != null ? `${duel.scored_sample_count} samples` : ""}
+            {duel.judge_errors ? ` · ${duel.judge_errors} judge err` : ""}
+          </span>
+        )}
+        {verdict && (
+          <a
+            href={verdict}
+            target="_blank"
+            rel="noreferrer"
+            className="block text-[8px] text-sky-400 hover:underline mt-0.5"
+          >
+            verdict
+          </a>
         )}
       </td>
     </tr>
@@ -338,6 +398,14 @@ export default function AlbedoDuelPanel() {
               { label: "King defenses", value: String(data.king_wins), accent: "text-rose-300" },
               { label: "Challenger win %", value: fmtPct(data.challenger_win_pct) },
               { label: "Avg margin", value: fmtMargin(data.avg_win_margin) },
+              {
+                label: "Win bar",
+                value: data.required_win_margin != null ? fmtScore(data.required_win_margin) : "—",
+                sub:
+                  data.binary_scoring_duels != null && data.binary_scoring_duels > 0
+                    ? `${data.binary_scoring_duels} binary duels`
+                    : undefined,
+              },
               { label: "Avg ch / k score", value: `${fmtScore(data.avg_challenger_score)} / ${fmtScore(data.avg_king_score)}` },
               {
                 label: "Queue",
@@ -479,10 +547,11 @@ export default function AlbedoDuelPanel() {
         <section className="panel px-3 py-2">
           <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge duel scores</h3>
           <p className="text-[9px] text-zinc-600 mb-2">
-            Each judge cell: green = picked king · red = picked challenger · result: green challenger win · grey defended
+            Binary rubric: each judge cell shows challenger win-rate (red) vs king win-rate (green); pick = higher side.
+            Duel margin must clear the win bar (typically 6%) to dethrone. Result: green challenger · grey defended.
           </p>
           <div className="overflow-x-auto">
-            <table className="w-full text-[10px] min-w-[720px]">
+            <table className="w-full text-[10px] min-w-[860px]">
               <thead>
                 <tr className="text-zinc-500 border-b border-zinc-800">
                   <th className="text-left py-1 pr-2">When</th>
@@ -490,11 +559,12 @@ export default function AlbedoDuelPanel() {
                   <th className="text-left py-1 pr-2">King</th>
                   {judgeOrder.map((name) => (
                     <th key={name} className="text-center py-1 px-1 border-l border-zinc-800/50 text-zinc-400">
-                      {name.split("-")[0]}
+                      <div>{name.split("-")[0]}</div>
+                      <div className="text-[8px] font-normal text-zinc-600">ch / k</div>
                     </th>
                   ))}
                   <th className="text-center py-1 px-1 text-zinc-600">σ spread</th>
-                  <th className="text-left py-1 pr-2">Final</th>
+                  <th className="text-left py-1 pr-2">Aggregate</th>
                   <th className="text-left py-1 pr-2">Margin</th>
                   <th className="text-left py-1 pr-2">Result</th>
                 </tr>

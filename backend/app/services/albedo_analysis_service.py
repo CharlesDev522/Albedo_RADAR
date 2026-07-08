@@ -160,11 +160,32 @@ def _win_rate_row(
     )
 
 
-def _judge_votes(run: dict[str, Any]) -> dict[str, bool]:
+def _judge_score_pairs(run: dict[str, Any]) -> dict[str, tuple[float, float]]:
+    """Per-judge challenger and king rubric win-rates from dashboard breakdown."""
     breakdown = run.get("score_breakdown") or {}
+    by_ch = breakdown.get("by_judge") or {}
+    by_k = breakdown.get("by_judge_king") or {}
+    pairs: dict[str, tuple[float, float]] = {}
+    for judge, ch_raw in by_ch.items():
+        ch = float(ch_raw)
+        if judge in by_k:
+            k = float(by_k[judge])
+        else:
+            k = 1.0 - ch
+        pairs[str(judge)] = (ch, k)
+    return pairs
+
+
+def _pick_challenger(ch: float, k: float) -> bool:
+    if ch != k:
+        return ch > k
+    return ch > 0.5
+
+
+def _judge_votes(run: dict[str, Any]) -> dict[str, bool]:
     return {
-        str(judge): float(score) > 0.5
-        for judge, score in (breakdown.get("by_judge") or {}).items()
+        judge: _pick_challenger(ch, k)
+        for judge, (ch, k) in _judge_score_pairs(run).items()
     }
 
 
@@ -197,20 +218,18 @@ CONSENSUS_LABELS = {
 
 def _build_judge_vote_rows(run: dict[str, Any]) -> list[AlbedoDuelJudgeVote]:
     challenger_won = bool(run.get("challenger_won"))
-    breakdown = run.get("score_breakdown") or {}
     rows: list[AlbedoDuelJudgeVote] = []
-    for judge, score in (breakdown.get("by_judge") or {}).items():
-        s = float(score)
-        pick_ch = s > 0.5
+    for judge, (ch, k) in _judge_score_pairs(run).items():
+        pick_ch = _pick_challenger(ch, k)
         rows.append(
             AlbedoDuelJudgeVote(
-                judge=str(judge),
-                short_name=judge_short_name(str(judge)),
-                challenger_score=round(s, 4),
-                king_score=round(1.0 - s, 4),
+                judge=judge,
+                short_name=judge_short_name(judge),
+                challenger_score=round(ch, 4),
+                king_score=round(k, 4),
                 pick_challenger=pick_ch,
                 agrees_with_verdict=pick_ch == challenger_won,
-                margin_from_neutral=round(s - 0.5, 4),
+                margin_from_neutral=round(ch - k, 4),
             )
         )
     return rows
@@ -246,6 +265,10 @@ def _duel_summary(
     judge_spread = round(max(scores) - min(scores), 4) if len(scores) >= 2 else None
     votes = _judge_votes(run)
     pattern = _consensus_pattern(votes)
+    breakdown = run.get("score_breakdown") or {}
+    req_raw = run.get("required_win_margin")
+    req_margin = float(req_raw) if req_raw is not None else None
+    win_margin = float(run.get("win_margin") or 0)
     return AlbedoDuelSummary(
         eval_run_id=run.get("eval_run_id", ""),
         finished_at=run.get("finished_at", ""),
@@ -254,7 +277,7 @@ def _duel_summary(
         king_version=run.get("king_version"),
         score_challenger=float(run.get("score_challenger") or 0),
         score_king=float(run.get("score_king") or 0),
-        win_margin=float(run.get("win_margin") or 0),
+        win_margin=win_margin,
         model_uri=uri,
         model_name=name,
         namespace=ns,
@@ -272,6 +295,18 @@ def _duel_summary(
         king_version_defended=int(king["king_version"]) if king.get("king_version") is not None else None,
         valid_turns=run.get("valid_turns"),
         total_turns=run.get("total_turns"),
+        scoring_mode=run.get("scoring_mode"),
+        required_win_margin=req_margin,
+        margin_cleared=win_margin >= req_margin if req_margin is not None else None,
+        scored_sample_count=run.get("scored_sample_count"),
+        judge_errors=run.get("judge_errors"),
+        metric_breakdown={
+            str(metric): float(score) for metric, score in (breakdown.get("by_metric") or {}).items()
+        },
+        category_breakdown={
+            str(cat): float(score) for cat, score in (breakdown.get("by_category") or {}).items()
+        },
+        artifacts={str(k): str(v) for k, v in (run.get("artifacts") or {}).items()},
         judge_scores={v.judge: v.challenger_score for v in judge_votes},
         judge_votes=judge_votes,
         judge_spread=judge_spread,
@@ -384,6 +419,7 @@ def _build_judge_details(
     per_judge: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "scores": [],
+            "king_scores": [],
             "pick_challenger": 0,
             "agree": 0,
             "overturn": 0,
@@ -412,7 +448,7 @@ def _build_judge_details(
             consensus_counts[pattern]["k_wins"] += 1
 
         breakdown = run.get("score_breakdown") or {}
-        by_judge = breakdown.get("by_judge") or {}
+        pairs = _judge_score_pairs(run)
         is_split = pattern in ("split_2_1_challenger", "split_1_2_king")
         dissenter = _solo_dissenter(votes)
 
@@ -427,23 +463,22 @@ def _build_judge_details(
                 else:
                     per_judge[judge]["split"] += 1
 
-        for judge, score in by_judge.items():
-            judge = str(judge)
-            s = float(score)
-            picks_ch = s > 0.5
-            per_judge[judge]["scores"].append(s)
+        for judge, (ch, k) in pairs.items():
+            picks_ch = _pick_challenger(ch, k)
+            per_judge[judge]["scores"].append(ch)
+            per_judge[judge]["king_scores"].append(k)
             if picks_ch:
                 per_judge[judge]["pick_challenger"] += 1
             if picks_ch == challenger_won:
                 per_judge[judge]["agree"] += 1
             else:
                 per_judge[judge]["overturn"] += 1
-            if s >= 0.6 or s <= 0.4:
+            if ch >= 0.6 or ch <= 0.4:
                 per_judge[judge]["extreme"] += 1
             if challenger_won:
-                per_judge[judge]["when_ch_wins"].append(s)
+                per_judge[judge]["when_ch_wins"].append(ch)
             else:
-                per_judge[judge]["when_k_wins"].append(s)
+                per_judge[judge]["when_k_wins"].append(ch)
             if is_split:
                 per_judge[judge]["split_total"] += 1
                 if picks_ch == challenger_won:
@@ -464,6 +499,7 @@ def _build_judge_details(
             continue
         duels = len(stats["scores"])
         avg = mean(stats["scores"])
+        avg_king = mean(stats["king_scores"]) if stats["king_scores"] else 1.0 - avg
         aggregates.append(
             AlbedoJudgeAggregate(
                 judge=judge,
@@ -478,7 +514,7 @@ def _build_judge_details(
                 short_name=judge_short_name(judge),
                 duels=duels,
                 avg_challenger_score=round(avg, 4),
-                avg_king_score=round(1.0 - avg, 4),
+                avg_king_score=round(avg_king, 4),
                 score_std=round(pstdev(stats["scores"]), 4) if len(stats["scores"]) > 1 else 0.0,
                 pick_challenger_pct=round(stats["pick_challenger"] / duels * 100, 1),
                 pick_king_pct=round((duels - stats["pick_challenger"]) / duels * 100, 1),
@@ -744,43 +780,43 @@ def _build_judge_analytics(
                 unanimous=is_unanimous,
             )
 
-        breakdown = run.get("score_breakdown") or {}
-        by_judge = {str(j): float(s) for j, s in (breakdown.get("by_judge") or {}).items()}
+        pairs = _judge_score_pairs(run)
         outcome_key = "challenger_win" if challenger_won else "king_win"
 
-        for judge, score in by_judge.items():
-            picks_ch = score > 0.5
+        for judge, (ch, k) in pairs.items():
+            picks_ch = _pick_challenger(ch, k)
             agrees = picks_ch == challenger_won
             entity_targets = [repo_buckets[repo_key]]
             if coldkey_key:
                 entity_targets.append(coldkey_buckets[coldkey_key])
             for bucket in entity_targets:
                 jstats = bucket["judges"][judge]
-                jstats["scores"].append(score)
+                jstats["scores"].append(ch)
                 if picks_ch:
                     jstats["pick_ch"] += 1
                 if agrees:
                     jstats["agree"] += 1
 
             ostats = outcome_buckets[outcome_key][judge]
-            ostats["scores"].append(score)
+            ostats["scores"].append(ch)
             if picks_ch:
                 ostats["pick_ch"] += 1
             if agrees:
                 ostats["agree"] += 1
 
+        by_judge = dict(pairs)
         judge_list = sorted(by_judge.keys())
         for i, ja in enumerate(judge_list):
             for jb in judge_list[i + 1 :]:
                 pair_key = (ja, jb) if ja < jb else (jb, ja)
-                pa = by_judge[ja]
-                pb = by_judge[jb]
+                ch_a, k_a = by_judge[ja]
+                ch_b, k_b = by_judge[jb]
                 pairwise[pair_key]["duels"] += 1
-                if (pa > 0.5) == (pb > 0.5):
+                if _pick_challenger(ch_a, k_a) == _pick_challenger(ch_b, k_b):
                     pairwise[pair_key]["agree"] += 1
-                pairwise[pair_key]["deltas"].append(abs(pa - pb))
-                pairwise[pair_key]["pairs_a"].append(pa)
-                pairwise[pair_key]["pairs_b"].append(pb)
+                pairwise[pair_key]["deltas"].append(abs(ch_a - ch_b))
+                pairwise[pair_key]["pairs_a"].append(ch_a)
+                pairwise[pair_key]["pairs_b"].append(ch_b)
 
     ordered_judges = judge_models or sorted(
         {j for b in repo_buckets.values() for j in b["judges"]}
@@ -1431,6 +1467,11 @@ def build_analysis_overview(
     margins = [float(r.get("win_margin") or 0) for r in eval_runs]
     ch_scores = [float(r.get("score_challenger") or 0) for r in eval_runs]
     k_scores = [float(r.get("score_king") or 0) for r in eval_runs]
+    binary_scoring_duels = sum(1 for r in eval_runs if r.get("scoring_mode") == "binary")
+    required_win_margin = next(
+        (float(r["required_win_margin"]) for r in eval_runs if r.get("required_win_margin") is not None),
+        None,
+    )
 
     ns_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {"duels": 0, "wins": 0, "margins": [], "coronations": 0})
     repo_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {"duels": 0, "wins": 0, "margins": [], "coronations": 0})
@@ -1466,6 +1507,8 @@ def build_analysis_overview(
         breakdown = run.get("score_breakdown") or {}
         for metric, score in (breakdown.get("by_metric") or {}).items():
             metric_scores[str(metric)].append(float(score))
+        for cat, score in (breakdown.get("by_category") or {}).items():
+            metric_scores[str(cat)].append(float(score))
 
         margin_counts[_margin_bucket(margin)] += 1
 
@@ -1583,6 +1626,8 @@ def build_analysis_overview(
         avg_win_margin=round(mean(margins), 4) if margins else None,
         avg_challenger_score=round(mean(ch_scores), 4) if ch_scores else None,
         avg_king_score=round(mean(k_scores), 4) if k_scores else None,
+        required_win_margin=required_win_margin,
+        binary_scoring_duels=binary_scoring_duels,
         reign=reign_members,
         current_king=reign_members[0] if reign_members else None,
         current_eval=_current_eval(dashboard.get("current_eval"), miner_lookup),
@@ -1619,6 +1664,12 @@ def build_analysis_overview(
         repo_submission_stats=repo_submission_stats,
         note=(
             "Live duel data from Hippius Albedo dashboard JSON (eval_runs + reign chain)."
+            + (
+                f" Binary rubric scoring on {binary_scoring_duels}/{total} recent duels"
+                f" (win bar ≥ {required_win_margin * 100:.0f}% when set)."
+                if required_win_margin is not None
+                else ""
+            )
             + lookup_note
         ),
     )

@@ -598,3 +598,75 @@ def test_repo_crown_reward_estimates_with_basis():
     coldkey_row = analysis.crowns_by_coldkey[0]
     assert coldkey_row.total_estimated_alpha == repo_row.total_estimated_alpha
     assert analysis.grand_total_estimated_alpha == repo_row.total_estimated_alpha
+
+
+def test_binary_rubric_scoring_uses_by_judge_king_pairs():
+    """Binary rubric uses paired ch/k scores; judge pick is ch > k, not ch > 0.5."""
+    dashboard = {
+        "updated_at": "2026-06-27T12:00:00+00:00",
+        "chain": {"judge_models": ["org/judge-a", "org/judge-b"]},
+        "reign": {"members": []},
+        "current_eval": None,
+        "queue": [],
+        "eval_runs": [
+            {
+                "eval_run_id": "binary-1",
+                "challenger_won": False,
+                "coronated": False,
+                "king_version": 1,
+                "score_challenger": 0.515,
+                "score_king": 0.485,
+                "win_margin": 0.0059,
+                "finished_at": "2026-06-27T10:00:00+00:00",
+                "model_uri": "org/challenger@sha256:1",
+                "hotkey": "hk_ch",
+                "uid": 2,
+                "scoring_mode": "binary",
+                "required_win_margin": 0.06,
+                "scored_sample_count": 120,
+                "judge_errors": 1,
+                "score_breakdown": {
+                    "by_judge": {"org/judge-a": 0.52, "org/judge-b": 0.51},
+                    "by_judge_king": {"org/judge-a": 0.48, "org/judge-b": 0.52},
+                    "by_metric": {"cat_01": 0.515},
+                    "by_category": {"cat_01": 0.515},
+                },
+                "artifacts": {"EVAL_VERDICT": "https://example.com/verdict.json"},
+                "king": {
+                    "king_version": 1,
+                    "model_uri": "org/king@sha256:0",
+                    "uid": 1,
+                    "hotkey": "hk_k",
+                },
+            },
+        ],
+    }
+
+    overview = build_analysis_overview(
+        dashboard,
+        subnet=97,
+        source_url="https://example.com/dashboard.json",
+    )
+
+    assert overview.binary_scoring_duels == 1
+    assert overview.required_win_margin == 0.06
+
+    duel = overview.recent_duels[0]
+    assert duel.scoring_mode == "binary"
+    assert duel.required_win_margin == 0.06
+    assert duel.margin_cleared is False
+    assert duel.scored_sample_count == 120
+    assert duel.judge_errors == 1
+    assert duel.artifacts["EVAL_VERDICT"] == "https://example.com/verdict.json"
+    assert duel.category_breakdown["cat_01"] == 0.515
+
+    by_short = {v.short_name: v for v in duel.judge_votes}
+    assert by_short["judge-a"].challenger_score == 0.52
+    assert by_short["judge-a"].king_score == 0.48
+    assert by_short["judge-a"].pick_challenger is True
+    assert by_short["judge-a"].margin_from_neutral == 0.04
+
+    # Legacy fallback (1 - ch) would give k=0.49 and pick challenger — wrong.
+    assert by_short["judge-b"].king_score == 0.52
+    assert by_short["judge-b"].pick_challenger is False
+    assert by_short["judge-b"].margin_from_neutral == -0.01

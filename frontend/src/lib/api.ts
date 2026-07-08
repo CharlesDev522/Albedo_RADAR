@@ -393,6 +393,14 @@ export interface AlbedoDuelSummary {
   king_version_defended?: number | null;
   valid_turns?: number | null;
   total_turns?: number | null;
+  scoring_mode?: string | null;
+  required_win_margin?: number | null;
+  margin_cleared?: boolean | null;
+  scored_sample_count?: number | null;
+  judge_errors?: number | null;
+  metric_breakdown?: Record<string, number>;
+  category_breakdown?: Record<string, number>;
+  artifacts?: Record<string, string>;
   judge_scores?: Record<string, number>;
   judge_votes?: AlbedoDuelJudgeVote[];
   judge_spread?: number | null;
@@ -772,6 +780,8 @@ export interface AlbedoAnalysisOverview {
   avg_win_margin?: number | null;
   avg_challenger_score?: number | null;
   avg_king_score?: number | null;
+  required_win_margin?: number | null;
+  binary_scoring_duels?: number;
   reign: AlbedoReignMember[];
   current_king?: AlbedoReignMember | null;
   current_eval?: AlbedoCurrentEval | null;

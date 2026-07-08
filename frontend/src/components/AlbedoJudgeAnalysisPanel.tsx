@@ -30,6 +30,11 @@ function fmtScore(n: number | null | undefined): string {
   return `${(n * 100).toFixed(1)}%`;
 }
 
+function metricLabel(metric: string): string {
+  if (metric.startsWith("cat_")) return `Category ${metric.slice(4)}`;
+  return metric.replace(/_/g, " ");
+}
+
 function fmtMargin(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   const pct = n * 100;
@@ -495,10 +500,15 @@ export default function AlbedoJudgeAnalysisPanel({
 
       <section className="panel px-3 py-2">
         <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Scoring metrics (challenger avg)</h3>
+        <p className="text-[9px] text-zinc-600 mb-2">
+          Rubric category win-rates from Hippius score breakdown (binary + GLM category modes).
+        </p>
         <div className="space-y-1.5">
           {(metricAggregates ?? []).map((m) => (
             <div key={m.metric} className="flex items-center gap-2 text-[10px]">
-              <span className="w-20 text-zinc-400 capitalize">{m.metric}</span>
+              <span className="w-24 text-zinc-400 capitalize truncate" title={m.metric}>
+                {metricLabel(m.metric)}
+              </span>
               <div className="flex-1 h-2 rounded bg-zinc-800 overflow-hidden">
                 <div
                   className="h-full rounded bg-violet-500/60"

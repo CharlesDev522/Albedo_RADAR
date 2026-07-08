@@ -71,6 +71,14 @@ class AlbedoDuelSummary(BaseModel):
     king_version_defended: int | None = None
     valid_turns: int | None = None
     total_turns: int | None = None
+    scoring_mode: str | None = None
+    required_win_margin: float | None = None
+    margin_cleared: bool | None = None
+    scored_sample_count: int | None = None
+    judge_errors: int | None = None
+    metric_breakdown: dict[str, float] = Field(default_factory=dict)
+    category_breakdown: dict[str, float] = Field(default_factory=dict)
+    artifacts: dict[str, str] = Field(default_factory=dict)
     judge_scores: dict[str, float] = Field(default_factory=dict)
     judge_votes: list[AlbedoDuelJudgeVote] = Field(default_factory=list)
     judge_spread: float | None = None
@@ -403,6 +411,8 @@ class AlbedoAnalysisOverview(BaseModel):
     avg_win_margin: float | None = None
     avg_challenger_score: float | None = None
     avg_king_score: float | None = None
+    required_win_margin: float | None = None
+    binary_scoring_duels: int = 0
     reign: list[AlbedoReignMember] = Field(default_factory=list)
     current_king: AlbedoReignMember | None = None
     current_eval: AlbedoCurrentEval | None = None
