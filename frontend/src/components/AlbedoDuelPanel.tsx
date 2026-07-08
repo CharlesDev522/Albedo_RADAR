@@ -5,7 +5,7 @@ import RepoCrownAnalysisPanel from "@/components/RepoCrownAnalysisPanel";
 import AlbedoJudgeAnalysisPanel from "@/components/AlbedoJudgeAnalysisPanel";
 import { EntityNameCell } from "@/lib/entityLabels";
 import AlbedoEvalQueueOverviewPanel from "@/components/AlbedoEvalQueueOverview";
-import AlbedoEvalFailsPanel from "@/components/AlbedoEvalFailsPanel";
+import AlbedoScoringGapsPanel from "@/components/AlbedoScoringGapsPanel";
 import {
   api,
   hippiusModelUrl,
@@ -76,8 +76,8 @@ function scoringModeClass(mode: string | null | undefined): string {
   return "text-zinc-400 border-zinc-600 bg-zinc-800/50";
 }
 
-function verdictUrl(duel: AlbedoDuelSummary): string | null {
-  return duel.artifacts?.EVAL_VERDICT ?? duel.artifacts?.eval_verdict ?? null;
+function scoringResultsAvailable(duel: AlbedoDuelSummary): boolean {
+  return Boolean(duel.artifacts?.SCORING_RESULTS ?? duel.artifacts?.scoring_results);
 }
 
 function SectionTabs({
@@ -229,14 +229,27 @@ function judgeVoteMap(duel: AlbedoDuelSummary): Record<string, AlbedoDuelJudgeVo
 
 const JUDGE_COLUMNS = ["glm-5.1", "qwen3.5-397b-a17b", "deepseek-v3.2"];
 
-function DuelRow({ duel, judgeOrder }: { duel: AlbedoDuelSummary; judgeOrder: string[] }) {
+function DuelRow({
+  duel,
+  judgeOrder,
+  colSpan,
+  scoringExpanded,
+  onToggleScoring,
+}: {
+  duel: AlbedoDuelSummary;
+  judgeOrder: string[];
+  colSpan: number;
+  scoringExpanded: boolean;
+  onToggleScoring: () => void;
+}) {
   const won = duel.challenger_won;
   const votes = judgeVoteMap(duel);
   const req = duel.required_win_margin;
   const marginBelowBar =
     req != null && duel.win_margin > 0 && duel.win_margin < req && !won;
-  const verdict = verdictUrl(duel);
+  const hasScoring = scoringResultsAvailable(duel);
   return (
+    <>
     <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
       <td className="py-1.5 pr-2 text-zinc-500 whitespace-nowrap">
         <div>{fmtTime(duel.finished_at)}</div>
@@ -301,18 +314,27 @@ function DuelRow({ duel, judgeOrder }: { duel: AlbedoDuelSummary; judgeOrder: st
             {duel.judge_errors ? ` · ${duel.judge_errors} judge err` : ""}
           </span>
         )}
-        {verdict && (
-          <a
-            href={verdict}
-            target="_blank"
-            rel="noreferrer"
-            className="block text-[8px] text-sky-400 hover:underline mt-0.5"
+        {hasScoring && (
+          <button
+            type="button"
+            onClick={onToggleScoring}
+            className={`block text-[8px] mt-0.5 hover:underline ${
+              scoringExpanded ? "text-amber-300" : "text-sky-400"
+            }`}
           >
-            verdict
-          </a>
+            {scoringExpanded ? "hide scoring gaps" : "scoring gaps"}
+          </button>
         )}
       </td>
     </tr>
+    {scoringExpanded && hasScoring && (
+      <tr className="border-b border-zinc-800/50 bg-zinc-900/30">
+        <td colSpan={colSpan} className="py-1 px-2">
+          <AlbedoScoringGapsPanel evalRunId={duel.eval_run_id} />
+        </td>
+      </tr>
+    )}
+    </>
   );
 }
 
@@ -325,6 +347,7 @@ export default function AlbedoDuelPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("overview");
+  const [scoringDuelId, setScoringDuelId] = useState<string | null>(null);
 
   const queuePollActive = panelActive && (section === "overview" || section === "dq");
 
@@ -366,6 +389,8 @@ export default function AlbedoDuelPanel() {
     const fromApi = (data?.judge_details ?? []).map((j) => j.short_name);
     return fromApi.length ? fromApi : JUDGE_COLUMNS;
   }, [data]);
+
+  const duelColSpan = 7 + judgeOrder.length;
 
   const multiSlotHolders = useMemo(
     () => (data?.reign_slot_holders ?? []).filter((h) => h.slots_held > 1),
@@ -572,7 +597,8 @@ export default function AlbedoDuelPanel() {
         <section className="panel px-3 py-2">
           <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge duel scores</h3>
           <p className="text-[9px] text-zinc-600 mb-2">
-            Each judge cell: ch/k win-rates and pick with margin (e.g. k +2.8%). Duel margin must clear the win bar (typically 6%).
+            Each judge cell: ch/k win-rates and pick with margin. Click scoring gaps to see rubric
+            questions where both GLM and Qwen scored 0, grouped by sample id.
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-[10px] min-w-[920px]">
@@ -595,7 +621,16 @@ export default function AlbedoDuelPanel() {
               </thead>
               <tbody>
                 {data.recent_duels.map((duel) => (
-                  <DuelRow key={duel.eval_run_id} duel={duel} judgeOrder={judgeOrder} />
+                  <DuelRow
+                    key={duel.eval_run_id}
+                    duel={duel}
+                    judgeOrder={judgeOrder}
+                    colSpan={duelColSpan}
+                    scoringExpanded={scoringDuelId === duel.eval_run_id}
+                    onToggleScoring={() =>
+                      setScoringDuelId((prev) => (prev === duel.eval_run_id ? null : duel.eval_run_id))
+                    }
+                  />
                 ))}
               </tbody>
             </table>

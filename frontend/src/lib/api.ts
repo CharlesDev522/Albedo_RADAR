@@ -765,6 +765,38 @@ export interface AlbedoRepoCrownAnalysis {
   crown_history_coverage_note?: string;
 }
 
+export interface AlbedoScoringAnalysis {
+  eval_run_id: string;
+  scoring_results_url?: string | null;
+  challenger_repo?: string | null;
+  king_model_name?: string | null;
+  finished_at?: string | null;
+  glm_judge?: string | null;
+  qwen_judge?: string | null;
+  side: string;
+  total_samples: number;
+  samples_with_dual_zeros: number;
+  total_dual_zero_questions: number;
+  samples: AlbedoSampleDualZeros[];
+}
+
+export interface AlbedoSampleDualZeros {
+  sample_id: string;
+  sample_label: string;
+  challenger_score?: number | null;
+  king_score?: number | null;
+  dual_zero_count: number;
+  questions: AlbedoDualZeroQuestion[];
+}
+
+export interface AlbedoDualZeroQuestion {
+  question_id: string;
+  category?: string | null;
+  text: string;
+  glm_explanation?: string | null;
+  qwen_explanation?: string | null;
+}
+
 export interface AlbedoAnalysisOverview {
   subnet: number;
   source: string;
@@ -924,6 +956,11 @@ export const api = {
     ),
   getAlbedoLiveDuel: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
     fetchApi<AlbedoLiveDuel>(`/albedo/live-duel?subnet=${subnet}`, { forceRefresh }),
+  getAlbedoScoringAnalysis: (evalRunId: string, subnet = DEFAULT_SUBNET, forceRefresh = false) =>
+    fetchApi<AlbedoScoringAnalysis>(
+      `/albedo/scoring-analysis?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}`,
+      { forceRefresh }
+    ),
 };
 
 export function hippiusModelUrl(repo: string, branch = "main"): string {

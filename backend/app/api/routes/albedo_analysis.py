@@ -8,10 +8,12 @@ from app.db.session import get_db
 from app.schemas.albedo_analysis import AlbedoAnalysisOverview
 from app.schemas.albedo_eval_queue import AlbedoEvalQueueOverview
 from app.schemas.albedo_live import AlbedoLiveDuel
+from app.schemas.albedo_scoring_analysis import AlbedoScoringAnalysis
 from app.services.albedo_analysis_service import get_albedo_analysis_overview
 from app.services.albedo_eval_queue_service import get_eval_queue_overview
 from app.services.albedo_live_duel_service import get_live_duel
 from app.services.albedo_miner_lookup import load_historical_miner_lookup
+from app.services.albedo_scoring_analysis_service import get_scoring_analysis_for_eval
 
 router = APIRouter(prefix="/albedo", tags=["albedo"])
 
@@ -82,4 +84,30 @@ async def albedo_live_duel(
         raise HTTPException(
             status_code=502,
             detail=f"Failed to fetch Albedo live duel: {exc}",
+        ) from exc
+
+
+@router.get("/scoring-analysis", response_model=AlbedoScoringAnalysis)
+async def albedo_scoring_analysis(
+    eval_run_id: str = Query(..., min_length=8),
+    subnet: int = Query(default=97, ge=0),
+    fresh: bool = Query(default=False),
+) -> AlbedoScoringAnalysis:
+    """GLM + Qwen dual-zero rubric questions from scoring-results.jsonl for one duel."""
+    if subnet != 97:
+        raise HTTPException(status_code=400, detail="Albedo scoring analysis is only available for SN97")
+    settings = get_settings()
+    try:
+        return await get_scoring_analysis_for_eval(
+            eval_run_id,
+            subnet=subnet,
+            settings=settings,
+            fresh=fresh,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to analyze scoring results: {exc}",
         ) from exc

@@ -1,0 +1,187 @@
+"""Analyze Albedo scoring-results.jsonl for GLM + Qwen dual-zero rubric questions."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import httpx
+
+from app.config import Settings, get_settings
+from app.integrations.albedo_dashboard import fetch_dashboard
+from app.integrations.albedo_scoring_results import fetch_scoring_results_jsonl
+from app.schemas.albedo_scoring_analysis import (
+    AlbedoDualZeroQuestion,
+    AlbedoSampleDualZeros,
+    AlbedoScoringAnalysis,
+)
+from app.services.albedo_analysis_service import parse_model_uri
+
+logger = logging.getLogger(__name__)
+
+GLM_JUDGE_HINT = "glm"
+QWEN_JUDGE_HINT = "qwen"
+CHALLENGER_SIDE = "challenger"
+
+
+def _is_glm_judge(model: str | None) -> bool:
+    return GLM_JUDGE_HINT in (model or "").lower()
+
+
+def _is_qwen_judge(model: str | None) -> bool:
+    return QWEN_JUDGE_HINT in (model or "").lower()
+
+
+def _sample_label(sample_id: str) -> str:
+    if ":" in sample_id:
+        tail = sample_id.rsplit(":", 2)
+        if len(tail) >= 2:
+            return ":".join(tail[-2:])
+    if "/" in sample_id:
+        return sample_id.rsplit("/", 1)[-1]
+    return sample_id
+
+
+def _judge_entry(
+    sample: dict[str, Any],
+    *,
+    predicate,
+    side: str = CHALLENGER_SIDE,
+) -> dict[str, Any] | None:
+    for entry in sample.get("judge_results") or []:
+        if entry.get("side") != side:
+            continue
+        if predicate(entry.get("judge_model")):
+            return entry
+    return None
+
+
+def _answer_is_zero(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return float(value) == 0.0
+    return str(value).strip() in {"0", "0.0", "false", "no"}
+
+
+def analyze_dual_zero_questions(
+    rows: list[dict[str, Any]],
+    *,
+    glm_judge: str | None = None,
+    qwen_judge: str | None = None,
+    side: str = CHALLENGER_SIDE,
+) -> AlbedoScoringAnalysis:
+    """Find rubric questions where GLM and Qwen both scored 0 for the challenger."""
+    resolved_glm = glm_judge
+    resolved_qwen = qwen_judge
+    samples_out: list[AlbedoSampleDualZeros] = []
+    total_dual_zero = 0
+
+    for row in rows:
+        glm_entry = _judge_entry(row, predicate=_is_glm_judge, side=side)
+        qwen_entry = _judge_entry(row, predicate=_is_qwen_judge, side=side)
+        if glm_entry is None or qwen_entry is None:
+            continue
+        resolved_glm = resolved_glm or glm_entry.get("judge_model")
+        resolved_qwen = resolved_qwen or qwen_entry.get("judge_model")
+
+        glm_answers: dict[str, Any] = glm_entry.get("answers") or {}
+        qwen_answers: dict[str, Any] = qwen_entry.get("answers") or {}
+        glm_expl: dict[str, str] = glm_entry.get("explanations") or {}
+        qwen_expl: dict[str, str] = qwen_entry.get("explanations") or {}
+        question_map = {q.get("id"): q for q in (row.get("questions") or []) if q.get("id")}
+
+        dual_questions: list[AlbedoDualZeroQuestion] = []
+        for qid, question in sorted(question_map.items()):
+            if not (_answer_is_zero(glm_answers.get(qid)) and _answer_is_zero(qwen_answers.get(qid))):
+                continue
+            dual_questions.append(
+                AlbedoDualZeroQuestion(
+                    question_id=str(qid),
+                    category=question.get("category"),
+                    text=str(question.get("text") or ""),
+                    glm_explanation=glm_expl.get(qid),
+                    qwen_explanation=qwen_expl.get(qid),
+                )
+            )
+
+        if not dual_questions:
+            continue
+
+        sample_id = str(row.get("sample_id") or "")
+        total_dual_zero += len(dual_questions)
+        samples_out.append(
+            AlbedoSampleDualZeros(
+                sample_id=sample_id,
+                sample_label=_sample_label(sample_id),
+                challenger_score=_optional_float(row.get("challenger_score")),
+                king_score=_optional_float(row.get("king_score")),
+                dual_zero_count=len(dual_questions),
+                questions=dual_questions,
+            )
+        )
+
+    samples_out.sort(key=lambda s: (-s.dual_zero_count, s.sample_id))
+    return AlbedoScoringAnalysis(
+        eval_run_id="",
+        glm_judge=resolved_glm,
+        qwen_judge=resolved_qwen,
+        side=side,
+        total_samples=len(rows),
+        samples_with_dual_zeros=len(samples_out),
+        total_dual_zero_questions=total_dual_zero,
+        samples=samples_out,
+    )
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _scoring_results_url(eval_run: dict[str, Any]) -> str | None:
+    artifacts = eval_run.get("artifacts") or {}
+    url = artifacts.get("SCORING_RESULTS") or artifacts.get("scoring_results")
+    return str(url) if url else None
+
+
+async def get_scoring_analysis_for_eval(
+    eval_run_id: str,
+    *,
+    subnet: int = 97,
+    settings: Settings | None = None,
+    fresh: bool = False,
+) -> AlbedoScoringAnalysis:
+    settings = settings or get_settings()
+    dashboard = await fetch_dashboard(settings=settings, fresh=fresh)
+    eval_run = next(
+        (r for r in dashboard.get("eval_runs") or [] if r.get("eval_run_id") == eval_run_id),
+        None,
+    )
+    if eval_run is None:
+        raise LookupError(f"eval_run_id not found: {eval_run_id}")
+
+    url = _scoring_results_url(eval_run)
+    if not url:
+        raise LookupError(f"No SCORING_RESULTS artifact for eval_run_id {eval_run_id}")
+
+    async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:
+        rows = await fetch_scoring_results_jsonl(url, settings=settings, client=client, fresh=fresh)
+
+    _, challenger_name, _ = parse_model_uri(eval_run.get("model_uri"))
+    king = eval_run.get("king") or {}
+    _, king_name, _ = parse_model_uri(king.get("model_uri"))
+
+    analysis = analyze_dual_zero_questions(rows)
+    analysis.eval_run_id = eval_run_id
+    analysis.scoring_results_url = url
+    analysis.challenger_repo = challenger_name or None
+    analysis.king_model_name = king_name or None
+    analysis.finished_at = eval_run.get("finished_at")
+    return analysis
