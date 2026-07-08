@@ -95,6 +95,7 @@ async def albedo_live_duel(
 async def albedo_scoring_analysis(
     eval_run_id: str = Query(..., min_length=8),
     subnet: int = Query(default=97, ge=0),
+    side: str = Query(default="challenger", pattern="^(challenger|king|previous_king)$"),
     fresh: bool = Query(default=False),
 ) -> AlbedoScoringAnalysis:
     """GLM + Qwen dual-zero rubric questions from scoring-results.jsonl for one duel."""
@@ -107,6 +108,7 @@ async def albedo_scoring_analysis(
             subnet=subnet,
             settings=settings,
             fresh=fresh,
+            side=side,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -121,6 +123,7 @@ async def albedo_scoring_analysis(
 async def albedo_scoring_analysis_export(
     eval_run_id: str = Query(..., min_length=8),
     subnet: int = Query(default=97, ge=0),
+    side: str = Query(default="challenger", pattern="^(challenger|king|previous_king)$"),
     fresh: bool = Query(default=False),
 ) -> Response:
     """Download GLM + Qwen dual-zero questions as JSONL (one object per sample_id)."""
@@ -133,6 +136,7 @@ async def albedo_scoring_analysis_export(
             subnet=subnet,
             settings=settings,
             fresh=fresh,
+            side=side,
         )
         return Response(
             content=body,

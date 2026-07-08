@@ -7,6 +7,7 @@ from app.services.albedo_scoring_analysis_service import (
     analyze_dual_zero_questions,
     build_dual_zero_export_jsonl,
     dual_zero_export_filename,
+    normalize_side_param,
 )
 
 
@@ -17,6 +18,8 @@ def _sample_row(
     qwen_q1: str = "0",
     glm_q2: str = "1",
     qwen_q2: str = "0",
+    king_glm_q1: str = "1",
+    king_qwen_q1: str = "1",
 ) -> dict:
     return {
         "sample_id": sample_id,
@@ -43,6 +46,24 @@ def _sample_row(
                 "explanations": {
                     "q_01": "Qwen: only git diff was run.",
                     "q_02": "Qwen: no -x flag.",
+                },
+            },
+            {
+                "judge_model": "z-ai/glm-5.1",
+                "side": "previous_king",
+                "answers": {"q_01": king_glm_q1, "q_02": "1"},
+                "explanations": {
+                    "q_01": "GLM king: ok",
+                    "q_02": "GLM king: ok",
+                },
+            },
+            {
+                "judge_model": "qwen/qwen3.5-397b-a17b",
+                "side": "previous_king",
+                "answers": {"q_01": king_qwen_q1, "q_02": "1"},
+                "explanations": {
+                    "q_01": "Qwen king: ok",
+                    "q_02": "Qwen king: ok",
                 },
             },
             {
@@ -89,6 +110,24 @@ def test_analyze_dual_zero_questions_groups_by_sample():
     assert "test suite" in sample.questions[0].text
     assert sample.questions[0].glm_explanation.startswith("GLM:")
     assert sample.questions[0].qwen_explanation.startswith("Qwen:")
+    assert sample.questions[0].side == "challenger"
+    assert analysis.side == "challenger"
+    assert analysis.side_raw == "challenger"
+
+
+def test_analyze_dual_zero_on_king_side():
+    rows = [_sample_row(sample_id="dataset/k:1:1", king_glm_q1="0", king_qwen_q1="0")]
+    analysis = analyze_dual_zero_questions(rows, side="previous_king", api_side="king")
+    assert analysis.side == "king"
+    assert analysis.side_raw == "previous_king"
+    assert analysis.samples_with_dual_zeros == 1
+    assert analysis.samples[0].questions[0].side == "king"
+
+
+def test_normalize_side_param():
+    assert normalize_side_param("challenger") == ("challenger", "challenger")
+    assert normalize_side_param("king") == ("king", "previous_king")
+    assert normalize_side_param("previous_king") == ("king", "previous_king")
 
 
 def test_analyze_dual_zero_skips_when_only_one_judge_is_zero():
@@ -117,5 +156,7 @@ def test_build_dual_zero_export_jsonl_writes_one_line_per_sample():
     assert record["dual_zero_count"] == 1
     assert record["questions"][0]["glm_score"] == 0
     assert record["questions"][0]["qwen_score"] == 0
+    assert record["questions"][0]["side"] == "challenger"
+    assert record["side_raw"] == "challenger"
     assert "glm_explanation" in record["questions"][0]
-    assert dual_zero_export_filename(analysis.eval_run_id) == "dual-zero-fabc90bf.jsonl"
+    assert dual_zero_export_filename(analysis.eval_run_id, "challenger") == "dual-zero-challenger-fabc90bf.jsonl"

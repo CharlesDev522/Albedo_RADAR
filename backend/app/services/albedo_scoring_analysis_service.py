@@ -23,6 +23,30 @@ logger = logging.getLogger(__name__)
 GLM_JUDGE_HINT = "glm"
 QWEN_JUDGE_HINT = "qwen"
 CHALLENGER_SIDE = "challenger"
+KING_SIDE_RAW = "previous_king"
+
+SIDE_DESCRIPTIONS = {
+    CHALLENGER_SIDE: "Rubric questions scored against the challenger's answer for each duel sample.",
+    KING_SIDE_RAW: "Rubric questions scored against the king's answer for each duel sample.",
+}
+
+
+def normalize_side_param(side: str | None) -> tuple[str, str]:
+    """Map API side (challenger|king) to JSONL judge_results.side value."""
+    raw = (side or CHALLENGER_SIDE).strip().lower()
+    if raw in {"king", "previous_king", "k"}:
+        return "king", KING_SIDE_RAW
+    return CHALLENGER_SIDE, CHALLENGER_SIDE
+
+
+def side_label(api_side: str) -> str:
+    if api_side == "king":
+        return "King model output"
+    return "Challenger model output"
+
+
+def side_description(raw_side: str) -> str:
+    return SIDE_DESCRIPTIONS.get(raw_side, SIDE_DESCRIPTIONS[CHALLENGER_SIDE])
 
 
 def _is_glm_judge(model: str | None) -> bool:
@@ -73,8 +97,10 @@ def analyze_dual_zero_questions(
     glm_judge: str | None = None,
     qwen_judge: str | None = None,
     side: str = CHALLENGER_SIDE,
+    api_side: str | None = None,
 ) -> AlbedoScoringAnalysis:
-    """Find rubric questions where GLM and Qwen both scored 0 for the challenger."""
+    """Find rubric questions where GLM and Qwen both scored 0 for one duel side."""
+    resolved_api_side = api_side or ("king" if side == KING_SIDE_RAW else CHALLENGER_SIDE)
     resolved_glm = glm_judge
     resolved_qwen = qwen_judge
     samples_out: list[AlbedoSampleDualZeros] = []
@@ -103,6 +129,7 @@ def analyze_dual_zero_questions(
                     question_id=str(qid),
                     category=question.get("category"),
                     text=str(question.get("text") or ""),
+                    side=resolved_api_side,
                     glm_explanation=glm_expl.get(qid),
                     qwen_explanation=qwen_expl.get(qid),
                 )
@@ -117,6 +144,7 @@ def analyze_dual_zero_questions(
             AlbedoSampleDualZeros(
                 sample_id=sample_id,
                 sample_label=_sample_label(sample_id),
+                side=resolved_api_side,
                 challenger_score=_optional_float(row.get("challenger_score")),
                 king_score=_optional_float(row.get("king_score")),
                 dual_zero_count=len(dual_questions),
@@ -129,7 +157,10 @@ def analyze_dual_zero_questions(
         eval_run_id="",
         glm_judge=resolved_glm,
         qwen_judge=resolved_qwen,
-        side=side,
+        side=resolved_api_side,
+        side_raw=side,
+        side_label=side_label(resolved_api_side),
+        side_description=side_description(side),
         total_samples=len(rows),
         samples_with_dual_zeros=len(samples_out),
         total_dual_zero_questions=total_dual_zero,
@@ -158,8 +189,10 @@ async def get_scoring_analysis_for_eval(
     subnet: int = 97,
     settings: Settings | None = None,
     fresh: bool = False,
+    side: str | None = None,
 ) -> AlbedoScoringAnalysis:
     settings = settings or get_settings()
+    api_side, raw_side = normalize_side_param(side)
     dashboard = await fetch_dashboard(settings=settings, fresh=fresh)
     eval_run = next(
         (r for r in dashboard.get("eval_runs") or [] if r.get("eval_run_id") == eval_run_id),
@@ -179,7 +212,7 @@ async def get_scoring_analysis_for_eval(
     king = eval_run.get("king") or {}
     _, king_name, _ = parse_model_uri(king.get("model_uri"))
 
-    analysis = analyze_dual_zero_questions(rows)
+    analysis = analyze_dual_zero_questions(rows, side=raw_side, api_side=api_side)
     analysis.eval_run_id = eval_run_id
     analysis.scoring_results_url = url
     analysis.challenger_repo = challenger_name or None
@@ -188,9 +221,10 @@ async def get_scoring_analysis_for_eval(
     return analysis
 
 
-def dual_zero_export_filename(eval_run_id: str) -> str:
+def dual_zero_export_filename(eval_run_id: str, side: str = CHALLENGER_SIDE) -> str:
     short = eval_run_id.replace("-", "")[:8]
-    return f"dual-zero-{short}.jsonl"
+    api_side, _ = normalize_side_param(side)
+    return f"dual-zero-{api_side}-{short}.jsonl"
 
 
 def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
@@ -205,6 +239,9 @@ def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
             "glm_judge": analysis.glm_judge,
             "qwen_judge": analysis.qwen_judge,
             "side": analysis.side,
+            "side_raw": analysis.side_raw,
+            "side_label": analysis.side_label,
+            "side_description": analysis.side_description,
             "scoring_results_url": analysis.scoring_results_url,
             "sample_id": sample.sample_id,
             "sample_label": sample.sample_label,
@@ -216,6 +253,7 @@ def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
                     "question_id": q.question_id,
                     "category": q.category,
                     "text": q.text,
+                    "side": q.side,
                     "glm_score": 0,
                     "qwen_score": 0,
                     "glm_explanation": q.glm_explanation,
@@ -234,11 +272,13 @@ async def get_dual_zero_export_jsonl(
     subnet: int = 97,
     settings: Settings | None = None,
     fresh: bool = False,
+    side: str | None = None,
 ) -> tuple[str, str]:
     analysis = await get_scoring_analysis_for_eval(
         eval_run_id,
         subnet=subnet,
         settings=settings,
         fresh=fresh,
+        side=side,
     )
-    return build_dual_zero_export_jsonl(analysis), dual_zero_export_filename(eval_run_id)
+    return build_dual_zero_export_jsonl(analysis), dual_zero_export_filename(eval_run_id, side or CHALLENGER_SIDE)

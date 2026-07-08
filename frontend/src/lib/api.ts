@@ -765,6 +765,8 @@ export interface AlbedoRepoCrownAnalysis {
   crown_history_coverage_note?: string;
 }
 
+export type AlbedoScoringSide = "challenger" | "king";
+
 export interface AlbedoScoringAnalysis {
   eval_run_id: string;
   scoring_results_url?: string | null;
@@ -773,7 +775,10 @@ export interface AlbedoScoringAnalysis {
   finished_at?: string | null;
   glm_judge?: string | null;
   qwen_judge?: string | null;
-  side: string;
+  side: AlbedoScoringSide;
+  side_raw?: string;
+  side_label?: string;
+  side_description?: string;
   total_samples: number;
   samples_with_dual_zeros: number;
   total_dual_zero_questions: number;
@@ -783,6 +788,7 @@ export interface AlbedoScoringAnalysis {
 export interface AlbedoSampleDualZeros {
   sample_id: string;
   sample_label: string;
+  side?: AlbedoScoringSide;
   challenger_score?: number | null;
   king_score?: number | null;
   dual_zero_count: number;
@@ -793,6 +799,7 @@ export interface AlbedoDualZeroQuestion {
   question_id: string;
   category?: string | null;
   text: string;
+  side?: AlbedoScoringSide;
   glm_explanation?: string | null;
   qwen_explanation?: string | null;
 }
@@ -956,14 +963,23 @@ export const api = {
     ),
   getAlbedoLiveDuel: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
     fetchApi<AlbedoLiveDuel>(`/albedo/live-duel?subnet=${subnet}`, { forceRefresh }),
-  getAlbedoScoringAnalysis: (evalRunId: string, subnet = DEFAULT_SUBNET, forceRefresh = false) =>
+  getAlbedoScoringAnalysis: (
+    evalRunId: string,
+    subnet = DEFAULT_SUBNET,
+    forceRefresh = false,
+    side: AlbedoScoringSide = "challenger"
+  ) =>
     fetchApi<AlbedoScoringAnalysis>(
-      `/albedo/scoring-analysis?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}`,
+      `/albedo/scoring-analysis?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}&side=${side}`,
       { forceRefresh }
     ),
-  downloadAlbedoScoringExport: async (evalRunId: string, subnet = DEFAULT_SUBNET) => {
+  downloadAlbedoScoringExport: async (
+    evalRunId: string,
+    subnet = DEFAULT_SUBNET,
+    side: AlbedoScoringSide = "challenger"
+  ) => {
     const res = await fetch(
-      `${apiBase()}/albedo/scoring-analysis/export?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}`,
+      `${apiBase()}/albedo/scoring-analysis/export?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}&side=${side}`,
       { cache: "no-store" }
     );
     if (!res.ok) {
@@ -978,7 +994,7 @@ export const api = {
     }
     const blob = await res.blob();
     const header = res.headers.get("Content-Disposition");
-    const fallback = `dual-zero-${evalRunId.replace(/-/g, "").slice(0, 8)}.jsonl`;
+    const fallback = `dual-zero-${side}-${evalRunId.replace(/-/g, "").slice(0, 8)}.jsonl`;
     const match = header?.match(/filename="?([^";\n]+)"?/i);
     const filename = match?.[1] ?? fallback;
     const objectUrl = URL.createObjectURL(blob);
