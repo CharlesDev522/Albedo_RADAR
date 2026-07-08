@@ -21,16 +21,6 @@ class AlbedoSampleDualZeros(BaseModel):
 
 
 class AlbedoScoringAnalysis(BaseModel):
-    eval_run_id: str
-    scoring_results_url: str | None = None
-    challenger_repo: str | None = None
-    king_model_name: str | None = None
-    finished_at: str | None = None
-    glm_judge: str | None = None
-    qwen_judge: str | None = None
-    criteria: str = (
-        "GLM and Qwen both scored 0 on the challenger side AND on the king side."
-    )
     total_samples: int = 0
     samples_with_dual_zeros: int = 0
     total_dual_zero_questions: int = 0

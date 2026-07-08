@@ -16,7 +16,6 @@ from app.schemas.albedo_scoring_analysis import (
     AlbedoSampleDualZeros,
     AlbedoScoringAnalysis,
 )
-from app.services.albedo_analysis_service import parse_model_uri
 
 logger = logging.getLogger(__name__)
 
@@ -58,15 +57,8 @@ def _answer_is_zero(value: Any) -> bool:
     return str(value).strip() in {"0", "0.0", "false", "no"}
 
 
-def analyze_dual_zero_questions(
-    rows: list[dict[str, Any]],
-    *,
-    glm_judge: str | None = None,
-    qwen_judge: str | None = None,
-) -> AlbedoScoringAnalysis:
+def analyze_dual_zero_questions(rows: list[dict[str, Any]]) -> AlbedoScoringAnalysis:
     """Questions where GLM and Qwen both score 0 on challenger AND king sides."""
-    resolved_glm = glm_judge
-    resolved_qwen = qwen_judge
     samples_out: list[AlbedoSampleDualZeros] = []
     total_dual_zero = 0
 
@@ -77,9 +69,6 @@ def analyze_dual_zero_questions(
         k_qwen = _judge_entry(row, predicate=_is_qwen_judge, side=KING_SIDE_RAW)
         if not (ch_glm and ch_qwen and k_glm and k_qwen):
             continue
-
-        resolved_glm = resolved_glm or ch_glm.get("judge_model")
-        resolved_qwen = resolved_qwen or ch_qwen.get("judge_model")
 
         ch_glm_ans: dict[str, Any] = ch_glm.get("answers") or {}
         ch_qwen_ans: dict[str, Any] = ch_qwen.get("answers") or {}
@@ -126,9 +115,6 @@ def analyze_dual_zero_questions(
 
     samples_out.sort(key=lambda s: (-s.dual_zero_count, s.sample_id))
     return AlbedoScoringAnalysis(
-        eval_run_id="",
-        glm_judge=resolved_glm,
-        qwen_judge=resolved_qwen,
         total_samples=len(rows),
         samples_with_dual_zeros=len(samples_out),
         total_dual_zero_questions=total_dual_zero,
@@ -165,17 +151,7 @@ async def get_scoring_analysis_for_eval(
     async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:
         rows = await fetch_scoring_results_jsonl(url, settings=settings, client=client, fresh=fresh)
 
-    _, challenger_name, _ = parse_model_uri(eval_run.get("model_uri"))
-    king = eval_run.get("king") or {}
-    _, king_name, _ = parse_model_uri(king.get("model_uri"))
-
-    analysis = analyze_dual_zero_questions(rows)
-    analysis.eval_run_id = eval_run_id
-    analysis.scoring_results_url = url
-    analysis.challenger_repo = challenger_name or None
-    analysis.king_model_name = king_name or None
-    analysis.finished_at = eval_run.get("finished_at")
-    return analysis
+    return analyze_dual_zero_questions(rows)
 
 
 def dual_zero_export_filename(eval_run_id: str) -> str:
@@ -184,7 +160,7 @@ def dual_zero_export_filename(eval_run_id: str) -> str:
 
 
 def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
-    """Minimal JSONL export: sample_id + dual-zero questions with 4 judge reasons."""
+    """Minimal JSONL: sample_id + question_id + four judge reasons per dual-zero question."""
     lines: list[str] = []
     for sample in analysis.samples:
         record = {
@@ -192,7 +168,6 @@ def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
             "questions": [
                 {
                     "question_id": q.question_id,
-                    "text": q.text,
                     "challenger_glm": q.challenger_glm,
                     "challenger_qwen": q.challenger_qwen,
                     "king_glm": q.king_glm,

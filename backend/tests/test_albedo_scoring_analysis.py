@@ -111,7 +111,6 @@ def test_analyze_dual_zero_skips_when_any_side_not_zero():
 def test_build_dual_zero_export_jsonl_minimal_shape():
     rows = [_sample_row(sample_id="dataset/a:1:1")]
     analysis = analyze_dual_zero_questions(rows)
-    analysis.eval_run_id = "fabc90bf-3871-46ef-ac7b-51d2e3b7039b"
 
     payload = build_dual_zero_export_jsonl(analysis)
     record = json.loads(payload.strip())
@@ -120,11 +119,9 @@ def test_build_dual_zero_export_jsonl_minimal_shape():
     assert record["sample_id"] == "dataset/a:1:1"
     assert set(record["questions"][0].keys()) == {
         "question_id",
-        "text",
         "challenger_glm",
         "challenger_qwen",
         "king_glm",
         "king_qwen",
     }
-    assert "eval_run_id" not in record
-    assert dual_zero_export_filename(analysis.eval_run_id) == "dual-zero-both-fabc90bf.jsonl"
+    assert dual_zero_export_filename("fabc90bf-3871-46ef-ac7b-51d2e3b7039b") == "dual-zero-both-fabc90bf.jsonl"

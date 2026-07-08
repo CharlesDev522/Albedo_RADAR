@@ -766,14 +766,6 @@ export interface AlbedoRepoCrownAnalysis {
 }
 
 export interface AlbedoScoringAnalysis {
-  eval_run_id: string;
-  scoring_results_url?: string | null;
-  challenger_repo?: string | null;
-  king_model_name?: string | null;
-  finished_at?: string | null;
-  glm_judge?: string | null;
-  qwen_judge?: string | null;
-  criteria?: string;
   total_samples: number;
   samples_with_dual_zeros: number;
   total_dual_zero_questions: number;

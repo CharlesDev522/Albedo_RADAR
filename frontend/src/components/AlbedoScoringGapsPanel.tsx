@@ -107,30 +107,17 @@ export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: strin
             {data.total_dual_zero_questions} questions
           </p>
           <p className="text-[8px] text-zinc-600 mt-0.5 max-w-3xl">
-            {data.criteria ??
-              "Included only when GLM and Qwen both score 0 on the challenger side AND on the king side."}
+            GLM and Qwen both score 0 on challenger and king sides for the same rubric question.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => void handleDownload()}
-            disabled={downloading}
-            className="rounded border border-emerald-500/35 bg-emerald-500/10 px-2 py-1 text-[9px] text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
-          >
-            {downloading ? "Preparing…" : "Download JSONL"}
-          </button>
-          {data.scoring_results_url && (
-            <a
-              href={data.scoring_results_url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[9px] text-sky-400 hover:underline"
-            >
-              source jsonl
-            </a>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => void handleDownload()}
+          disabled={downloading}
+          className="rounded border border-emerald-500/35 bg-emerald-500/10 px-2 py-1 text-[9px] text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50 shrink-0"
+        >
+          {downloading ? "Preparing…" : "Download JSONL"}
+        </button>
       </div>
 
       {data.total_dual_zero_questions === 0 ? (
