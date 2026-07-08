@@ -5,6 +5,7 @@ import RepoCrownAnalysisPanel from "@/components/RepoCrownAnalysisPanel";
 import AlbedoJudgeAnalysisPanel from "@/components/AlbedoJudgeAnalysisPanel";
 import { EntityNameCell } from "@/lib/entityLabels";
 import AlbedoEvalQueueOverviewPanel from "@/components/AlbedoEvalQueueOverview";
+import AlbedoEvalFailsPanel from "@/components/AlbedoEvalFailsPanel";
 import AlbedoScoringGapsPanel from "@/components/AlbedoScoringGapsPanel";
 import {
   api,
