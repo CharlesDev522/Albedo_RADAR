@@ -14,7 +14,6 @@ import {
   shortAddr,
   shortRepo,
   type AlbedoAnalysisOverview,
-  type AlbedoDuelJudgeVote,
   type AlbedoDuelSummary,
   type AlbedoEvalQueueOverview,
   type AlbedoKingTenure,
@@ -179,80 +178,18 @@ function KingTenureCard({ tenure }: { tenure: AlbedoKingTenure }) {
   );
 }
 
-function judgeShortFromModel(judge: string): string {
-  const slash = judge.lastIndexOf("/");
-  return slash >= 0 ? judge.slice(slash + 1) : judge;
-}
-
-function judgeShortHeader(name: string): string {
-  if (name.startsWith("glm")) return "GLM";
-  if (name.startsWith("qwen")) return "Qwen";
-  if (name.startsWith("deepseek")) return "DS";
-  return name.split("-")[0];
-}
-
-function JudgeScoreCell({ vote }: { vote: AlbedoDuelJudgeVote | undefined }) {
-  if (!vote) {
-    return <td className="py-1.5 px-1 text-center text-zinc-700 border-l border-zinc-800/50">—</td>;
-  }
-
-  const pickCh = vote.pick_challenger;
-  const pickLabel = pickCh ? "ch" : "k";
-  const diagnosis = `${pickLabel} ${fmtMargin(pickCh ? vote.margin_from_neutral : -vote.margin_from_neutral)}`;
-
-  return (
-    <td
-      className={`py-1.5 px-1 text-center mono text-[10px] border-l border-zinc-800/50 min-w-[68px] ${
-        pickCh ? "text-rose-300 bg-rose-500/15" : "text-emerald-300 bg-emerald-500/15"
-      }`}
-      title={[
-        vote.judge,
-        `challenger ${fmtScore(vote.challenger_score)}`,
-        `king ${fmtScore(vote.king_score)}`,
-        `Δ ${fmtMargin(vote.margin_from_neutral)}`,
-        `pick ${pickCh ? "challenger" : "king"}`,
-        vote.agrees_with_verdict ? "agrees with verdict" : "dissents from verdict",
-      ].join("\n")}
-    >
-      <div className="leading-tight">
-        <span className="text-rose-200/90">{fmtScore(vote.challenger_score)}</span>
-        <span className="text-zinc-600 mx-0.5">/</span>
-        <span className="text-emerald-200/90">{fmtScore(vote.king_score)}</span>
-      </div>
-      <div className={`text-[9px] font-semibold mt-0.5 ${pickCh ? "text-rose-300" : "text-emerald-300"}`}>
-        {diagnosis}
-      </div>
-    </td>
-  );
-}
-
-function judgeVoteMap(duel: AlbedoDuelSummary): Record<string, AlbedoDuelJudgeVote> {
-  const map: Record<string, AlbedoDuelJudgeVote> = {};
-  for (const v of duel.judge_votes ?? []) {
-    for (const key of [v.short_name, v.judge, judgeShortFromModel(v.judge)]) {
-      if (key) map[key] = v;
-    }
-  }
-  return map;
-}
-
-const JUDGE_COLUMNS = ["glm-5.1", "qwen3.5-397b-a17b", "deepseek-v3.2"];
-
 function DuelRow({
   duel,
-  judgeOrder,
   colSpan,
   scoringExpanded,
   onToggleScoring,
 }: {
   duel: AlbedoDuelSummary;
-  judgeOrder: string[];
   colSpan: number;
   scoringExpanded: boolean;
   onToggleScoring: () => void;
 }) {
   const won = duel.challenger_won;
-  const votes = judgeVoteMap(duel);
   const req = duel.required_win_margin;
   const marginBelowBar =
     req != null && duel.win_margin > 0 && duel.win_margin < req && !won;
@@ -279,10 +216,6 @@ function DuelRow({
       <td className="py-1.5 pr-2 text-zinc-500 truncate max-w-[90px]">
         vs {duel.king_model_name ? shortRepo(duel.king_model_name, 12) : "—"}
       </td>
-      {judgeOrder.map((name) => (
-        <JudgeScoreCell key={name} vote={votes[name]} />
-      ))}
-      <td className="py-1.5 px-1 mono text-zinc-400 text-center">{duel.judge_spread != null ? fmtScore(duel.judge_spread) : "—"}</td>
       <td className="py-1.5 pr-2 mono text-[10px]">
         <div className="text-rose-200">{fmtScore(duel.score_challenger)}</div>
         <div className="text-emerald-200/90">{fmtScore(duel.score_king)}</div>
@@ -317,10 +250,9 @@ function DuelRow({
         {duel.panel_pattern && !duel.unanimous_panel && (
           <span className="block text-[8px] text-zinc-600 mt-0.5">{duel.panel_pattern.replace(/_/g, " ")}</span>
         )}
-        {(duel.scored_sample_count != null || duel.judge_errors != null) && (
+        {duel.scored_sample_count != null && (
           <span className="block text-[8px] text-zinc-600 mt-0.5">
-            {duel.scored_sample_count != null ? `${duel.scored_sample_count} samples` : ""}
-            {duel.judge_errors ? ` · ${duel.judge_errors} judge err` : ""}
+            {duel.scored_sample_count} samples
           </span>
         )}
         {hasScoring && (
@@ -396,21 +328,7 @@ export default function AlbedoDuelPanel() {
     return () => clearInterval(id);
   }, [queuePollActive, refreshQueue]);
 
-  const judgeOrder = useMemo(() => {
-    const fromDetails = (data?.judge_details ?? []).map((j) => j.short_name).filter(Boolean);
-    if (fromDetails.length > 0) return fromDetails;
-    const fromChain = (data?.judge_models ?? []).map(judgeShortFromModel).filter(Boolean);
-    if (fromChain.length > 0) return fromChain;
-    const seen = new Set<string>();
-    for (const duel of data?.recent_duels ?? []) {
-      for (const v of duel.judge_votes ?? []) {
-        if (v.short_name) seen.add(v.short_name);
-      }
-    }
-    return seen.size > 0 ? [...seen] : JUDGE_COLUMNS;
-  }, [data]);
-
-  const duelColSpan = 7 + judgeOrder.length;
+  const duelColSpan = 6;
 
   const multiSlotHolders = useMemo(
     () => (data?.reign_slot_holders ?? []).filter((h) => h.slots_held > 1),
@@ -616,26 +534,19 @@ export default function AlbedoDuelPanel() {
       {section === "duels" && (
         <section className="panel px-3 py-2">
           <AlbedoDatasetBuilderPanel />
-          <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge duel scores</h3>
+          <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Duel feed</h3>
           <p className="text-[9px] text-zinc-600 mb-2">
             Finished duels only ({(data.recent_duels ?? []).length} shown, {data.total_duels} total).
-            In-progress evals appear in the live duel banner above. Each judge cell: red = picks
-            challenger, green = picks king. Click scoring gaps for dual-zero / dual-one rubric questions.
+            In-progress evals appear in the live duel banner above. Click scoring gaps for dual-zero /
+            dual-one rubric questions.
           </p>
           <div className="overflow-x-auto">
-            <table className="w-full text-[10px] min-w-[920px]">
+            <table className="w-full text-[10px] min-w-[640px]">
               <thead>
                 <tr className="text-zinc-500 border-b border-zinc-800">
                   <th className="text-left py-1 pr-2">When</th>
                   <th className="text-left py-1 pr-2">Challenger repo</th>
                   <th className="text-left py-1 pr-2">King</th>
-                  {judgeOrder.map((name) => (
-                    <th key={name} className="text-center py-1 px-1 border-l border-zinc-800/50 text-zinc-400 min-w-[68px]">
-                      <div>{judgeShortHeader(name)}</div>
-                      <div className="text-[8px] font-normal text-zinc-600">pick / Δ</div>
-                    </th>
-                  ))}
-                  <th className="text-center py-1 px-1 text-zinc-600">σ spread</th>
                   <th className="text-left py-1 pr-2">Aggregate</th>
                   <th className="text-left py-1 pr-2">Margin</th>
                   <th className="text-left py-1 pr-2">Result</th>
@@ -656,7 +567,6 @@ export default function AlbedoDuelPanel() {
                   <DuelRow
                     key={duel.eval_run_id}
                     duel={duel}
-                    judgeOrder={judgeOrder}
                     colSpan={duelColSpan}
                     scoringExpanded={scoringDuelId === duel.eval_run_id}
                     onToggleScoring={() =>
