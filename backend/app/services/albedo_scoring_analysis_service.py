@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -14,6 +16,7 @@ from app.integrations.albedo_dashboard import fetch_dashboard
 from app.integrations.albedo_scoring_results import fetch_scoring_results_jsonl
 from app.schemas.albedo_scoring_analysis import (
     AlbedoDualZeroQuestion,
+    AlbedoDatasetBuildSummary,
     AlbedoSampleDualZeros,
     AlbedoScoringAnalysis,
 )
@@ -25,12 +28,24 @@ QWEN_JUDGE_HINT = "qwen"
 CHALLENGER_SIDE = "challenger"
 KING_SIDE_RAW = "previous_king"
 
+_DATASET_CACHE: dict[str, tuple[float, "DatasetBuildResult"]] = {}
+_DATASET_CACHE_TTL_SECONDS = 300.0
+_DATASET_EXPORT_FILENAME = "binary-dual-zero-dataset.jsonl"
+_DEDUP_SCRIPT_FILENAME = "dedup_dual_zero_jsonl.py"
+_DEDUP_SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / _DEDUP_SCRIPT_FILENAME
+
 
 @dataclass(frozen=True)
 class ExportPayload:
     content: bytes
     filename: str
     media_type: str
+
+
+@dataclass(frozen=True)
+class DatasetBuildResult:
+    summary: AlbedoDatasetBuildSummary
+    records: list[dict[str, Any]]
 
 
 def duel_export_filename(
@@ -224,6 +239,149 @@ def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
         for sample in analysis.samples
     ]
     return "\n".join(lines) + ("\n" if lines else "")
+
+
+def dedupe_records_by_sample_id(
+    records: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
+    """Keep the first JSONL record per sample_id; drop later duplicates."""
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    removed = 0
+    for record in records:
+        sample_id = str(record.get("sample_id") or "")
+        if not sample_id:
+            unique.append(record)
+            continue
+        if sample_id in seen:
+            removed += 1
+            continue
+        seen.add(sample_id)
+        unique.append(record)
+    return unique, removed
+
+
+def build_dataset_export_jsonl(records: list[dict[str, Any]]) -> str:
+    lines = [json.dumps(record, ensure_ascii=False) for record in records]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _binary_eval_runs(eval_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        run
+        for run in eval_runs
+        if run.get("scoring_mode") == "binary" and _scoring_results_url(run)
+    ]
+
+
+def _dataset_cache_get() -> DatasetBuildResult | None:
+    now = time.monotonic()
+    cached = _DATASET_CACHE.get("binary_dual_zero")
+    if cached and cached[0] > now:
+        return cached[1]
+    return None
+
+
+def _dataset_cache_set(result: DatasetBuildResult) -> None:
+    _DATASET_CACHE["binary_dual_zero"] = (time.monotonic() + _DATASET_CACHE_TTL_SECONDS, result)
+
+
+async def build_binary_dual_zero_dataset(
+    *,
+    settings: Settings | None = None,
+    fresh: bool = False,
+) -> DatasetBuildResult:
+    settings = settings or get_settings()
+    if not fresh:
+        cached = _dataset_cache_get()
+        if cached is not None:
+            return cached
+
+    dashboard = await fetch_dashboard(settings=settings, fresh=fresh)
+    eval_runs: list[dict[str, Any]] = list(dashboard.get("eval_runs") or [])
+    binary_total = sum(1 for run in eval_runs if run.get("scoring_mode") == "binary")
+    binary_runs = _binary_eval_runs(eval_runs)
+
+    all_records: list[dict[str, Any]] = []
+    duels_with_dual_zero = 0
+
+    async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:
+        for run in binary_runs:
+            url = _scoring_results_url(run)
+            if not url:
+                continue
+            try:
+                rows = await fetch_scoring_results_jsonl(
+                    url,
+                    settings=settings,
+                    client=client,
+                    fresh=fresh,
+                )
+                analysis = analyze_dual_zero_questions(rows)
+            except Exception:
+                logger.warning(
+                    "Skipping binary duel dataset row eval_run_id=%s",
+                    run.get("eval_run_id"),
+                    exc_info=True,
+                )
+                continue
+            if not analysis.samples:
+                continue
+            duels_with_dual_zero += 1
+            for sample in analysis.samples:
+                all_records.append(build_sample_export_record(sample))
+
+    unique_records, duplicates_removed = dedupe_records_by_sample_id(all_records)
+    total_questions = sum(len(record.get("questions") or []) for record in unique_records)
+    summary = AlbedoDatasetBuildSummary(
+        export_filename=_DATASET_EXPORT_FILENAME,
+        dedup_script_filename=_DEDUP_SCRIPT_FILENAME,
+        binary_duels_total=binary_total,
+        binary_duels_with_scoring=len(binary_runs),
+        binary_duels_with_dual_zero=duels_with_dual_zero,
+        samples_before_dedup=len(all_records),
+        unique_samples=len(unique_records),
+        duplicates_removed=duplicates_removed,
+        total_dual_zero_questions=total_questions,
+    )
+    result = DatasetBuildResult(summary=summary, records=unique_records)
+    if not fresh:
+        _dataset_cache_set(result)
+    return result
+
+
+async def get_binary_dataset_summary(
+    *,
+    settings: Settings | None = None,
+    fresh: bool = False,
+) -> AlbedoDatasetBuildSummary:
+    return (await build_binary_dual_zero_dataset(settings=settings, fresh=fresh)).summary
+
+
+async def get_binary_dataset_export(
+    *,
+    settings: Settings | None = None,
+    fresh: bool = False,
+) -> ExportPayload:
+    result = await build_binary_dual_zero_dataset(settings=settings, fresh=fresh)
+    if not result.records:
+        raise LookupError("No dual-zero samples found across binary rubric duels")
+
+    return ExportPayload(
+        content=build_dataset_export_jsonl(result.records).encode("utf-8"),
+        filename=result.summary.export_filename,
+        media_type="application/x-ndjson",
+    )
+
+
+def get_dedup_script_export() -> ExportPayload:
+    if not _DEDUP_SCRIPT_PATH.is_file():
+        raise LookupError(f"Dedup script not found: {_DEDUP_SCRIPT_PATH.name}")
+    return ExportPayload(
+        content=_DEDUP_SCRIPT_PATH.read_bytes(),
+        filename=_DEDUP_SCRIPT_FILENAME,
+        media_type="text/x-python",
+    )
 
 
 def build_dual_zero_export(

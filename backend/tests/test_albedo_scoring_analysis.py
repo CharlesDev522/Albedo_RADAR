@@ -1,13 +1,16 @@
 """Tests for Albedo scoring-results dual-zero analysis."""
 
+import asyncio
 import json
 
 from app.integrations.albedo_scoring_results import parse_scoring_results_jsonl
 from app.services.albedo_scoring_analysis_service import (
     analyze_dual_zero_questions,
+    build_binary_dual_zero_dataset,
     build_dual_zero_export,
     build_dual_zero_export_jsonl,
     build_sample_export_json,
+    dedupe_records_by_sample_id,
     duel_export_filename,
 )
 
@@ -149,3 +152,66 @@ def test_build_sample_export_json_minimal_shape():
     record = json.loads(build_sample_export_json(analysis.samples[0]).strip())
     assert "eval_run_id" not in record
     assert record["sample_id"] == "dataset/a:1:1"
+
+
+def test_dedupe_records_by_sample_id_keeps_first():
+    records = [
+        {"sample_id": "dataset/a:1:1", "questions": [{"question_id": "q_01"}]},
+        {"sample_id": "dataset/b:2:2", "questions": []},
+        {"sample_id": "dataset/a:1:1", "questions": [{"question_id": "q_02"}]},
+    ]
+    unique, removed = dedupe_records_by_sample_id(records)
+    assert removed == 1
+    assert len(unique) == 2
+    assert unique[0]["questions"][0]["question_id"] == "q_01"
+
+
+def test_build_binary_dual_zero_dataset_dedupes_across_duels(monkeypatch):
+    rows_a = [_sample_row(sample_id="dataset/a:1:1")]
+    rows_b = [_sample_row(sample_id="dataset/a:1:1"), _sample_row(sample_id="dataset/c:3:3")]
+
+    async def fake_fetch_dashboard(*, settings=None, fresh=False):
+        return {
+            "eval_runs": [
+                {
+                    "eval_run_id": "duel-a",
+                    "scoring_mode": "binary",
+                    "artifacts": {"SCORING_RESULTS": "https://example.com/a.jsonl"},
+                },
+                {
+                    "eval_run_id": "duel-b",
+                    "scoring_mode": "binary",
+                    "artifacts": {"SCORING_RESULTS": "https://example.com/b.jsonl"},
+                },
+                {
+                    "eval_run_id": "legacy",
+                    "scoring_mode": "glm_categories",
+                    "artifacts": {"SCORING_RESULTS": "https://example.com/legacy.jsonl"},
+                },
+            ]
+        }
+
+    async def fake_fetch_scoring_results_jsonl(url, *, settings=None, client=None, fresh=False):
+        if url.endswith("/a.jsonl"):
+            return rows_a
+        if url.endswith("/b.jsonl"):
+            return rows_b
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setattr(
+        "app.services.albedo_scoring_analysis_service.fetch_dashboard",
+        fake_fetch_dashboard,
+    )
+    monkeypatch.setattr(
+        "app.services.albedo_scoring_analysis_service.fetch_scoring_results_jsonl",
+        fake_fetch_scoring_results_jsonl,
+    )
+
+    result = asyncio.run(build_binary_dual_zero_dataset(fresh=True))
+    assert result.summary.binary_duels_total == 2
+    assert result.summary.binary_duels_with_scoring == 2
+    assert result.summary.binary_duels_with_dual_zero == 2
+    assert result.summary.samples_before_dedup == 3
+    assert result.summary.unique_samples == 2
+    assert result.summary.duplicates_removed == 1
+    assert {record["sample_id"] for record in result.records} == {"dataset/a:1:1", "dataset/c:3:3"}

@@ -27,3 +27,15 @@ class AlbedoScoringAnalysis(BaseModel):
     samples_with_dual_zeros: int = 0
     total_dual_zero_questions: int = 0
     samples: list[AlbedoSampleDualZeros] = Field(default_factory=list)
+
+
+class AlbedoDatasetBuildSummary(BaseModel):
+    export_filename: str = "binary-dual-zero-dataset.jsonl"
+    dedup_script_filename: str = "dedup_dual_zero_jsonl.py"
+    binary_duels_total: int = 0
+    binary_duels_with_scoring: int = 0
+    binary_duels_with_dual_zero: int = 0
+    samples_before_dedup: int = 0
+    unique_samples: int = 0
+    duplicates_removed: int = 0
+    total_dual_zero_questions: int = 0

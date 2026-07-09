@@ -7,6 +7,7 @@ import { EntityNameCell } from "@/lib/entityLabels";
 import AlbedoEvalQueueOverviewPanel from "@/components/AlbedoEvalQueueOverview";
 import AlbedoEvalFailsPanel from "@/components/AlbedoEvalFailsPanel";
 import AlbedoScoringGapsPanel from "@/components/AlbedoScoringGapsPanel";
+import AlbedoDatasetBuilderPanel from "@/components/AlbedoDatasetBuilderPanel";
 import {
   api,
   hippiusModelUrl,
@@ -614,6 +615,7 @@ export default function AlbedoDuelPanel() {
 
       {section === "duels" && (
         <section className="panel px-3 py-2">
+          <AlbedoDatasetBuilderPanel />
           <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge duel scores</h3>
           <p className="text-[9px] text-zinc-600 mb-2">
             Each judge cell: ch/k win-rates and pick with margin. Red = judge picks challenger,

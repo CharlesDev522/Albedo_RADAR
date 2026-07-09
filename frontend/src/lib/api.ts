@@ -765,6 +765,18 @@ export interface AlbedoRepoCrownAnalysis {
   crown_history_coverage_note?: string;
 }
 
+export interface AlbedoDatasetBuildSummary {
+  export_filename: string;
+  dedup_script_filename: string;
+  binary_duels_total: number;
+  binary_duels_with_scoring: number;
+  binary_duels_with_dual_zero: number;
+  samples_before_dedup: number;
+  unique_samples: number;
+  duplicates_removed: number;
+  total_dual_zero_questions: number;
+}
+
 export interface AlbedoScoringAnalysis {
   export_filename?: string | null;
   total_samples: number;
@@ -979,6 +991,57 @@ export const api = {
     const exportHeader = res.headers.get("X-Export-Filename");
     const match = header?.match(/filename="?([^";\n]+)"?/i);
     const filename = exportHeader ?? match?.[1] ?? fallback;
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
+  },
+  getAlbedoDatasetSummary: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
+    fetchApi<AlbedoDatasetBuildSummary>(
+      `/albedo/scoring-dataset/summary?subnet=${subnet}`,
+      { forceRefresh }
+    ),
+  downloadAlbedoDatasetExport: async (subnet = DEFAULT_SUBNET, forceRefresh = false) => {
+    const qs = forceRefresh ? "&fresh=true" : "";
+    const res = await fetch(`${apiBase()}/albedo/scoring-dataset/export?subnet=${subnet}${qs}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      let detail = `Download failed: HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        if (body && typeof body.detail === "string") detail = body.detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail);
+    }
+    const blob = await res.blob();
+    const header = res.headers.get("Content-Disposition");
+    const exportHeader = res.headers.get("X-Export-Filename");
+    const match = header?.match(/filename="?([^";\n]+)"?/i);
+    const filename = exportHeader ?? match?.[1] ?? "binary-dual-zero-dataset.jsonl";
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
+  },
+  downloadAlbedoDatasetDedupScript: async (subnet = DEFAULT_SUBNET) => {
+    const res = await fetch(`${apiBase()}/albedo/scoring-dataset/dedup-script?subnet=${subnet}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      throw new Error(`Download failed: HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const header = res.headers.get("Content-Disposition");
+    const exportHeader = res.headers.get("X-Export-Filename");
+    const match = header?.match(/filename="?([^";\n]+)"?/i);
+    const filename = exportHeader ?? match?.[1] ?? "dedup_dual_zero_jsonl.py";
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;

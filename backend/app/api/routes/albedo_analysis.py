@@ -9,12 +9,15 @@ from app.db.session import get_db
 from app.schemas.albedo_analysis import AlbedoAnalysisOverview
 from app.schemas.albedo_eval_queue import AlbedoEvalQueueOverview
 from app.schemas.albedo_live import AlbedoLiveDuel
-from app.schemas.albedo_scoring_analysis import AlbedoScoringAnalysis
+from app.schemas.albedo_scoring_analysis import AlbedoDatasetBuildSummary, AlbedoScoringAnalysis
 from app.services.albedo_analysis_service import get_albedo_analysis_overview
 from app.services.albedo_eval_queue_service import get_eval_queue_overview
 from app.services.albedo_live_duel_service import get_live_duel
 from app.services.albedo_miner_lookup import load_historical_miner_lookup
 from app.services.albedo_scoring_analysis_service import (
+    get_binary_dataset_export,
+    get_binary_dataset_summary,
+    get_dedup_script_export,
     get_dual_zero_export,
     get_scoring_analysis_for_eval,
 )
@@ -149,3 +152,70 @@ async def albedo_scoring_analysis_export(
             status_code=502,
             detail=f"Failed to export scoring results: {exc}",
         ) from exc
+
+
+@router.get("/scoring-dataset/summary", response_model=AlbedoDatasetBuildSummary)
+async def albedo_scoring_dataset_summary(
+    subnet: int = Query(default=97, ge=0),
+    fresh: bool = Query(default=False),
+) -> AlbedoDatasetBuildSummary:
+    """Summarize combined dual-zero JSONL across all binary rubric duels."""
+    if subnet != 97:
+        raise HTTPException(status_code=400, detail="Albedo scoring dataset is only available for SN97")
+    settings = get_settings()
+    try:
+        return await get_binary_dataset_summary(settings=settings, fresh=fresh)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to build scoring dataset summary: {exc}",
+        ) from exc
+
+
+@router.get("/scoring-dataset/export")
+async def albedo_scoring_dataset_export(
+    subnet: int = Query(default=97, ge=0),
+    fresh: bool = Query(default=False),
+) -> Response:
+    """Download combined, deduplicated dual-zero JSONL for binary rubric duels."""
+    if subnet != 97:
+        raise HTTPException(status_code=400, detail="Albedo scoring dataset export is only available for SN97")
+    settings = get_settings()
+    try:
+        payload = await get_binary_dataset_export(settings=settings, fresh=fresh)
+        return Response(
+            content=payload.content,
+            media_type=payload.media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{payload.filename}"',
+                "X-Export-Filename": payload.filename,
+            },
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to export scoring dataset: {exc}",
+        ) from exc
+
+
+@router.get("/scoring-dataset/dedup-script")
+async def albedo_scoring_dataset_dedup_script(
+    subnet: int = Query(default=97, ge=0),
+) -> Response:
+    """Download the sample_id deduplication helper script."""
+    if subnet != 97:
+        raise HTTPException(status_code=400, detail="Albedo scoring dataset is only available for SN97")
+    try:
+        payload = get_dedup_script_export()
+        return Response(
+            content=payload.content,
+            media_type=payload.media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{payload.filename}"',
+                "X-Export-Filename": payload.filename,
+            },
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
