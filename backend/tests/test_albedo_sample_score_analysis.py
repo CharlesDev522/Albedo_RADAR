@@ -63,17 +63,24 @@ def test_analyze_sample_rows_emits_per_judge_observations():
     assert sum(1 for o in obs if o.bucket == "moderate") == 3
 
 
-def test_crushed_loser_case_and_judge_gap_share():
+def test_gap_type_margin_share_and_distribution():
     rows = [_uniform_row(sample_id="s1", question_count=10, ch_ones=10, k_ones=0)]
     obs = analyze_sample_rows(rows, eval_run_id="duel-a")
     result = build_sample_score_analysis(obs)
-    crushed = next(c for c in result.edge_cases if c.case_id == "crushed_loser")
-    assert crushed.observations == 3
-    assert crushed.gap_share_pct == 100.0
+
     assert result.total_gap_points == 300.0
+    assert len(result.gap_types) == 3
+    decisive = next(t for t in result.gap_types if t.gap_type == "decisive")
+    assert decisive.margin_share_pct == 100.0
+    assert decisive.total_gap_points == 300.0
+    assert len(decisive.gap_distribution) == 5
+    top_bin = max(decisive.gap_distribution, key=lambda b: b.gap_points_sum)
+    assert top_bin.share_of_total_margin_pct == 100.0
+
     assert len(result.judge_margin_shares) == 3
     assert result.judge_margin_shares[0].gap_share_pct == 33.3
-    assert result.duels[0].edge_cases[0].observations == 3
+    assert len(result.judge_margin_shares[0].by_gap_type) == 3
+    assert result.duels[0].gap_types[2].margin_share_pct == 100.0
 
 
 def test_build_sample_score_analysis_aggregates_duels_and_judges():
@@ -86,8 +93,10 @@ def test_build_sample_score_analysis_aggregates_duels_and_judges():
     assert result.total_observations == 6
     assert result.binary_duels_with_samples == 2
     assert len(result.by_judge) == 3
-    assert result.overall.counts.decisive == 3
-    assert result.overall.counts.close == 3
+    decisive_pts = next(t.total_gap_points for t in result.gap_types if t.gap_type == "decisive")
+    close_pts = next(t.total_gap_points for t in result.gap_types if t.gap_type == "close")
+    assert decisive_pts == 300.0
+    assert close_pts == 30.0
     assert len(result.judge_pairs) == 3
     assert result.duels[0].eval_run_id == "duel-a"
 

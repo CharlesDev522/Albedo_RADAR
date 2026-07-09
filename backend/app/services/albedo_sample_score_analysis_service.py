@@ -15,16 +15,16 @@ from app.config import Settings, get_settings
 from app.integrations.albedo_dashboard import fetch_dashboard
 from app.integrations.albedo_scoring_results import fetch_scoring_results_jsonl
 from app.schemas.albedo_sample_score_analysis import (
+    GAP_TYPE_CRITERIA,
+    GAP_TYPE_LABELS,
     AlbedoSampleScoreAnalysis,
     DuelSampleGapSummary,
-    GapBucketCounts,
-    GapBucketDistribution,
+    GapDiffBin,
+    GapTypeSummary,
     JudgeMarginShare,
     JudgePairAgreement,
     JudgeSampleGapSummary,
     SampleGapBucket,
-    ScoreCaseCategory,
-    ScoreCaseRow,
 )
 from app.services.albedo_analysis_service import judge_short_name
 from app.services.albedo_scoring_analysis_service import (
@@ -39,10 +39,31 @@ logger = logging.getLogger(__name__)
 _CACHE: dict[str, tuple[float, AlbedoSampleScoreAnalysis]] = {}
 _CACHE_TTL_SECONDS = 300.0
 
-_GAP_LABELS: dict[SampleGapBucket, str] = {
-    "close": "≤20 pt gap",
-    "moderate": "20–50 pt gap (or wide low-confidence)",
-    "decisive": ">50 pt gap & leader >90%",
+_GAP_TYPES: tuple[SampleGapBucket, ...] = ("close", "moderate", "decisive")
+
+# Histogram bins per gap type (label, min inclusive edge, max inclusive edge).
+_GAP_TYPE_BIN_SPECS: dict[SampleGapBucket, list[tuple[str, float, float]]] = {
+    "close": [
+        ("0–5 pt", 0.0, 5.0),
+        ("5–10 pt", 5.0, 10.0),
+        ("10–15 pt", 10.0, 15.0),
+        ("15–20 pt", 15.0, 20.0),
+    ],
+    "moderate": [
+        ("20–30 pt", 20.0, 30.0),
+        ("30–40 pt", 30.0, 40.0),
+        ("40–50 pt", 40.0, 50.0),
+        ("50–70 pt", 50.0, 70.0),
+        ("70–90 pt", 70.0, 90.0),
+        ("90–100 pt", 90.0, 100.0),
+    ],
+    "decisive": [
+        ("50–60 pt", 50.0, 60.0),
+        ("60–70 pt", 60.0, 70.0),
+        ("70–80 pt", 70.0, 80.0),
+        ("80–90 pt", 80.0, 90.0),
+        ("90–100 pt", 90.0, 100.0),
+    ],
 }
 
 
@@ -64,129 +85,19 @@ class _Observation:
     pick_challenger: bool
 
 
-@dataclass(frozen=True)
-class _CaseDef:
-    case_id: str
-    label: str
-    category: ScoreCaseCategory
-
-
-def _obs_matches_case(obs: _Observation, case_id: str) -> bool:
-    lo, hi, gap = obs.lower_pct, obs.higher_pct, obs.gap_pct
-    if case_id == "gap_le_10":
-        return gap <= 10
-    if case_id == "gap_10_20":
-        return 10 < gap <= 20
-    if case_id == "gap_20_50":
-        return 20 < gap <= 50
-    if case_id == "gap_50_80":
-        return 50 < gap <= 80
-    if case_id == "gap_gt_80":
-        return gap > 80
-    if case_id == "loser_lt_10":
-        return lo < 10
-    if case_id == "loser_10_30":
-        return 10 <= lo < 30
-    if case_id == "loser_30_70":
-        return 30 <= lo < 70
-    if case_id == "loser_ge_70":
-        return lo >= 70
-    if case_id == "crushed_loser":
-        return lo < 10 and gap > 20
-    if case_id == "crushed_loser_wide":
-        return lo < 10 and gap > 50
-    if case_id == "decisive_high":
-        return gap > 50 and hi > 90
-    if case_id == "close_call":
-        return gap <= 20
-    if case_id == "both_strong_close":
-        return lo >= 70 and gap <= 20
-    if case_id == "both_weak":
-        return hi < 30
-    if case_id == "weak_loser_big_gap":
-        return lo < 30 and gap > 20
-    if case_id == "winner_under_50_big_gap":
-        return hi < 50 and gap > 30
-    if case_id == "challenger_blowout":
-        return obs.pick_challenger and gap > 50
-    if case_id == "king_blowout":
-        return not obs.pick_challenger and gap > 50
-    if case_id == "loser_lt_10_gap_20_50":
-        return lo < 10 and 20 < gap <= 50
-    if case_id == "mid_split":
-        return 20 < gap <= 50 and lo >= 20
-    if case_id == "leader_gt_90":
-        return hi > 90
-    if case_id == "loser_zero":
-        return lo == 0
-    if case_id == "perfect_winner":
-        return hi == 100 and gap > 20
-    return False
-
-
-SCORE_CASE_DEFINITIONS: list[_CaseDef] = [
-    _CaseDef("gap_le_10", "Gap ≤10 pt", "gap_band"),
-    _CaseDef("gap_10_20", "Gap 10–20 pt", "gap_band"),
-    _CaseDef("gap_20_50", "Gap 20–50 pt", "gap_band"),
-    _CaseDef("gap_50_80", "Gap 50–80 pt", "gap_band"),
-    _CaseDef("gap_gt_80", "Gap >80 pt", "gap_band"),
-    _CaseDef("loser_lt_10", "Loser score <10%", "loser_band"),
-    _CaseDef("loser_10_30", "Loser score 10–30%", "loser_band"),
-    _CaseDef("loser_30_70", "Loser score 30–70%", "loser_band"),
-    _CaseDef("loser_ge_70", "Loser score ≥70%", "loser_band"),
-    _CaseDef("crushed_loser", "Loser <10% & gap >20", "edge"),
-    _CaseDef("crushed_loser_wide", "Loser <10% & gap >50", "edge"),
-    _CaseDef("loser_lt_10_gap_20_50", "Loser <10% & gap 20–50", "edge"),
-    _CaseDef("decisive_high", "Gap >50 & leader >90%", "edge"),
-    _CaseDef("close_call", "Gap ≤20 (close)", "edge"),
-    _CaseDef("both_strong_close", "Both ≥70% & gap ≤20", "edge"),
-    _CaseDef("both_weak", "Both scores <30%", "edge"),
-    _CaseDef("weak_loser_big_gap", "Loser <30% & gap >20", "edge"),
-    _CaseDef("winner_under_50_big_gap", "Winner <50% & gap >30", "edge"),
-    _CaseDef("challenger_blowout", "Challenger wins sample & gap >50", "edge"),
-    _CaseDef("king_blowout", "King wins sample & gap >50", "edge"),
-    _CaseDef("mid_split", "Gap 20–50 & loser ≥20%", "edge"),
-    _CaseDef("leader_gt_90", "Leader score >90%", "edge"),
-    _CaseDef("loser_zero", "Loser score 0%", "edge"),
-    _CaseDef("perfect_winner", "Perfect 100% & gap >20", "edge"),
-]
-
-
-@dataclass
-class _MutableCounts:
-    close: int = 0
-    moderate: int = 0
-    decisive: int = 0
-
-    def add(self, bucket: SampleGapBucket) -> None:
-        if bucket == "close":
-            self.close += 1
-        elif bucket == "moderate":
-            self.moderate += 1
-        else:
-            self.decisive += 1
-
-    def to_counts(self) -> GapBucketCounts:
-        total = self.close + self.moderate + self.decisive
-        return GapBucketCounts(
-            close=self.close,
-            moderate=self.moderate,
-            decisive=self.decisive,
-            total=total,
-        )
-
-
 @dataclass
 class _JudgeAccumulator:
     ch_scores: list[float] = field(default_factory=list)
     k_scores: list[float] = field(default_factory=list)
     gaps: list[float] = field(default_factory=list)
     pick_ch: int = 0
-    counts: _MutableCounts = field(default_factory=_MutableCounts)
+    by_bucket: dict[SampleGapBucket, list[_Observation]] = field(
+        default_factory=lambda: {t: [] for t in _GAP_TYPES}
+    )
 
 
 def gap_bucket_label(bucket: SampleGapBucket) -> str:
-    return _GAP_LABELS[bucket]
+    return GAP_TYPE_LABELS[bucket]
 
 
 def _answer_is_one(value: Any) -> bool:
@@ -217,62 +128,70 @@ def classify_sample_gap(challenger_pct: float, king_pct: float) -> SampleGapBuck
     return "moderate"
 
 
-def _distribution(counts: _MutableCounts) -> GapBucketDistribution:
-    total = counts.close + counts.moderate + counts.decisive
-    if total == 0:
-        return GapBucketDistribution(counts=counts.to_counts())
-    return GapBucketDistribution(
-        counts=counts.to_counts(),
-        close_pct=round(counts.close / total * 100, 1),
-        moderate_pct=round(counts.moderate / total * 100, 1),
-        decisive_pct=round(counts.decisive / total * 100, 1),
-    )
-
-
 def _total_gap_points(observations: list[_Observation]) -> float:
     return sum(o.gap_pct for o in observations)
 
 
-def _build_case_rows(observations: list[_Observation]) -> list[ScoreCaseRow]:
-    if not observations:
-        return []
-    total_obs = len(observations)
-    total_gap = _total_gap_points(observations)
-    rows: list[ScoreCaseRow] = []
-    for case in SCORE_CASE_DEFINITIONS:
-        matched = [o for o in observations if _obs_matches_case(o, case.case_id)]
-        if not matched:
-            rows.append(
-                ScoreCaseRow(
-                    case_id=case.case_id,
-                    label=case.label,
-                    category=case.category,
-                )
-            )
-            continue
-        gap_sum = sum(o.gap_pct for o in matched)
-        rows.append(
-            ScoreCaseRow(
-                case_id=case.case_id,
-                label=case.label,
-                category=case.category,
-                observations=len(matched),
-                observations_pct=round(len(matched) / total_obs * 100, 1),
-                total_gap_points=round(gap_sum, 2),
-                gap_share_pct=round(gap_sum / total_gap * 100, 1) if total_gap else 0.0,
-                avg_gap=round(mean(o.gap_pct for o in matched), 2),
-                avg_lower_score=round(mean(o.lower_pct for o in matched), 2),
-                avg_higher_score=round(mean(o.higher_pct for o in matched), 2),
+def _gap_in_bin(gap: float, bin_min: float, bin_max: float, *, is_first: bool) -> bool:
+    if is_first:
+        return bin_min <= gap <= bin_max
+    return bin_min < gap <= bin_max
+
+
+def _build_gap_distribution(
+    observations: list[_Observation],
+    gap_type: SampleGapBucket,
+    *,
+    total_margin: float,
+) -> list[GapDiffBin]:
+    type_gap_sum = sum(o.gap_pct for o in observations)
+    specs = _GAP_TYPE_BIN_SPECS[gap_type]
+    bins: list[GapDiffBin] = []
+    for idx, (label, bin_min, bin_max) in enumerate(specs):
+        matched = [
+            o
+            for o in observations
+            if _gap_in_bin(o.gap_pct, bin_min, bin_max, is_first=idx == 0)
+        ]
+        bin_gap_sum = sum(o.gap_pct for o in matched)
+        bins.append(
+            GapDiffBin(
+                label=label,
+                bin_min=bin_min,
+                bin_max=bin_max,
+                gap_points_sum=round(bin_gap_sum, 2),
+                share_of_total_margin_pct=round(bin_gap_sum / total_margin * 100, 1) if total_margin else 0.0,
+                share_within_type_pct=round(bin_gap_sum / type_gap_sum * 100, 1) if type_gap_sum else 0.0,
             )
         )
-    return rows
+    return bins
 
 
-def _split_case_rows(rows: list[ScoreCaseRow]) -> tuple[list[ScoreCaseRow], list[ScoreCaseRow], list[ScoreCaseRow]]:
-    gap_bands = [r for r in rows if r.category == "gap_band"]
-    loser_bands = [r for r in rows if r.category == "loser_band"]
-    edge_cases = [r for r in rows if r.category == "edge"]
-    return gap_bands, loser_bands, edge_cases
+def _build_gap_type_summaries(
+    observations: list[_Observation],
+    *,
+    total_margin: float,
+) -> list[GapTypeSummary]:
+    by_type: dict[SampleGapBucket, list[_Observation]] = {t: [] for t in _GAP_TYPES}
+    for obs in observations:
+        by_type[obs.bucket].append(obs)
+
+    summaries: list[GapTypeSummary] = []
+    for gap_type in _GAP_TYPES:
+        type_obs = by_type[gap_type]
+        type_gap_sum = sum(o.gap_pct for o in type_obs)
+        summaries.append(
+            GapTypeSummary(
+                gap_type=gap_type,
+                label=GAP_TYPE_LABELS[gap_type],
+                criteria=GAP_TYPE_CRITERIA[gap_type],
+                total_gap_points=round(type_gap_sum, 2),
+                margin_share_pct=round(type_gap_sum / total_margin * 100, 1) if total_margin else 0.0,
+                avg_gap=round(mean(o.gap_pct for o in type_obs), 2) if type_obs else 0.0,
+                gap_distribution=_build_gap_distribution(type_obs, gap_type, total_margin=total_margin),
+            )
+        )
+    return summaries
 
 
 def _build_judge_margin_shares(observations: list[_Observation]) -> list[JudgeMarginShare]:
@@ -296,6 +215,7 @@ def _build_judge_margin_shares(observations: list[_Observation]) -> list[JudgeMa
                 gap_share_pct=round(gap_sum / total_gap * 100, 1) if total_gap else 0.0,
                 avg_gap=round(gap_sum / n, 2) if n else 0.0,
                 pick_challenger_pct=round(pick_ch / n * 100, 1) if n else 0.0,
+                by_gap_type=_build_gap_type_summaries(obs_list, total_margin=total_gap),
             )
         )
     shares.sort(key=lambda s: (-s.gap_share_pct, s.judge_model))
@@ -389,7 +309,6 @@ def _finalize_judge_summary(
         judge_model=judge_model,
         short_name=judge_short_name(judge_model),
         observations=n,
-        distribution=_distribution(acc.counts),
         avg_challenger_pct=round(mean(acc.ch_scores), 2) if n else 0.0,
         avg_king_pct=round(mean(acc.k_scores), 2) if n else 0.0,
         avg_gap_pct=round(mean(acc.gaps), 2) if n else 0.0,
@@ -403,10 +322,8 @@ def build_sample_score_analysis(observations: list[_Observation]) -> AlbedoSampl
     if not observations:
         return AlbedoSampleScoreAnalysis()
 
-    overall_counts = _MutableCounts()
     judge_acc: dict[str, _JudgeAccumulator] = defaultdict(_JudgeAccumulator)
     duel_meta: dict[str, dict[str, Any]] = {}
-    duel_counts: dict[str, _MutableCounts] = defaultdict(_MutableCounts)
     duel_judge_acc: dict[str, dict[str, _JudgeAccumulator]] = defaultdict(lambda: defaultdict(_JudgeAccumulator))
     duel_samples: dict[str, set[str]] = defaultdict(set)
     pair_stats: dict[tuple[str, str], dict[str, int | list[float]]] = defaultdict(
@@ -418,9 +335,8 @@ def build_sample_score_analysis(observations: list[_Observation]) -> AlbedoSampl
         by_sample_judge[(obs.eval_run_id, obs.sample_id, obs.judge_model)] = obs
 
     for obs in observations:
-        overall_counts.add(obs.bucket)
         jacc = judge_acc[obs.judge_model]
-        jacc.counts.add(obs.bucket)
+        jacc.by_bucket[obs.bucket].append(obs)
         jacc.ch_scores.append(obs.challenger_pct)
         jacc.k_scores.append(obs.king_pct)
         jacc.gaps.append(obs.gap_pct)
@@ -433,10 +349,9 @@ def build_sample_score_analysis(observations: list[_Observation]) -> AlbedoSampl
             "king_label": obs.king_label,
             "winner": obs.winner,
         }
-        duel_counts[obs.eval_run_id].add(obs.bucket)
         duel_samples[obs.eval_run_id].add(obs.sample_id)
         dj = duel_judge_acc[obs.eval_run_id][obs.judge_model]
-        dj.counts.add(obs.bucket)
+        dj.by_bucket[obs.bucket].append(obs)
         dj.ch_scores.append(obs.challenger_pct)
         dj.k_scores.append(obs.king_pct)
         dj.gaps.append(obs.gap_pct)
@@ -489,8 +404,7 @@ def build_sample_score_analysis(observations: list[_Observation]) -> AlbedoSampl
         duel_observations[obs.eval_run_id].append(obs)
 
     total_gap = _total_gap_points(observations)
-    all_case_rows = _build_case_rows(observations)
-    gap_bands, loser_bands, edge_cases = _split_case_rows(all_case_rows)
+    gap_types = _build_gap_type_summaries(observations, total_margin=total_gap)
 
     for eval_run_id in sorted(
         duel_meta.keys(),
@@ -500,8 +414,6 @@ def build_sample_score_analysis(observations: list[_Observation]) -> AlbedoSampl
         meta = duel_meta[eval_run_id]
         duel_obs = duel_observations[eval_run_id]
         duel_gap = _total_gap_points(duel_obs)
-        duel_cases = _build_case_rows(duel_obs)
-        d_gap_bands, _, d_edge = _split_case_rows(duel_cases)
         judges = [
             _finalize_judge_summary(judge_model, acc, total_gap=duel_gap)
             for judge_model, acc in sorted(duel_judge_acc[eval_run_id].items())
@@ -519,9 +431,7 @@ def build_sample_score_analysis(observations: list[_Observation]) -> AlbedoSampl
                 judge_count=len(judges),
                 observations=obs_count,
                 total_gap_points=round(duel_gap, 2),
-                distribution=_distribution(duel_counts[eval_run_id]),
-                gap_bands=d_gap_bands,
-                edge_cases=[c for c in d_edge if c.observations > 0],
+                gap_types=_build_gap_type_summaries(duel_obs, total_margin=duel_gap),
                 judge_margin_shares=_build_judge_margin_shares(duel_obs),
                 judges=judges,
             )
@@ -534,10 +444,7 @@ def build_sample_score_analysis(observations: list[_Observation]) -> AlbedoSampl
         total_observations=len(observations),
         total_gap_points=round(total_gap, 2),
         judge_models=judge_models,
-        overall=_distribution(overall_counts),
-        gap_bands=gap_bands,
-        loser_bands=loser_bands,
-        edge_cases=[c for c in edge_cases if c.observations > 0],
+        gap_types=gap_types,
         judge_margin_shares=_build_judge_margin_shares(observations),
         by_judge=[
             _finalize_judge_summary(judge_model, acc, total_gap=total_gap)

@@ -682,31 +682,25 @@ export interface AlbedoDualZeroQuestion {
   king_qwen?: string | null;
 }
 
-export interface GapBucketCounts {
-  close: number;
-  moderate: number;
-  decisive: number;
-  total: number;
-}
+export type SampleGapBucket = "close" | "moderate" | "decisive";
 
-export interface GapBucketDistribution {
-  counts: GapBucketCounts;
-  close_pct: number;
-  moderate_pct: number;
-  decisive_pct: number;
-}
-
-export interface ScoreCaseRow {
-  case_id: string;
+export interface GapDiffBin {
   label: string;
-  category: "gap_band" | "loser_band" | "edge";
-  observations: number;
-  observations_pct: number;
+  bin_min: number;
+  bin_max: number;
+  gap_points_sum: number;
+  share_of_total_margin_pct: number;
+  share_within_type_pct: number;
+}
+
+export interface GapTypeSummary {
+  gap_type: SampleGapBucket;
+  label: string;
+  criteria: string;
   total_gap_points: number;
-  gap_share_pct: number;
+  margin_share_pct: number;
   avg_gap: number;
-  avg_lower_score: number;
-  avg_higher_score: number;
+  gap_distribution: GapDiffBin[];
 }
 
 export interface JudgeMarginShare {
@@ -717,13 +711,13 @@ export interface JudgeMarginShare {
   gap_share_pct: number;
   avg_gap: number;
   pick_challenger_pct: number;
+  by_gap_type: GapTypeSummary[];
 }
 
 export interface JudgeSampleGapSummary {
   judge_model: string;
   short_name: string;
   observations: number;
-  distribution: GapBucketDistribution;
   avg_challenger_pct: number;
   avg_king_pct: number;
   avg_gap_pct: number;
@@ -753,9 +747,7 @@ export interface DuelSampleGapSummary {
   judge_count: number;
   observations: number;
   total_gap_points: number;
-  distribution: GapBucketDistribution;
-  gap_bands: ScoreCaseRow[];
-  edge_cases: ScoreCaseRow[];
+  gap_types: GapTypeSummary[];
   judge_margin_shares: JudgeMarginShare[];
   judges: JudgeSampleGapSummary[];
 }
@@ -768,10 +760,7 @@ export interface AlbedoSampleScoreAnalysis {
   total_observations: number;
   total_gap_points: number;
   judge_models: string[];
-  overall: GapBucketDistribution;
-  gap_bands: ScoreCaseRow[];
-  loser_bands: ScoreCaseRow[];
-  edge_cases: ScoreCaseRow[];
+  gap_types: GapTypeSummary[];
   judge_margin_shares: JudgeMarginShare[];
   by_judge: JudgeSampleGapSummary[];
   judge_pairs: JudgePairAgreement[];
