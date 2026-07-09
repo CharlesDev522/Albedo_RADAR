@@ -337,8 +337,10 @@ function DuelRow({
     </tr>
     {scoringExpanded && hasScoring && (
       <tr className="border-b border-zinc-800/50 bg-zinc-900/30">
-        <td colSpan={colSpan} className="py-1 px-2">
-          <AlbedoScoringGapsPanel evalRunId={duel.eval_run_id} />
+        <td colSpan={colSpan} className="p-0 max-w-0 w-full">
+          <div className="min-w-0 max-w-full overflow-hidden border-l-2 border-amber-500/25 px-2 py-0.5">
+            <AlbedoScoringGapsPanel evalRunId={duel.eval_run_id} />
+          </div>
         </td>
       </tr>
     )}
