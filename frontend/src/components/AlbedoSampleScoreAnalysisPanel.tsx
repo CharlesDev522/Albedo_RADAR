@@ -16,7 +16,8 @@ const GAP_COLORS: Record<SampleGapBucket, { bar: string; text: string; border: s
   decisive: { bar: "bg-rose-500", text: "text-rose-200", border: "border-rose-500/30", bg: "bg-rose-500/10" },
 };
 
-function fmtPct(n: number): string {
+function fmtPct(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
   return `${n.toFixed(1)}%`;
 }
 
@@ -40,7 +41,7 @@ function Stat({ label, value, sub }: { label: string; value: string | number; su
   );
 }
 
-function MarginStackBar({ types }: { types: GapTypeSummary[] }) {
+function MarginStackBar({ types = [] }: { types?: GapTypeSummary[] }) {
   const active = types.filter((t) => t.margin_share_pct > 0);
   if (active.length === 0) {
     return <div className="h-3 rounded bg-zinc-800" />;
@@ -71,7 +72,7 @@ function MarginStackBar({ types }: { types: GapTypeSummary[] }) {
   );
 }
 
-function GapHistogram({ bins, gapType }: { bins: GapDiffBin[]; gapType: SampleGapBucket }) {
+function GapHistogram({ bins = [], gapType }: { bins?: GapDiffBin[]; gapType: SampleGapBucket }) {
   const active = bins.filter((b) => b.gap_points_sum > 0);
   if (active.length === 0) {
     return <p className="text-[9px] text-zinc-600 py-2">No margin in this type</p>;
@@ -130,7 +131,7 @@ function GapTypeCard({ summary }: { summary: GapTypeSummary }) {
           avg <span className="mono text-zinc-300">{summary.avg_gap.toFixed(1)} pt</span>
         </span>
       </div>
-      <GapHistogram bins={summary.gap_distribution} gapType={summary.gap_type} />
+      <GapHistogram bins={summary.gap_distribution ?? []} gapType={summary.gap_type} />
     </article>
   );
 }
@@ -169,6 +170,14 @@ export default function AlbedoSampleScoreAnalysisPanel() {
   }
   if (!data) return null;
 
+  const gapTypes = data.gap_types ?? [];
+  const judgeMarginShares = data.judge_margin_shares ?? [];
+  const byJudge = data.by_judge ?? [];
+  const judgePairs = data.judge_pairs ?? [];
+  const duels = data.duels ?? [];
+  const needsApiRebuild =
+    gapTypes.length === 0 && data.total_gap_points > 0 && data.total_observations > 0;
+
   return (
     <div className="space-y-3">
       <section className="panel px-3 py-2.5">
@@ -202,12 +211,22 @@ export default function AlbedoSampleScoreAnalysisPanel() {
 
         <div className="mt-4 pt-3 border-t border-zinc-800/80">
           <p className="text-[9px] uppercase tracking-wide text-zinc-500 mb-2">Margin by gap type</p>
-          <MarginStackBar types={data.gap_types} />
+          <MarginStackBar types={gapTypes} />
         </div>
       </section>
 
+      {needsApiRebuild && (
+        <section className="panel px-3 py-2.5 border border-amber-500/30 bg-amber-500/10">
+          <p className="text-[10px] text-amber-200">
+            Score analysis API is out of date on the server. Rebuild and restart the{" "}
+            <span className="mono">api</span> container so it returns <span className="mono">gap_types</span>{" "}
+            (margin distributions). Until then charts stay empty but the app will not crash.
+          </p>
+        </section>
+      )}
+
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        {data.gap_types.map((t) => (
+        {gapTypes.map((t) => (
           <GapTypeCard key={t.gap_type} summary={t} />
         ))}
       </section>
@@ -230,7 +249,7 @@ export default function AlbedoSampleScoreAnalysisPanel() {
             </tr>
           </thead>
           <tbody>
-            {data.judge_margin_shares.map((j) => {
+            {judgeMarginShares.map((j) => {
               const open = expandedJudge === j.judge_model;
               return (
                 <Fragment key={j.judge_model}>
@@ -261,7 +280,7 @@ export default function AlbedoSampleScoreAnalysisPanel() {
                     <tr className="border-b border-zinc-800/50 bg-zinc-900/40">
                       <td colSpan={7} className="py-2 px-2">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                          {j.by_gap_type.map((t) => (
+                          {(j.by_gap_type ?? []).map((t) => (
                             <div
                               key={t.gap_type}
                               className={`rounded border ${GAP_COLORS[t.gap_type].border} px-2 py-1.5`}
@@ -298,7 +317,7 @@ export default function AlbedoSampleScoreAnalysisPanel() {
             </tr>
           </thead>
           <tbody>
-            {data.by_judge.map((j) => (
+            {byJudge.map((j) => (
               <tr key={j.judge_model} className="border-b border-zinc-800/50">
                 <td className="py-1.5 pr-2">
                   <div className="font-medium text-zinc-200">{j.short_name}</div>
@@ -318,7 +337,7 @@ export default function AlbedoSampleScoreAnalysisPanel() {
         </table>
       </section>
 
-      {data.judge_pairs.length > 0 && (
+      {judgePairs.length > 0 && (
         <section className="panel px-3 py-2.5 overflow-x-auto">
           <h4 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge agreement</h4>
           <p className="text-[9px] text-zinc-600 mb-2">Same gap type / same pick on shared samples.</p>
@@ -333,7 +352,7 @@ export default function AlbedoSampleScoreAnalysisPanel() {
               </tr>
             </thead>
             <tbody>
-              {data.judge_pairs.map((p) => (
+              {judgePairs.map((p) => (
                 <tr key={`${p.judge_a}-${p.judge_b}`} className="border-b border-zinc-800/50">
                   <td className="py-1.5 pr-2 text-zinc-300">
                     {p.short_name_a} · {p.short_name_b}
@@ -363,8 +382,10 @@ export default function AlbedoSampleScoreAnalysisPanel() {
             </tr>
           </thead>
           <tbody>
-            {data.duels.map((duel) => {
+            {duels.map((duel) => {
               const open = expandedDuel === duel.eval_run_id;
+              const duelGapTypes = duel.gap_types ?? [];
+              const duelJudgeShares = duel.judge_margin_shares ?? [];
               return (
                 <Fragment key={duel.eval_run_id}>
                   <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
@@ -375,7 +396,7 @@ export default function AlbedoSampleScoreAnalysisPanel() {
                     <td className="py-1.5 pr-2 capitalize text-zinc-400">{duel.winner}</td>
                     <td className="text-right py-1.5 px-1 mono text-zinc-300">{duel.total_gap_points.toFixed(0)}</td>
                     <td className="py-1.5 pl-2">
-                      <MarginStackBar types={duel.gap_types} />
+                      <MarginStackBar types={duelGapTypes} />
                     </td>
                     <td className="py-1.5 pl-2">
                       <button
@@ -393,7 +414,7 @@ export default function AlbedoSampleScoreAnalysisPanel() {
                     <tr className="border-b border-zinc-800/50 bg-zinc-900/30">
                       <td colSpan={6} className="py-2 px-2 space-y-3">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                          {duel.gap_types.map((t) => (
+                          {duelGapTypes.map((t) => (
                             <GapTypeCard key={t.gap_type} summary={t} />
                           ))}
                         </div>
@@ -409,7 +430,7 @@ export default function AlbedoSampleScoreAnalysisPanel() {
                               </tr>
                             </thead>
                             <tbody>
-                              {duel.judge_margin_shares.map((j) => (
+                              {duelJudgeShares.map((j) => (
                                 <tr key={j.judge_model}>
                                   <td className="py-0.5 text-zinc-400">{j.short_name}</td>
                                   <td className="text-right py-0.5 mono text-amber-300">{fmtPct(j.gap_share_pct)}</td>

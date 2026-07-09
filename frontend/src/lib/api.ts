@@ -809,6 +809,91 @@ export interface AlbedoAnalysisOverview {
 
 import { fetchWithCache, invalidateApiCache } from "@/lib/apiCache";
 
+const EMPTY_GAP_TYPES: GapTypeSummary[] = [];
+
+function normalizeGapTypeSummary(raw: unknown): GapTypeSummary | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const gapType = row.gap_type;
+  if (gapType !== "close" && gapType !== "moderate" && gapType !== "decisive") return null;
+  const bins = Array.isArray(row.gap_distribution) ? row.gap_distribution : [];
+  return {
+    gap_type: gapType,
+    label: typeof row.label === "string" ? row.label : gapType,
+    criteria: typeof row.criteria === "string" ? row.criteria : "",
+    total_gap_points: Number(row.total_gap_points) || 0,
+    margin_share_pct: Number(row.margin_share_pct) || 0,
+    avg_gap: Number(row.avg_gap) || 0,
+    gap_distribution: bins
+      .map((bin) => {
+        if (!bin || typeof bin !== "object") return null;
+        const b = bin as Record<string, unknown>;
+        return {
+          label: typeof b.label === "string" ? b.label : "",
+          bin_min: Number(b.bin_min) || 0,
+          bin_max: Number(b.bin_max) || 0,
+          gap_points_sum: Number(b.gap_points_sum) || 0,
+          share_of_total_margin_pct: Number(b.share_of_total_margin_pct) || 0,
+          share_within_type_pct: Number(b.share_within_type_pct) || 0,
+        };
+      })
+      .filter((bin): bin is GapDiffBin => bin !== null),
+  };
+}
+
+function normalizeSampleScoreAnalysis(
+  raw: AlbedoSampleScoreAnalysis & Record<string, unknown>
+): AlbedoSampleScoreAnalysis {
+  const gapTypes = Array.isArray(raw.gap_types)
+    ? raw.gap_types.map(normalizeGapTypeSummary).filter((t): t is GapTypeSummary => t !== null)
+    : EMPTY_GAP_TYPES;
+
+  const judgeMarginShares = (Array.isArray(raw.judge_margin_shares) ? raw.judge_margin_shares : []).map(
+    (row) => {
+      const j = row as JudgeMarginShare & Record<string, unknown>;
+      return {
+        ...j,
+        by_gap_type: Array.isArray(j.by_gap_type)
+          ? j.by_gap_type.map(normalizeGapTypeSummary).filter((t): t is GapTypeSummary => t !== null)
+          : EMPTY_GAP_TYPES,
+      };
+    }
+  );
+
+  const duels = (Array.isArray(raw.duels) ? raw.duels : []).map((row) => {
+    const duel = row as DuelSampleGapSummary & Record<string, unknown>;
+    return {
+      ...duel,
+      gap_types: Array.isArray(duel.gap_types)
+        ? duel.gap_types.map(normalizeGapTypeSummary).filter((t): t is GapTypeSummary => t !== null)
+        : EMPTY_GAP_TYPES,
+      judge_margin_shares: Array.isArray(duel.judge_margin_shares)
+        ? duel.judge_margin_shares.map((j) => ({
+            ...j,
+            by_gap_type: Array.isArray(j.by_gap_type) ? j.by_gap_type : EMPTY_GAP_TYPES,
+          }))
+        : [],
+      judges: Array.isArray(duel.judges) ? duel.judges : [],
+    };
+  });
+
+  return {
+    binary_duels_total: Number(raw.binary_duels_total) || 0,
+    binary_duels_scanned: Number(raw.binary_duels_scanned) || 0,
+    binary_duels_with_samples: Number(raw.binary_duels_with_samples) || 0,
+    total_samples: Number(raw.total_samples) || 0,
+    total_observations: Number(raw.total_observations) || 0,
+    total_gap_points: Number(raw.total_gap_points) || 0,
+    judge_models: Array.isArray(raw.judge_models) ? raw.judge_models : [],
+    gap_types: gapTypes,
+    judge_margin_shares: judgeMarginShares,
+    by_judge: Array.isArray(raw.by_judge) ? raw.by_judge : [],
+    judge_pairs: Array.isArray(raw.judge_pairs) ? raw.judge_pairs : [],
+    duels,
+    updated_at: raw.updated_at ?? null,
+  };
+}
+
 async function fetchApiRaw<T>(path: string): Promise<T> {
   const url = `${apiBase()}${path}`;
   const maxAttempts = typeof window === "undefined" ? 3 : 1;
@@ -974,11 +1059,13 @@ export const api = {
       `/albedo/scoring-dataset/summary?subnet=${subnet}&polarity=${polarity}`,
       { forceRefresh }
     ),
-  getAlbedoSampleScoreAnalysis: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
-    fetchApi<AlbedoSampleScoreAnalysis>(
+  getAlbedoSampleScoreAnalysis: async (subnet = DEFAULT_SUBNET, forceRefresh = false) => {
+    const raw = await fetchApi<AlbedoSampleScoreAnalysis & Record<string, unknown>>(
       `/albedo/sample-score-analysis?subnet=${subnet}${forceRefresh ? "&fresh=true" : ""}`,
       { forceRefresh }
-    ),
+    );
+    return normalizeSampleScoreAnalysis(raw);
+  },
   downloadAlbedoDatasetExport: async (
     subnet = DEFAULT_SUBNET,
     forceRefresh = false,
