@@ -620,7 +620,7 @@ export default function AlbedoDuelPanel() {
           <p className="text-[9px] text-zinc-600 mb-2">
             Finished duels only ({(data.recent_duels ?? []).length} shown, {data.total_duels} total).
             In-progress evals appear in the live duel banner above. Each judge cell: red = picks
-            challenger, green = picks king. Click scoring gaps for dual-zero rubric questions.
+            challenger, green = picks king. Click scoring gaps for dual-zero / dual-one rubric questions.
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-[10px] min-w-[920px]">

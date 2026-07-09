@@ -1,13 +1,15 @@
-"""Tests for Albedo scoring-results dual-zero analysis."""
+"""Tests for Albedo scoring-results dual-zero / dual-one analysis."""
 
 import asyncio
 import json
 
 from app.integrations.albedo_scoring_results import parse_scoring_results_jsonl
 from app.services.albedo_scoring_analysis_service import (
+    analyze_dual_one_questions,
     analyze_dual_zero_questions,
+    build_binary_dual_one_dataset,
     build_binary_dual_zero_dataset,
-    build_dual_zero_export,
+    build_consensus_export,
     build_dual_zero_export_jsonl,
     build_sample_export_json,
     dedupe_records_by_sample_id,
@@ -98,11 +100,34 @@ def test_analyze_dual_zero_requires_both_sides():
 
 
 def test_duel_export_filename():
-    assert duel_export_filename(king_uid=50, challenger_uid=205, winner="king") == "50 vs 205 king.jsonl"
     assert (
-        duel_export_filename(king_uid=50, challenger_uid=205, winner="challenger")
-        == "50 vs 205 challenger.jsonl"
+        duel_export_filename(king_uid=50, challenger_uid=205, winner="king")
+        == "50 vs 205 king dual-zero.jsonl"
     )
+    assert (
+        duel_export_filename(king_uid=50, challenger_uid=205, winner="challenger", polarity="one")
+        == "50 vs 205 challenger dual-one.jsonl"
+    )
+
+
+def test_analyze_dual_one_requires_both_sides():
+    rows = [
+        _sample_row(
+            sample_id="dataset/a:1:1",
+            glm_q1="1",
+            qwen_q1="1",
+            king_glm_q1="1",
+            king_qwen_q1="1",
+        ),
+        _sample_row(sample_id="dataset/b:2:2", glm_q1="1", qwen_q1="0"),
+    ]
+    analysis = analyze_dual_one_questions(rows)
+
+    assert analysis.polarity == "one"
+    assert analysis.total_samples == 2
+    assert analysis.samples_with_dual_zeros == 1
+    assert analysis.samples[0].sample_id == "dataset/a:1:1"
+    assert analysis.samples[0].questions[0].question_id == "q_01"
 
 
 def test_build_dual_zero_export_jsonl_is_multiline_jsonl():
@@ -120,7 +145,7 @@ def test_build_dual_zero_export_jsonl_is_multiline_jsonl():
 def test_build_dual_zero_export_single_jsonl_file():
     rows = [_sample_row(sample_id="dataset/a:1:1")]
     analysis = analyze_dual_zero_questions(rows)
-    payload = build_dual_zero_export(
+    payload = build_consensus_export(
         analysis,
         king_uid=50,
         challenger_uid=205,
@@ -128,7 +153,7 @@ def test_build_dual_zero_export_single_jsonl_file():
     )
 
     assert payload.media_type == "application/x-ndjson"
-    assert payload.filename == "50 vs 205 king.jsonl"
+    assert payload.filename == "50 vs 205 king dual-zero.jsonl"
     lines = payload.content.decode().strip().splitlines()
     assert len(lines) == 1
     record = json.loads(lines[0])
@@ -215,3 +240,44 @@ def test_build_binary_dual_zero_dataset_dedupes_across_duels(monkeypatch):
     assert result.summary.unique_samples == 2
     assert result.summary.duplicates_removed == 1
     assert {record["sample_id"] for record in result.records} == {"dataset/a:1:1", "dataset/c:3:3"}
+
+
+def test_build_binary_dual_one_dataset_uses_one_polarity(monkeypatch):
+    rows = [
+        _sample_row(
+            sample_id="dataset/a:1:1",
+            glm_q1="1",
+            qwen_q1="1",
+            king_glm_q1="1",
+            king_qwen_q1="1",
+        )
+    ]
+
+    async def fake_fetch_dashboard(*, settings=None, fresh=False):
+        return {
+            "eval_runs": [
+                {
+                    "eval_run_id": "duel-a",
+                    "scoring_mode": "binary",
+                    "artifacts": {"SCORING_RESULTS": "https://example.com/a.jsonl"},
+                },
+            ]
+        }
+
+    async def fake_fetch_scoring_results_jsonl(url, *, settings=None, client=None, fresh=False):
+        return rows
+
+    monkeypatch.setattr(
+        "app.services.albedo_scoring_analysis_service.fetch_dashboard",
+        fake_fetch_dashboard,
+    )
+    monkeypatch.setattr(
+        "app.services.albedo_scoring_analysis_service.fetch_scoring_results_jsonl",
+        fake_fetch_scoring_results_jsonl,
+    )
+
+    result = asyncio.run(build_binary_dual_one_dataset(fresh=True))
+    assert result.summary.polarity == "one"
+    assert result.summary.export_filename == "binary-dual-one-dataset.jsonl"
+    assert result.summary.unique_samples == 1
+    assert result.records[0]["questions"][0]["question_id"] == "q_01"

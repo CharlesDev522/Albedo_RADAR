@@ -1,8 +1,12 @@
-"""Schemas for Albedo scoring-results.jsonl dual-zero question analysis."""
+"""Schemas for Albedo scoring-results.jsonl GLM+Qwen consensus question analysis."""
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+ScoringConsensusPolarity = Literal["zero", "one"]
 
 
 class AlbedoDualZeroQuestion(BaseModel):
@@ -22,6 +26,7 @@ class AlbedoSampleDualZeros(BaseModel):
 
 
 class AlbedoScoringAnalysis(BaseModel):
+    polarity: ScoringConsensusPolarity = "zero"
     export_filename: str | None = None
     total_samples: int = 0
     samples_with_dual_zeros: int = 0
@@ -30,6 +35,7 @@ class AlbedoScoringAnalysis(BaseModel):
 
 
 class AlbedoDatasetBuildSummary(BaseModel):
+    polarity: ScoringConsensusPolarity = "zero"
     export_filename: str = "binary-dual-zero-dataset.jsonl"
     dedup_script_filename: str = "dedup_dual_zero_jsonl.py"
     binary_duels_total: int = 0

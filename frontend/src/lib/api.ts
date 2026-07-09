@@ -765,7 +765,10 @@ export interface AlbedoRepoCrownAnalysis {
   crown_history_coverage_note?: string;
 }
 
+export type ScoringConsensusPolarity = "zero" | "one";
+
 export interface AlbedoDatasetBuildSummary {
+  polarity?: ScoringConsensusPolarity;
   export_filename: string;
   dedup_script_filename: string;
   binary_duels_total: number;
@@ -778,6 +781,7 @@ export interface AlbedoDatasetBuildSummary {
 }
 
 export interface AlbedoScoringAnalysis {
+  polarity?: ScoringConsensusPolarity;
   export_filename?: string | null;
   total_samples: number;
   samples_with_dual_zeros: number;
@@ -960,18 +964,24 @@ export const api = {
     ),
   getAlbedoLiveDuel: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
     fetchApi<AlbedoLiveDuel>(`/albedo/live-duel?subnet=${subnet}`, { forceRefresh }),
-  getAlbedoScoringAnalysis: (evalRunId: string, subnet = DEFAULT_SUBNET, forceRefresh = false) =>
+  getAlbedoScoringAnalysis: (
+    evalRunId: string,
+    subnet = DEFAULT_SUBNET,
+    forceRefresh = false,
+    polarity: ScoringConsensusPolarity = "zero"
+  ) =>
     fetchApi<AlbedoScoringAnalysis>(
-      `/albedo/scoring-analysis?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}`,
+      `/albedo/scoring-analysis?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}&polarity=${polarity}`,
       { forceRefresh }
     ),
   downloadAlbedoScoringExport: async (
     evalRunId: string,
     subnet = DEFAULT_SUBNET,
-    filenameHint?: string | null
+    filenameHint?: string | null,
+    polarity: ScoringConsensusPolarity = "zero"
   ) => {
     const res = await fetch(
-      `${apiBase()}/albedo/scoring-analysis/export?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}`,
+      `${apiBase()}/albedo/scoring-analysis/export?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}&polarity=${polarity}`,
       { cache: "no-store" }
     );
     if (!res.ok) {
@@ -986,7 +996,7 @@ export const api = {
     }
     const blob = await res.blob();
     const duelSlug = evalRunId.replace(/-/g, "").slice(0, 8);
-    const fallback = filenameHint ?? `dual-zero-${duelSlug}.jsonl`;
+    const fallback = filenameHint ?? `dual-${polarity}-${duelSlug}.jsonl`;
     const header = res.headers.get("Content-Disposition");
     const exportHeader = res.headers.get("X-Export-Filename");
     const match = header?.match(/filename="?([^";\n]+)"?/i);
@@ -998,14 +1008,28 @@ export const api = {
     anchor.click();
     URL.revokeObjectURL(objectUrl);
   },
-  getAlbedoDatasetSummary: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
+  getAlbedoDatasetSummary: (
+    subnet = DEFAULT_SUBNET,
+    forceRefresh = false,
+    polarity: ScoringConsensusPolarity = "zero"
+  ) =>
     fetchApi<AlbedoDatasetBuildSummary>(
-      `/albedo/scoring-dataset/summary?subnet=${subnet}`,
+      `/albedo/scoring-dataset/summary?subnet=${subnet}&polarity=${polarity}`,
       { forceRefresh }
     ),
-  downloadAlbedoDatasetExport: async (subnet = DEFAULT_SUBNET, forceRefresh = false) => {
-    const qs = forceRefresh ? "&fresh=true" : "";
-    const res = await fetch(`${apiBase()}/albedo/scoring-dataset/export?subnet=${subnet}${qs}`, {
+  downloadAlbedoDatasetExport: async (
+    subnet = DEFAULT_SUBNET,
+    forceRefresh = false,
+    polarity: ScoringConsensusPolarity = "zero"
+  ) => {
+    const qs = [
+      `subnet=${subnet}`,
+      `polarity=${polarity}`,
+      forceRefresh ? "fresh=true" : "",
+    ]
+      .filter(Boolean)
+      .join("&");
+    const res = await fetch(`${apiBase()}/albedo/scoring-dataset/export?${qs}`, {
       cache: "no-store",
     });
     if (!res.ok) {
@@ -1022,7 +1046,10 @@ export const api = {
     const header = res.headers.get("Content-Disposition");
     const exportHeader = res.headers.get("X-Export-Filename");
     const match = header?.match(/filename="?([^";\n]+)"?/i);
-    const filename = exportHeader ?? match?.[1] ?? "binary-dual-zero-dataset.jsonl";
+    const filename =
+      exportHeader ??
+      match?.[1] ??
+      (polarity === "one" ? "binary-dual-one-dataset.jsonl" : "binary-dual-zero-dataset.jsonl");
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;

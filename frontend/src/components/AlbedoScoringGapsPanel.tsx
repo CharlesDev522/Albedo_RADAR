@@ -6,8 +6,41 @@ import {
   type AlbedoDualZeroQuestion,
   type AlbedoScoringAnalysis,
   type AlbedoSampleDualZeros,
+  type ScoringConsensusPolarity,
 } from "@/lib/api";
 import { useSubnet } from "@/lib/useSubnet";
+
+const POLARITY_LABEL: Record<ScoringConsensusPolarity, string> = {
+  zero: "dual-zero",
+  one: "dual-one",
+};
+
+function PolarityToggle({
+  polarity,
+  onChange,
+}: {
+  polarity: ScoringConsensusPolarity;
+  onChange: (next: ScoringConsensusPolarity) => void;
+}) {
+  return (
+    <div className="inline-flex rounded border border-zinc-700 overflow-hidden shrink-0">
+      {(["zero", "one"] as const).map((value) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => onChange(value)}
+          className={`px-2 py-1 text-[10px] ${
+            polarity === value
+              ? "bg-zinc-700 text-zinc-100"
+              : "bg-zinc-900/60 text-zinc-400 hover:bg-zinc-800/80"
+          }`}
+        >
+          {POLARITY_LABEL[value]}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function QuestionBlock({ q }: { q: AlbedoDualZeroQuestion }) {
   return (
@@ -46,7 +79,13 @@ function QuestionBlock({ q }: { q: AlbedoDualZeroQuestion }) {
   );
 }
 
-function SampleBlock({ sample }: { sample: AlbedoSampleDualZeros }) {
+function SampleBlock({
+  sample,
+  polarity,
+}: {
+  sample: AlbedoSampleDualZeros;
+  polarity: ScoringConsensusPolarity;
+}) {
   const [open, setOpen] = useState(true);
   return (
     <article className="rounded border border-zinc-800 bg-zinc-900/40 min-w-0 overflow-hidden">
@@ -59,7 +98,7 @@ function SampleBlock({ sample }: { sample: AlbedoSampleDualZeros }) {
           {sample.sample_id}
         </p>
         <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-200 shrink-0">
-          {sample.dual_zero_count} dual-zero
+          {sample.dual_zero_count} {POLARITY_LABEL[polarity]}
         </span>
       </button>
       {open && (
@@ -75,6 +114,7 @@ function SampleBlock({ sample }: { sample: AlbedoSampleDualZeros }) {
 
 export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: string }) {
   const { subnet } = useSubnet();
+  const [polarity, setPolarity] = useState<ScoringConsensusPolarity>("zero");
   const [data, setData] = useState<AlbedoScoringAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
@@ -83,7 +123,7 @@ export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: strin
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await api.getAlbedoScoringAnalysis(evalRunId, subnet, true);
+      const result = await api.getAlbedoScoringAnalysis(evalRunId, subnet, true, polarity);
       setData(result);
       setError(null);
     } catch (e) {
@@ -92,7 +132,7 @@ export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: strin
     } finally {
       setLoading(false);
     }
-  }, [evalRunId, subnet]);
+  }, [evalRunId, subnet, polarity]);
 
   useEffect(() => {
     void load();
@@ -101,7 +141,7 @@ export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: strin
   const handleDownload = async () => {
     setDownloading(true);
     try {
-      await api.downloadAlbedoScoringExport(evalRunId, subnet, data?.export_filename);
+      await api.downloadAlbedoScoringExport(evalRunId, subnet, data?.export_filename, polarity);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to download JSONL export");
@@ -110,8 +150,11 @@ export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: strin
     }
   };
 
+  const modeLabel = POLARITY_LABEL[polarity];
+  const scoreWord = polarity === "zero" ? "0" : "1";
+
   if (loading) {
-    return <div className="py-3 px-2 text-[11px] text-zinc-500">Loading dual-zero analysis…</div>;
+    return <div className="py-3 px-2 text-[11px] text-zinc-500">Loading {modeLabel} analysis…</div>;
   }
   if (error) {
     return <div className="py-3 px-2 text-[11px] text-rose-300">{error}</div>;
@@ -122,13 +165,18 @@ export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: strin
     <div className="min-w-0 max-w-full py-2 px-1 space-y-2 overflow-hidden">
       <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold text-zinc-200">Both-sides dual-zero (GLM + Qwen)</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[11px] font-semibold text-zinc-200">
+              Both-sides {modeLabel} (GLM + Qwen)
+            </p>
+            <PolarityToggle polarity={polarity} onChange={setPolarity} />
+          </div>
           <p className="text-[10px] text-zinc-500 mt-0.5">
-            {data.total_samples} samples · {data.samples_with_dual_zeros} with dual-zero ·{" "}
+            {data.total_samples} samples · {data.samples_with_dual_zeros} with {modeLabel} ·{" "}
             {data.total_dual_zero_questions} questions
           </p>
           <p className="text-[9px] text-zinc-600 mt-0.5 break-words">
-            GLM and Qwen both score 0 on challenger and king sides for the same rubric question.
+            GLM and Qwen both score {scoreWord} on challenger and king sides for the same rubric question.
           </p>
         </div>
         <button
@@ -144,12 +192,12 @@ export default function AlbedoScoringGapsPanel({ evalRunId }: { evalRunId: strin
 
       {data.total_dual_zero_questions === 0 ? (
         <p className="text-[11px] text-zinc-500 px-1">
-          No questions where GLM and Qwen both scored 0 on challenger and king sides.
+          No questions where GLM and Qwen both scored {scoreWord} on challenger and king sides.
         </p>
       ) : (
         <div className="space-y-2 max-h-[360px] overflow-y-auto overflow-x-hidden pr-1 min-w-0">
           {data.samples.map((sample) => (
-            <SampleBlock key={sample.sample_id} sample={sample} />
+            <SampleBlock key={sample.sample_id} sample={sample} polarity={polarity} />
           ))}
         </div>
       )}

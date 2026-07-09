@@ -1,8 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, type AlbedoDatasetBuildSummary } from "@/lib/api";
+import { api, type AlbedoDatasetBuildSummary, type ScoringConsensusPolarity } from "@/lib/api";
 import { useSubnet } from "@/lib/useSubnet";
+
+const POLARITY_LABEL: Record<ScoringConsensusPolarity, string> = {
+  zero: "dual-zero",
+  one: "dual-one",
+};
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
@@ -13,19 +18,52 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
+function PolarityToggle({
+  polarity,
+  onChange,
+  disabled,
+}: {
+  polarity: ScoringConsensusPolarity;
+  onChange: (next: ScoringConsensusPolarity) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="inline-flex rounded border border-zinc-700 overflow-hidden shrink-0">
+      {(["zero", "one"] as const).map((value) => (
+        <button
+          key={value}
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange(value)}
+          className={`px-2 py-1 text-[10px] disabled:opacity-50 ${
+            polarity === value
+              ? "bg-zinc-700 text-zinc-100"
+              : "bg-zinc-900/60 text-zinc-400 hover:bg-zinc-800/80"
+          }`}
+        >
+          {POLARITY_LABEL[value]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function AlbedoDatasetBuilderPanel() {
   const { subnet } = useSubnet();
+  const [polarity, setPolarity] = useState<ScoringConsensusPolarity>("zero");
   const [summary, setSummary] = useState<AlbedoDatasetBuildSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [building, setBuilding] = useState(false);
   const [downloadingScript, setDownloadingScript] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const modeLabel = POLARITY_LABEL[polarity];
+
   const loadSummary = useCallback(
     async (forceRefresh = false) => {
       setLoading(true);
       try {
-        const result = await api.getAlbedoDatasetSummary(subnet, forceRefresh);
+        const result = await api.getAlbedoDatasetSummary(subnet, forceRefresh, polarity);
         setSummary(result);
         setError(null);
       } catch (e) {
@@ -35,7 +73,7 @@ export default function AlbedoDatasetBuilderPanel() {
         setLoading(false);
       }
     },
-    [subnet]
+    [subnet, polarity]
   );
 
   useEffect(() => {
@@ -45,7 +83,7 @@ export default function AlbedoDatasetBuilderPanel() {
   const handleBuildDownload = async () => {
     setBuilding(true);
     try {
-      await api.downloadAlbedoDatasetExport(subnet, true);
+      await api.downloadAlbedoDatasetExport(subnet, true, polarity);
       await loadSummary(true);
       setError(null);
     } catch (e) {
@@ -71,9 +109,16 @@ export default function AlbedoDatasetBuilderPanel() {
     <section className="rounded-lg border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5 mb-3 min-w-0">
       <div className="flex flex-wrap items-start justify-between gap-3 min-w-0">
         <div className="min-w-0 flex-1">
-          <h3 className="text-[11px] font-semibold text-cyan-100">Dataset builder</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-[11px] font-semibold text-cyan-100">Dataset builder</h3>
+            <PolarityToggle
+              polarity={polarity}
+              onChange={setPolarity}
+              disabled={loading || building}
+            />
+          </div>
           <p className="text-[10px] text-zinc-500 mt-0.5 max-w-3xl">
-            Combine dual-zero JSONL exports from all binary rubric duels into one file. Duplicate
+            Combine {modeLabel} JSONL exports from all binary rubric duels into one file. Duplicate
             sample_ids are removed automatically (first occurrence kept).
           </p>
         </div>
@@ -113,11 +158,11 @@ export default function AlbedoDatasetBuilderPanel() {
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 mt-3 min-w-0">
           <Stat label="Binary duels" value={summary.binary_duels_total} />
           <Stat label="With scoring" value={summary.binary_duels_with_scoring} />
-          <Stat label="With dual-zero" value={summary.binary_duels_with_dual_zero} />
+          <Stat label={`With ${modeLabel}`} value={summary.binary_duels_with_dual_zero} />
           <Stat label="Lines before dedup" value={summary.samples_before_dedup} />
           <Stat label="Unique samples" value={summary.unique_samples} />
           <Stat label="Duplicates removed" value={summary.duplicates_removed} />
-          <Stat label="Dual-zero questions" value={summary.total_dual_zero_questions} />
+          <Stat label={`${modeLabel} questions`} value={summary.total_dual_zero_questions} />
           <Stat label="Output file" value={summary.export_filename} />
         </div>
       ) : null}

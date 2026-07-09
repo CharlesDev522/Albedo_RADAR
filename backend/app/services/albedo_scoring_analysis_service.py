@@ -1,4 +1,4 @@
-"""Analyze Albedo scoring-results.jsonl for GLM + Qwen dual-zero on both duel sides."""
+"""Analyze Albedo scoring-results.jsonl for GLM + Qwen dual-zero / dual-one on both sides."""
 
 from __future__ import annotations
 
@@ -15,10 +15,11 @@ from app.config import Settings, get_settings
 from app.integrations.albedo_dashboard import fetch_dashboard
 from app.integrations.albedo_scoring_results import fetch_scoring_results_jsonl
 from app.schemas.albedo_scoring_analysis import (
-    AlbedoDualZeroQuestion,
     AlbedoDatasetBuildSummary,
+    AlbedoDualZeroQuestion,
     AlbedoSampleDualZeros,
     AlbedoScoringAnalysis,
+    ScoringConsensusPolarity,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,11 +29,15 @@ QWEN_JUDGE_HINT = "qwen"
 CHALLENGER_SIDE = "challenger"
 KING_SIDE_RAW = "previous_king"
 
-_DATASET_CACHE: dict[str, tuple[float, "DatasetBuildResult"]] = {}
-_DATASET_CACHE_TTL_SECONDS = 300.0
-_DATASET_EXPORT_FILENAME = "binary-dual-zero-dataset.jsonl"
+_DATASET_EXPORT_FILENAMES: dict[ScoringConsensusPolarity, str] = {
+    "zero": "binary-dual-zero-dataset.jsonl",
+    "one": "binary-dual-one-dataset.jsonl",
+}
 _DEDUP_SCRIPT_FILENAME = "dedup_dual_zero_jsonl.py"
 _DEDUP_SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / _DEDUP_SCRIPT_FILENAME
+
+_DATASET_CACHE: dict[str, tuple[float, "DatasetBuildResult"]] = {}
+_DATASET_CACHE_TTL_SECONDS = 300.0
 
 
 @dataclass(frozen=True)
@@ -53,11 +58,13 @@ def duel_export_filename(
     king_uid: int | None,
     challenger_uid: int | None,
     winner: str,
+    polarity: ScoringConsensusPolarity = "zero",
 ) -> str:
-    """Filename: king uid vs challenger uid + who won."""
+    """Filename: king uid vs challenger uid + who won + polarity suffix."""
     k = king_uid if king_uid is not None else "k"
     c = challenger_uid if challenger_uid is not None else "c"
-    return f"{k} vs {c} {winner}.jsonl"
+    suffix = "dual-zero" if polarity == "zero" else "dual-one"
+    return f"{k} vs {c} {winner} {suffix}.jsonl"
 
 
 def _is_glm_judge(model: str | None) -> bool:
@@ -89,13 +96,34 @@ def _answer_is_zero(value: Any) -> bool:
         return not value
     if isinstance(value, (int, float)):
         return float(value) == 0.0
-    return str(value).strip() in {"0", "0.0", "false", "no"}
+    return str(value).strip().lower() in {"0", "0.0", "false", "no"}
 
 
-def analyze_dual_zero_questions(rows: list[dict[str, Any]]) -> AlbedoScoringAnalysis:
-    """Questions where GLM and Qwen both score 0 on challenger AND king sides."""
+def _answer_is_one(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return float(value) == 1.0
+    return str(value).strip().lower() in {"1", "1.0", "true", "yes"}
+
+
+def _answer_matches_polarity(value: Any, polarity: ScoringConsensusPolarity) -> bool:
+    if polarity == "zero":
+        return _answer_is_zero(value)
+    return _answer_is_one(value)
+
+
+def analyze_dual_consensus_questions(
+    rows: list[dict[str, Any]],
+    *,
+    polarity: ScoringConsensusPolarity = "zero",
+) -> AlbedoScoringAnalysis:
+    """Questions where GLM and Qwen both score 0 or 1 on challenger AND king sides."""
     samples_out: list[AlbedoSampleDualZeros] = []
-    total_dual_zero = 0
+    total_matches = 0
+    matches = _answer_matches_polarity
 
     for row in rows:
         ch_glm = _judge_entry(row, predicate=_is_glm_judge, side=CHALLENGER_SIDE)
@@ -118,10 +146,10 @@ def analyze_dual_zero_questions(rows: list[dict[str, Any]]) -> AlbedoScoringAnal
         dual_questions: list[AlbedoDualZeroQuestion] = []
         for qid, question in sorted(question_map.items()):
             if not (
-                _answer_is_zero(ch_glm_ans.get(qid))
-                and _answer_is_zero(ch_qwen_ans.get(qid))
-                and _answer_is_zero(k_glm_ans.get(qid))
-                and _answer_is_zero(k_qwen_ans.get(qid))
+                matches(ch_glm_ans.get(qid), polarity)
+                and matches(ch_qwen_ans.get(qid), polarity)
+                and matches(k_glm_ans.get(qid), polarity)
+                and matches(k_qwen_ans.get(qid), polarity)
             ):
                 continue
             dual_questions.append(
@@ -140,7 +168,7 @@ def analyze_dual_zero_questions(rows: list[dict[str, Any]]) -> AlbedoScoringAnal
             continue
 
         sample_id = str(row.get("sample_id") or "")
-        total_dual_zero += len(dual_questions)
+        total_matches += len(dual_questions)
         samples_out.append(
             AlbedoSampleDualZeros(
                 sample_id=sample_id,
@@ -151,11 +179,20 @@ def analyze_dual_zero_questions(rows: list[dict[str, Any]]) -> AlbedoScoringAnal
 
     samples_out.sort(key=lambda s: (-s.dual_zero_count, s.sample_id))
     return AlbedoScoringAnalysis(
+        polarity=polarity,
         total_samples=len(rows),
         samples_with_dual_zeros=len(samples_out),
-        total_dual_zero_questions=total_dual_zero,
+        total_dual_zero_questions=total_matches,
         samples=samples_out,
     )
+
+
+def analyze_dual_zero_questions(rows: list[dict[str, Any]]) -> AlbedoScoringAnalysis:
+    return analyze_dual_consensus_questions(rows, polarity="zero")
+
+
+def analyze_dual_one_questions(rows: list[dict[str, Any]]) -> AlbedoScoringAnalysis:
+    return analyze_dual_consensus_questions(rows, polarity="one")
 
 
 def _scoring_results_url(eval_run: dict[str, Any]) -> str | None:
@@ -180,6 +217,7 @@ async def get_scoring_analysis_for_eval(
     subnet: int = 97,
     settings: Settings | None = None,
     fresh: bool = False,
+    polarity: ScoringConsensusPolarity = "zero",
 ) -> AlbedoScoringAnalysis:
     settings = settings or get_settings()
     dashboard = await fetch_dashboard(settings=settings, fresh=fresh)
@@ -197,7 +235,7 @@ async def get_scoring_analysis_for_eval(
     async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:
         rows = await fetch_scoring_results_jsonl(url, settings=settings, client=client, fresh=fresh)
 
-    analysis = analyze_dual_zero_questions(rows)
+    analysis = analyze_dual_consensus_questions(rows, polarity=polarity)
     king_uid, challenger_uid, winner = _duel_export_labels(eval_run)
     return analysis.model_copy(
         update={
@@ -205,6 +243,7 @@ async def get_scoring_analysis_for_eval(
                 king_uid=king_uid,
                 challenger_uid=challenger_uid,
                 winner=winner,
+                polarity=polarity,
             )
         }
     )
@@ -232,13 +271,17 @@ def build_sample_export_json(sample: AlbedoSampleDualZeros) -> str:
     return json.dumps(build_sample_export_record(sample), ensure_ascii=False) + "\n"
 
 
-def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
-    """One JSON line per dual-zero sample in a single JSONL file."""
+def build_consensus_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
+    """One JSON line per matching sample in a single JSONL file."""
     lines = [
         json.dumps(build_sample_export_record(sample), ensure_ascii=False)
         for sample in analysis.samples
     ]
     return "\n".join(lines) + ("\n" if lines else "")
+
+
+def build_dual_zero_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
+    return build_consensus_export_jsonl(analysis)
 
 
 def dedupe_records_by_sample_id(
@@ -274,26 +317,38 @@ def _binary_eval_runs(eval_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def _dataset_cache_get() -> DatasetBuildResult | None:
+def _dataset_cache_key(polarity: ScoringConsensusPolarity) -> str:
+    return f"binary_dual_{polarity}"
+
+
+def _dataset_cache_get(polarity: ScoringConsensusPolarity) -> DatasetBuildResult | None:
     now = time.monotonic()
-    cached = _DATASET_CACHE.get("binary_dual_zero")
+    cached = _DATASET_CACHE.get(_dataset_cache_key(polarity))
     if cached and cached[0] > now:
         return cached[1]
     return None
 
 
-def _dataset_cache_set(result: DatasetBuildResult) -> None:
-    _DATASET_CACHE["binary_dual_zero"] = (time.monotonic() + _DATASET_CACHE_TTL_SECONDS, result)
+def _dataset_cache_set(polarity: ScoringConsensusPolarity, result: DatasetBuildResult) -> None:
+    _DATASET_CACHE[_dataset_cache_key(polarity)] = (
+        time.monotonic() + _DATASET_CACHE_TTL_SECONDS,
+        result,
+    )
 
 
-async def build_binary_dual_zero_dataset(
+def _polarity_label(polarity: ScoringConsensusPolarity) -> str:
+    return "dual-zero" if polarity == "zero" else "dual-one"
+
+
+async def build_binary_consensus_dataset(
     *,
     settings: Settings | None = None,
     fresh: bool = False,
+    polarity: ScoringConsensusPolarity = "zero",
 ) -> DatasetBuildResult:
     settings = settings or get_settings()
     if not fresh:
-        cached = _dataset_cache_get()
+        cached = _dataset_cache_get(polarity)
         if cached is not None:
             return cached
 
@@ -303,7 +358,7 @@ async def build_binary_dual_zero_dataset(
     binary_runs = _binary_eval_runs(eval_runs)
 
     all_records: list[dict[str, Any]] = []
-    duels_with_dual_zero = 0
+    duels_with_matches = 0
 
     async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:
         for run in binary_runs:
@@ -317,28 +372,30 @@ async def build_binary_dual_zero_dataset(
                     client=client,
                     fresh=fresh,
                 )
-                analysis = analyze_dual_zero_questions(rows)
+                analysis = analyze_dual_consensus_questions(rows, polarity=polarity)
             except Exception:
                 logger.warning(
-                    "Skipping binary duel dataset row eval_run_id=%s",
+                    "Skipping binary duel dataset row eval_run_id=%s polarity=%s",
                     run.get("eval_run_id"),
+                    polarity,
                     exc_info=True,
                 )
                 continue
             if not analysis.samples:
                 continue
-            duels_with_dual_zero += 1
+            duels_with_matches += 1
             for sample in analysis.samples:
                 all_records.append(build_sample_export_record(sample))
 
     unique_records, duplicates_removed = dedupe_records_by_sample_id(all_records)
     total_questions = sum(len(record.get("questions") or []) for record in unique_records)
     summary = AlbedoDatasetBuildSummary(
-        export_filename=_DATASET_EXPORT_FILENAME,
+        polarity=polarity,
+        export_filename=_DATASET_EXPORT_FILENAMES[polarity],
         dedup_script_filename=_DEDUP_SCRIPT_FILENAME,
         binary_duels_total=binary_total,
         binary_duels_with_scoring=len(binary_runs),
-        binary_duels_with_dual_zero=duels_with_dual_zero,
+        binary_duels_with_dual_zero=duels_with_matches,
         samples_before_dedup=len(all_records),
         unique_samples=len(unique_records),
         duplicates_removed=duplicates_removed,
@@ -346,26 +403,46 @@ async def build_binary_dual_zero_dataset(
     )
     result = DatasetBuildResult(summary=summary, records=unique_records)
     if not fresh:
-        _dataset_cache_set(result)
+        _dataset_cache_set(polarity, result)
     return result
+
+
+async def build_binary_dual_zero_dataset(
+    *,
+    settings: Settings | None = None,
+    fresh: bool = False,
+) -> DatasetBuildResult:
+    return await build_binary_consensus_dataset(settings=settings, fresh=fresh, polarity="zero")
+
+
+async def build_binary_dual_one_dataset(
+    *,
+    settings: Settings | None = None,
+    fresh: bool = False,
+) -> DatasetBuildResult:
+    return await build_binary_consensus_dataset(settings=settings, fresh=fresh, polarity="one")
 
 
 async def get_binary_dataset_summary(
     *,
     settings: Settings | None = None,
     fresh: bool = False,
+    polarity: ScoringConsensusPolarity = "zero",
 ) -> AlbedoDatasetBuildSummary:
-    return (await build_binary_dual_zero_dataset(settings=settings, fresh=fresh)).summary
+    return (await build_binary_consensus_dataset(settings=settings, fresh=fresh, polarity=polarity)).summary
 
 
 async def get_binary_dataset_export(
     *,
     settings: Settings | None = None,
     fresh: bool = False,
+    polarity: ScoringConsensusPolarity = "zero",
 ) -> ExportPayload:
-    result = await build_binary_dual_zero_dataset(settings=settings, fresh=fresh)
+    result = await build_binary_consensus_dataset(settings=settings, fresh=fresh, polarity=polarity)
     if not result.records:
-        raise LookupError("No dual-zero samples found across binary rubric duels")
+        raise LookupError(
+            f"No {_polarity_label(polarity)} samples found across binary rubric duels"
+        )
 
     return ExportPayload(
         content=build_dataset_export_jsonl(result.records).encode("utf-8"),
@@ -384,6 +461,30 @@ def get_dedup_script_export() -> ExportPayload:
     )
 
 
+def build_consensus_export(
+    analysis: AlbedoScoringAnalysis,
+    *,
+    king_uid: int | None,
+    challenger_uid: int | None,
+    winner: str,
+) -> ExportPayload:
+    polarity = analysis.polarity
+    if not analysis.samples:
+        raise LookupError(f"No {_polarity_label(polarity)} samples to export")
+
+    filename = duel_export_filename(
+        king_uid=king_uid,
+        challenger_uid=challenger_uid,
+        winner=winner,
+        polarity=polarity,
+    )
+    return ExportPayload(
+        content=build_consensus_export_jsonl(analysis).encode("utf-8"),
+        filename=filename,
+        media_type="application/x-ndjson",
+    )
+
+
 def build_dual_zero_export(
     analysis: AlbedoScoringAnalysis,
     *,
@@ -391,27 +492,21 @@ def build_dual_zero_export(
     challenger_uid: int | None,
     winner: str,
 ) -> ExportPayload:
-    if not analysis.samples:
-        raise LookupError("No dual-zero samples to export")
-
-    filename = duel_export_filename(
+    return build_consensus_export(
+        analysis,
         king_uid=king_uid,
         challenger_uid=challenger_uid,
         winner=winner,
     )
-    return ExportPayload(
-        content=build_dual_zero_export_jsonl(analysis).encode("utf-8"),
-        filename=filename,
-        media_type="application/x-ndjson",
-    )
 
 
-async def get_dual_zero_export(
+async def get_consensus_export(
     eval_run_id: str,
     *,
     subnet: int = 97,
     settings: Settings | None = None,
     fresh: bool = False,
+    polarity: ScoringConsensusPolarity = "zero",
 ) -> ExportPayload:
     settings = settings or get_settings()
     dashboard = await fetch_dashboard(settings=settings, fresh=fresh)
@@ -429,11 +524,27 @@ async def get_dual_zero_export(
     async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:
         rows = await fetch_scoring_results_jsonl(url, settings=settings, client=client, fresh=fresh)
 
-    analysis = analyze_dual_zero_questions(rows)
+    analysis = analyze_dual_consensus_questions(rows, polarity=polarity)
     king_uid, challenger_uid, winner = _duel_export_labels(eval_run)
-    return build_dual_zero_export(
+    return build_consensus_export(
         analysis,
         king_uid=king_uid,
         challenger_uid=challenger_uid,
         winner=winner,
+    )
+
+
+async def get_dual_zero_export(
+    eval_run_id: str,
+    *,
+    subnet: int = 97,
+    settings: Settings | None = None,
+    fresh: bool = False,
+) -> ExportPayload:
+    return await get_consensus_export(
+        eval_run_id,
+        subnet=subnet,
+        settings=settings,
+        fresh=fresh,
+        polarity="zero",
     )
