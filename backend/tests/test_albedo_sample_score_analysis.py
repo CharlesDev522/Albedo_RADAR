@@ -63,6 +63,19 @@ def test_analyze_sample_rows_emits_per_judge_observations():
     assert sum(1 for o in obs if o.bucket == "moderate") == 3
 
 
+def test_crushed_loser_case_and_judge_gap_share():
+    rows = [_uniform_row(sample_id="s1", question_count=10, ch_ones=10, k_ones=0)]
+    obs = analyze_sample_rows(rows, eval_run_id="duel-a")
+    result = build_sample_score_analysis(obs)
+    crushed = next(c for c in result.edge_cases if c.case_id == "crushed_loser")
+    assert crushed.observations == 3
+    assert crushed.gap_share_pct == 100.0
+    assert result.total_gap_points == 300.0
+    assert len(result.judge_margin_shares) == 3
+    assert result.judge_margin_shares[0].gap_share_pct == 33.3
+    assert result.duels[0].edge_cases[0].observations == 3
+
+
 def test_build_sample_score_analysis_aggregates_duels_and_judges():
     rows_a = [_uniform_row(sample_id="s1", question_count=10, ch_ones=10, k_ones=0)]
     rows_b = [_uniform_row(sample_id="s2", question_count=10, ch_ones=6, k_ones=5)]

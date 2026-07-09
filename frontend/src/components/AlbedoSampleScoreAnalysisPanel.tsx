@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useState } from "react";
-import { api, type AlbedoSampleScoreAnalysis, type GapBucketDistribution } from "@/lib/api";
+import { api, type AlbedoSampleScoreAnalysis, type GapBucketDistribution, type ScoreCaseRow } from "@/lib/api";
 import { useSubnet } from "@/lib/useSubnet";
 
 function fmtPct(n: number): string {
@@ -66,6 +66,65 @@ function DistributionBar({ dist, compact = false }: { dist: GapBucketDistributio
         </div>
       )}
     </div>
+  );
+}
+
+function CaseTable({
+  title,
+  subtitle,
+  rows,
+  showOnlyHits = true,
+}: {
+  title: string;
+  subtitle?: string;
+  rows: ScoreCaseRow[];
+  showOnlyHits?: boolean;
+}) {
+  const visible = showOnlyHits ? rows.filter((r) => r.observations > 0) : rows;
+  if (visible.length === 0) return null;
+  const maxGapShare = Math.max(...visible.map((r) => r.gap_share_pct), 1);
+  return (
+    <section className="panel px-3 py-2.5 overflow-x-auto">
+      <h4 className="text-[11px] font-semibold text-zinc-200">{title}</h4>
+      {subtitle && <p className="text-[9px] text-zinc-600 mb-2">{subtitle}</p>}
+      <table className="w-full text-[10px] min-w-[880px]">
+        <thead>
+          <tr className="text-zinc-500 border-b border-zinc-800">
+            <th className="text-left py-1 pr-2">Case</th>
+            <th className="text-right py-1 px-1">Obs</th>
+            <th className="text-right py-1 px-1">% obs</th>
+            <th className="text-right py-1 px-1">Σ gap</th>
+            <th className="text-right py-1 px-1">% margin</th>
+            <th className="text-left py-1 pl-2 min-w-[120px]">Margin share</th>
+            <th className="text-right py-1 px-1">Avg gap</th>
+            <th className="text-right py-1 px-1">Avg loser</th>
+            <th className="text-right py-1 px-1">Avg winner</th>
+          </tr>
+        </thead>
+        <tbody>
+          {visible.map((row) => (
+            <tr key={row.case_id} className="border-b border-zinc-800/50">
+              <td className="py-1.5 pr-2 text-zinc-300">{row.label}</td>
+              <td className="text-right py-1.5 px-1 mono text-zinc-400">{row.observations}</td>
+              <td className="text-right py-1.5 px-1 mono text-zinc-400">{fmtPct(row.observations_pct)}</td>
+              <td className="text-right py-1.5 px-1 mono text-zinc-300">{row.total_gap_points.toFixed(0)}</td>
+              <td className="text-right py-1.5 px-1 mono text-amber-200">{fmtPct(row.gap_share_pct)}</td>
+              <td className="py-1.5 pl-2">
+                <div className="h-2 rounded bg-zinc-800 overflow-hidden">
+                  <div
+                    className="h-full bg-amber-500/80"
+                    style={{ width: `${(row.gap_share_pct / maxGapShare) * 100}%` }}
+                  />
+                </div>
+              </td>
+              <td className="text-right py-1.5 px-1 mono text-zinc-400">{row.avg_gap.toFixed(1)}</td>
+              <td className="text-right py-1.5 px-1 mono text-rose-200/80">{row.avg_lower_score.toFixed(1)}</td>
+              <td className="text-right py-1.5 px-1 mono text-emerald-200/80">{row.avg_higher_score.toFixed(1)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }
 
@@ -134,9 +193,72 @@ export default function AlbedoSampleScoreAnalysisPanel() {
             value={data.total_observations}
             sub={`${data.judge_models.length} judges`}
           />
-          <Stat label="Updated" value={fmtTime(data.updated_at ?? "")} />
+          <Stat
+            label="Total margin"
+            value={data.total_gap_points.toFixed(0)}
+            sub="sum of gap points"
+          />
         </div>
       </section>
+
+      <section className="panel px-3 py-2.5 overflow-x-auto">
+        <h4 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge share of total margin</h4>
+        <p className="text-[9px] text-zinc-600 mb-2">
+          Each judge&apos;s sum of sample gaps as % of all gap points across every binary duel.
+        </p>
+        <table className="w-full text-[10px] min-w-[560px]">
+          <thead>
+            <tr className="text-zinc-500 border-b border-zinc-800">
+              <th className="text-left py-1 pr-2">Judge</th>
+              <th className="text-right py-1 px-1">Obs</th>
+              <th className="text-right py-1 px-1">Σ gap</th>
+              <th className="text-right py-1 px-1">% margin</th>
+              <th className="text-left py-1 pl-2 min-w-[140px]">Share bar</th>
+              <th className="text-right py-1 px-1">Avg gap</th>
+              <th className="text-right py-1 px-1">Pick ch%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.judge_margin_shares.map((j) => (
+              <tr key={j.judge_model} className="border-b border-zinc-800/50">
+                <td className="py-1.5 pr-2 font-medium text-zinc-200">{j.short_name}</td>
+                <td className="text-right py-1.5 px-1 mono text-zinc-400">{j.observations}</td>
+                <td className="text-right py-1.5 px-1 mono text-zinc-300">{j.total_gap_points.toFixed(0)}</td>
+                <td className="text-right py-1.5 px-1 mono text-amber-200 font-semibold">
+                  {fmtPct(j.gap_share_pct)}
+                </td>
+                <td className="py-1.5 pl-2">
+                  <div className="h-2.5 rounded bg-zinc-800 overflow-hidden">
+                    <div className="h-full bg-violet-500/80" style={{ width: `${j.gap_share_pct}%` }} />
+                  </div>
+                </td>
+                <td className="text-right py-1.5 px-1 mono text-zinc-400">{j.avg_gap.toFixed(1)}</td>
+                <td className="text-right py-1.5 px-1 mono text-zinc-400">{fmtPct(j.pick_challenger_pct)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <CaseTable
+        title="Gap band breakdown (partition)"
+        subtitle="Mutually exclusive gap ranges. % margin = share of total gap points."
+        rows={data.gap_bands}
+        showOnlyHits={false}
+      />
+
+      <CaseTable
+        title="Loser score bands"
+        subtitle="Distribution by the lower of challenger/king rubric %."
+        rows={data.loser_bands}
+        showOnlyHits={false}
+      />
+
+      <CaseTable
+        title="Edge & common cases"
+        subtitle="Overlapping filters — e.g. loser <10% with gap >20. % margin shows how much total gap each case contributes."
+        rows={data.edge_cases}
+      />
 
       <section className="panel px-3 py-2.5">
         <h4 className="text-[11px] font-semibold text-zinc-200 mb-2">Overall distribution</h4>
@@ -167,8 +289,9 @@ export default function AlbedoSampleScoreAnalysisPanel() {
               <th className="text-right py-1 px-1">Avg ch%</th>
               <th className="text-right py-1 px-1">Avg k%</th>
               <th className="text-right py-1 px-1">Avg gap</th>
+              <th className="text-right py-1 px-1">% margin</th>
               <th className="text-right py-1 px-1">Pick ch%</th>
-              <th className="text-left py-1 pl-2 min-w-[180px]">Distribution</th>
+              <th className="text-left py-1 pl-2 min-w-[160px]">Distribution</th>
             </tr>
           </thead>
           <tbody>
@@ -184,6 +307,7 @@ export default function AlbedoSampleScoreAnalysisPanel() {
                 <td className="text-right py-1.5 px-1 mono text-rose-200">{j.avg_challenger_pct.toFixed(1)}</td>
                 <td className="text-right py-1.5 px-1 mono text-emerald-200">{j.avg_king_pct.toFixed(1)}</td>
                 <td className="text-right py-1.5 px-1 mono text-zinc-300">{j.avg_gap_pct.toFixed(1)}</td>
+                <td className="text-right py-1.5 px-1 mono text-amber-200">{fmtPct(j.gap_share_pct)}</td>
                 <td className="text-right py-1.5 px-1 mono text-zinc-300">{fmtPct(j.pick_challenger_pct)}</td>
                 <td className="py-1.5 pl-2">
                   <DistributionBar dist={j.distribution} compact />
@@ -267,43 +391,94 @@ export default function AlbedoSampleScoreAnalysisPanel() {
                         }
                         className="text-[9px] text-sky-400 hover:underline"
                       >
-                        {open ? "hide judges" : "by judge"}
+                        {open ? "hide detail" : "deep dive"}
                       </button>
                     </td>
                   </tr>
                   {open && (
                     <tr className="border-b border-zinc-800/50 bg-zinc-900/30">
-                      <td colSpan={7} className="py-2 px-2">
-                        <table className="w-full text-[9px]">
-                          <thead>
-                            <tr className="text-zinc-600">
-                              <th className="text-left py-0.5">Judge</th>
-                              <th className="text-right py-0.5">Obs</th>
-                              <th className="text-right py-0.5">Close</th>
-                              <th className="text-right py-0.5">Mod</th>
-                              <th className="text-right py-0.5">Dec</th>
-                              <th className="text-right py-0.5">Avg gap</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {duel.judges.map((j) => (
-                              <tr key={j.judge_model}>
-                                <td className="py-0.5 text-zinc-400">{j.short_name}</td>
-                                <td className="text-right py-0.5 mono">{j.observations}</td>
-                                <td className="text-right py-0.5 mono text-sky-300">
-                                  {fmtPct(j.distribution.close_pct)}
-                                </td>
-                                <td className="text-right py-0.5 mono text-amber-300">
-                                  {fmtPct(j.distribution.moderate_pct)}
-                                </td>
-                                <td className="text-right py-0.5 mono text-rose-300">
-                                  {fmtPct(j.distribution.decisive_pct)}
-                                </td>
-                                <td className="text-right py-0.5 mono">{j.avg_gap_pct.toFixed(1)}</td>
+                      <td colSpan={7} className="py-2 px-2 space-y-3">
+                        <div>
+                          <p className="text-[9px] text-zinc-500 mb-1">
+                            Duel margin: {duel.total_gap_points.toFixed(0)} gap points · {duel.observations} obs
+                          </p>
+                          <table className="w-full text-[9px] mb-2">
+                            <thead>
+                              <tr className="text-zinc-600">
+                                <th className="text-left py-0.5">Judge</th>
+                                <th className="text-right py-0.5">% margin</th>
+                                <th className="text-right py-0.5">Σ gap</th>
+                                <th className="text-right py-0.5">Avg gap</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody>
+                              {duel.judge_margin_shares.map((j) => (
+                                <tr key={j.judge_model}>
+                                  <td className="py-0.5 text-zinc-400">{j.short_name}</td>
+                                  <td className="text-right py-0.5 mono text-amber-300">
+                                    {fmtPct(j.gap_share_pct)}
+                                  </td>
+                                  <td className="text-right py-0.5 mono">{j.total_gap_points.toFixed(0)}</td>
+                                  <td className="text-right py-0.5 mono">{j.avg_gap.toFixed(1)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        {duel.gap_bands.some((r) => r.observations > 0) && (
+                          <div>
+                            <p className="text-[9px] font-medium text-zinc-400 mb-1">Gap bands</p>
+                            <table className="w-full text-[9px]">
+                              <thead>
+                                <tr className="text-zinc-600">
+                                  <th className="text-left py-0.5">Case</th>
+                                  <th className="text-right py-0.5">Obs</th>
+                                  <th className="text-right py-0.5">% margin</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {duel.gap_bands
+                                  .filter((r) => r.observations > 0)
+                                  .map((r) => (
+                                    <tr key={r.case_id}>
+                                      <td className="py-0.5 text-zinc-400">{r.label}</td>
+                                      <td className="text-right py-0.5 mono">{r.observations}</td>
+                                      <td className="text-right py-0.5 mono text-amber-300">
+                                        {fmtPct(r.gap_share_pct)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        {duel.edge_cases.length > 0 && (
+                          <div>
+                            <p className="text-[9px] font-medium text-zinc-400 mb-1">Edge cases</p>
+                            <table className="w-full text-[9px]">
+                              <thead>
+                                <tr className="text-zinc-600">
+                                  <th className="text-left py-0.5">Case</th>
+                                  <th className="text-right py-0.5">Obs</th>
+                                  <th className="text-right py-0.5">% obs</th>
+                                  <th className="text-right py-0.5">% margin</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {duel.edge_cases.map((r) => (
+                                  <tr key={r.case_id}>
+                                    <td className="py-0.5 text-zinc-400">{r.label}</td>
+                                    <td className="text-right py-0.5 mono">{r.observations}</td>
+                                    <td className="text-right py-0.5 mono">{fmtPct(r.observations_pct)}</td>
+                                    <td className="text-right py-0.5 mono text-amber-300">
+                                      {fmtPct(r.gap_share_pct)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   )}

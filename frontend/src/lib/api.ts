@@ -696,6 +696,29 @@ export interface GapBucketDistribution {
   decisive_pct: number;
 }
 
+export interface ScoreCaseRow {
+  case_id: string;
+  label: string;
+  category: "gap_band" | "loser_band" | "edge";
+  observations: number;
+  observations_pct: number;
+  total_gap_points: number;
+  gap_share_pct: number;
+  avg_gap: number;
+  avg_lower_score: number;
+  avg_higher_score: number;
+}
+
+export interface JudgeMarginShare {
+  judge_model: string;
+  short_name: string;
+  observations: number;
+  total_gap_points: number;
+  gap_share_pct: number;
+  avg_gap: number;
+  pick_challenger_pct: number;
+}
+
 export interface JudgeSampleGapSummary {
   judge_model: string;
   short_name: string;
@@ -705,6 +728,8 @@ export interface JudgeSampleGapSummary {
   avg_king_pct: number;
   avg_gap_pct: number;
   pick_challenger_pct: number;
+  total_gap_points: number;
+  gap_share_pct: number;
 }
 
 export interface JudgePairAgreement {
@@ -727,7 +752,11 @@ export interface DuelSampleGapSummary {
   sample_count: number;
   judge_count: number;
   observations: number;
+  total_gap_points: number;
   distribution: GapBucketDistribution;
+  gap_bands: ScoreCaseRow[];
+  edge_cases: ScoreCaseRow[];
+  judge_margin_shares: JudgeMarginShare[];
   judges: JudgeSampleGapSummary[];
 }
 
@@ -737,8 +766,13 @@ export interface AlbedoSampleScoreAnalysis {
   binary_duels_with_samples: number;
   total_samples: number;
   total_observations: number;
+  total_gap_points: number;
   judge_models: string[];
   overall: GapBucketDistribution;
+  gap_bands: ScoreCaseRow[];
+  loser_bands: ScoreCaseRow[];
+  edge_cases: ScoreCaseRow[];
+  judge_margin_shares: JudgeMarginShare[];
   by_judge: JudgeSampleGapSummary[];
   judge_pairs: JudgePairAgreement[];
   duels: DuelSampleGapSummary[];

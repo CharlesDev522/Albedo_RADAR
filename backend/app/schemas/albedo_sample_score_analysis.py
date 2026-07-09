@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 SampleGapBucket = Literal["close", "moderate", "decisive"]
+ScoreCaseCategory = Literal["gap_band", "loser_band", "edge"]
 
 
 class GapBucketCounts(BaseModel):
@@ -23,6 +24,29 @@ class GapBucketDistribution(BaseModel):
     decisive_pct: float = 0.0
 
 
+class ScoreCaseRow(BaseModel):
+    case_id: str
+    label: str
+    category: ScoreCaseCategory = "edge"
+    observations: int = 0
+    observations_pct: float = 0.0
+    total_gap_points: float = 0.0
+    gap_share_pct: float = 0.0
+    avg_gap: float = 0.0
+    avg_lower_score: float = 0.0
+    avg_higher_score: float = 0.0
+
+
+class JudgeMarginShare(BaseModel):
+    judge_model: str
+    short_name: str
+    observations: int = 0
+    total_gap_points: float = 0.0
+    gap_share_pct: float = 0.0
+    avg_gap: float = 0.0
+    pick_challenger_pct: float = 0.0
+
+
 class JudgeSampleGapSummary(BaseModel):
     judge_model: str
     short_name: str
@@ -32,6 +56,8 @@ class JudgeSampleGapSummary(BaseModel):
     avg_king_pct: float = 0.0
     avg_gap_pct: float = 0.0
     pick_challenger_pct: float = 0.0
+    total_gap_points: float = 0.0
+    gap_share_pct: float = 0.0
 
 
 class JudgePairAgreement(BaseModel):
@@ -54,7 +80,11 @@ class DuelSampleGapSummary(BaseModel):
     sample_count: int = 0
     judge_count: int = 0
     observations: int = 0
+    total_gap_points: float = 0.0
     distribution: GapBucketDistribution = Field(default_factory=GapBucketDistribution)
+    gap_bands: list[ScoreCaseRow] = Field(default_factory=list)
+    edge_cases: list[ScoreCaseRow] = Field(default_factory=list)
+    judge_margin_shares: list[JudgeMarginShare] = Field(default_factory=list)
     judges: list[JudgeSampleGapSummary] = Field(default_factory=list)
 
 
@@ -64,8 +94,13 @@ class AlbedoSampleScoreAnalysis(BaseModel):
     binary_duels_with_samples: int = 0
     total_samples: int = 0
     total_observations: int = 0
+    total_gap_points: float = 0.0
     judge_models: list[str] = Field(default_factory=list)
     overall: GapBucketDistribution = Field(default_factory=GapBucketDistribution)
+    gap_bands: list[ScoreCaseRow] = Field(default_factory=list)
+    loser_bands: list[ScoreCaseRow] = Field(default_factory=list)
+    edge_cases: list[ScoreCaseRow] = Field(default_factory=list)
+    judge_margin_shares: list[JudgeMarginShare] = Field(default_factory=list)
     by_judge: list[JudgeSampleGapSummary] = Field(default_factory=list)
     judge_pairs: list[JudgePairAgreement] = Field(default_factory=list)
     duels: list[DuelSampleGapSummary] = Field(default_factory=list)
