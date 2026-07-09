@@ -119,49 +119,6 @@ class AlbedoWinRateRow(BaseModel):
     coronations: int = 0
 
 
-class AlbedoJudgeAggregate(BaseModel):
-    judge: str
-    short_name: str
-    avg_challenger_score: float
-    duels: int
-
-
-class AlbedoJudgeDetail(BaseModel):
-    judge: str
-    short_name: str
-    duels: int
-    avg_challenger_score: float
-    avg_king_score: float
-    score_std: float | None = None
-    pick_challenger_pct: float
-    pick_king_pct: float
-    agree_verdict_pct: float
-    overturn_duels: int
-    split_majority_align_pct: float | None = None
-    solo_dissent_win_pct: float | None = None
-    extreme_call_pct: float | None = None
-    avg_score_when_challenger_wins: float | None = None
-    avg_score_when_king_wins: float | None = None
-    unanimous_challenger_duels: int = 0
-    unanimous_king_duels: int = 0
-    split_duels: int = 0
-
-
-class AlbedoJudgeConsensus(BaseModel):
-    pattern: str
-    label: str
-    duels: int
-    pct: float
-    challenger_wins: int
-    king_wins: int
-
-
-class AlbedoMetricAggregate(BaseModel):
-    metric: str
-    avg_challenger_score: float
-    duels: int
-
-
 class AlbedoMarginBucket(BaseModel):
     label: str
     count: int
@@ -307,95 +264,6 @@ class AlbedoRepoCrownAnalysis(BaseModel):
     crown_history_coverage_note: str = ""
 
 
-class AlbedoJudgeSlice(BaseModel):
-    judge: str
-    short_name: str
-    duels: int
-    avg_challenger_score: float
-    pick_challenger_pct: float
-    agree_verdict_pct: float
-
-
-class AlbedoEntityJudgeStats(BaseModel):
-    key: str
-    label: str
-    repo: str | None = None
-    coldkey: str | None = None
-    hotkey: str | None = None
-    uid: int | None = None
-    miner_count: int = 0
-    repos: list[str] = Field(default_factory=list)
-    duels: int
-    wins: int
-    losses: int
-    win_pct: float
-    coronations: int = 0
-    avg_margin: float | None = None
-    avg_judge_spread: float | None = None
-    unanimous_pct: float | None = None
-    judges: list[AlbedoJudgeSlice] = Field(default_factory=list)
-    coldkeys: list[str] = Field(default_factory=list)
-    recent_dq: int = 0
-    dq_rate_pct: float | None = None
-    total_attempts: int = 0
-
-
-class AlbedoRepoSubmissionStats(BaseModel):
-    key: str
-    label: str
-    repo: str
-    coldkeys: list[str] = Field(default_factory=list)
-    eval_submissions: int = 0
-    recent_dq: int = 0
-    total_attempts: int = 0
-    dq_rate_pct: float | None = None
-    basis: str = "committed_chain_repo"
-    note: str = (
-        "Per committed repo: unique UIDs split into evaled vs DQ-only. "
-        "Repeated DQ rows for the same UID count once. "
-        "If a UID both DQ'd and completed eval, it counts as evaled. "
-        "DQ% = dq_only_uids / (evaled_uids + dq_only_uids)."
-    )
-
-
-class AlbedoJudgePairwise(BaseModel):
-    judge_a: str
-    judge_b: str
-    short_name_a: str
-    short_name_b: str
-    duels: int
-    agree_pct: float
-    avg_score_delta: float | None = None
-    score_correlation: float | None = None
-
-
-class AlbedoJudgeOutcomeSlice(BaseModel):
-    outcome: str
-    label: str
-    duels: int
-    judges: list[AlbedoJudgeSlice] = Field(default_factory=list)
-
-
-class AlbedoJudgeSpreadSummary(BaseModel):
-    avg_spread: float | None = None
-    high_spread_duels: int = 0
-    high_spread_pct: float = 0.0
-    unanimous_duels: int = 0
-    unanimous_pct: float = 0.0
-    split_duels: int = 0
-    split_pct: float = 0.0
-
-
-class AlbedoJudgeAnalytics(BaseModel):
-    total_submissions: int = 0
-    judge_models: list[str] = Field(default_factory=list)
-    by_repo: list[AlbedoEntityJudgeStats] = Field(default_factory=list)
-    by_coldkey: list[AlbedoEntityJudgeStats] = Field(default_factory=list)
-    pairwise: list[AlbedoJudgePairwise] = Field(default_factory=list)
-    by_outcome: list[AlbedoJudgeOutcomeSlice] = Field(default_factory=list)
-    spread_summary: AlbedoJudgeSpreadSummary = Field(default_factory=AlbedoJudgeSpreadSummary)
-
-
 class AlbedoAnalysisOverview(BaseModel):
     subnet: int = 97
     source: str = "hippius_dashboard"
@@ -428,14 +296,8 @@ class AlbedoAnalysisOverview(BaseModel):
     challenger_by_hotkey: list[AlbedoWinRateRow] = Field(default_factory=list)
     challenger_by_repo: list[AlbedoWinRateRow] = Field(default_factory=list)
     king_defense_by_model: list[AlbedoWinRateRow] = Field(default_factory=list)
-    judge_aggregates: list[AlbedoJudgeAggregate] = Field(default_factory=list)
-    judge_details: list[AlbedoJudgeDetail] = Field(default_factory=list)
-    judge_consensus: list[AlbedoJudgeConsensus] = Field(default_factory=list)
-    judge_analytics: AlbedoJudgeAnalytics = Field(default_factory=AlbedoJudgeAnalytics)
-    metric_aggregates: list[AlbedoMetricAggregate] = Field(default_factory=list)
     margin_histogram: list[AlbedoMarginBucket] = Field(default_factory=list)
     timeline: list[AlbedoTimelinePoint] = Field(default_factory=list)
     pipeline: list[AlbedoPipelineStage] = Field(default_factory=list)
     miner_lookup_coverage_pct: float | None = None
-    repo_submission_stats: list[AlbedoRepoSubmissionStats] = Field(default_factory=list)
     note: str = ""

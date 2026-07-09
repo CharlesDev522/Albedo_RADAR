@@ -7,6 +7,7 @@ import AlbedoEvalQueueOverviewPanel from "@/components/AlbedoEvalQueueOverview";
 import AlbedoEvalFailsPanel from "@/components/AlbedoEvalFailsPanel";
 import AlbedoScoringGapsPanel from "@/components/AlbedoScoringGapsPanel";
 import AlbedoDatasetBuilderPanel from "@/components/AlbedoDatasetBuilderPanel";
+import AlbedoSampleScoreAnalysisPanel from "@/components/AlbedoSampleScoreAnalysisPanel";
 import {
   api,
   hippiusModelUrl,
@@ -23,7 +24,7 @@ import { usePageVisibility } from "@/lib/usePageVisibility";
 
 const POLL_MS = 30_000;
 const QUEUE_POLL_MS = 8_000;
-type Section = "overview" | "kings" | "duels" | "dq";
+type Section = "overview" | "kings" | "duels" | "analysis" | "dq";
 
 function fmtPct(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
@@ -93,6 +94,7 @@ function SectionTabs({
     { id: "dq", label: "DQ" },
     { id: "kings", label: "Kings & rewards" },
     { id: "duels", label: "Duel feed" },
+    { id: "analysis", label: "Score analysis" },
   ];
   return (
     <div className="inline-flex rounded-md border border-zinc-800 bg-zinc-900/60 p-0.5">
@@ -395,8 +397,6 @@ export default function AlbedoDuelPanel() {
   }, [queuePollActive, refreshQueue]);
 
   const judgeOrder = useMemo(() => {
-    const fromDetails = (data?.judge_details ?? []).map((j) => j.short_name).filter(Boolean);
-    if (fromDetails.length > 0) return fromDetails;
     const fromChain = (data?.judge_models ?? []).map(judgeShortFromModel).filter(Boolean);
     if (fromChain.length > 0) return fromChain;
     const seen = new Set<string>();
@@ -585,6 +585,8 @@ export default function AlbedoDuelPanel() {
           </section>
         </>
       )}
+
+      {section === "analysis" && <AlbedoSampleScoreAnalysisPanel />}
 
       {section === "duels" && (
         <section className="panel px-3 py-2">

@@ -441,131 +441,6 @@ export interface AlbedoWinRateRow {
   coronations: number;
 }
 
-export interface AlbedoJudgeAggregate {
-  judge: string;
-  short_name: string;
-  avg_challenger_score: number;
-  duels: number;
-}
-
-export interface AlbedoJudgeDetail {
-  judge: string;
-  short_name: string;
-  duels: number;
-  avg_challenger_score: number;
-  avg_king_score: number;
-  score_std?: number | null;
-  pick_challenger_pct: number;
-  pick_king_pct: number;
-  agree_verdict_pct: number;
-  overturn_duels: number;
-  split_majority_align_pct?: number | null;
-  solo_dissent_win_pct?: number | null;
-  extreme_call_pct?: number | null;
-  avg_score_when_challenger_wins?: number | null;
-  avg_score_when_king_wins?: number | null;
-  unanimous_challenger_duels: number;
-  unanimous_king_duels: number;
-  split_duels: number;
-}
-
-export interface AlbedoJudgeConsensus {
-  pattern: string;
-  label: string;
-  duels: number;
-  pct: number;
-  challenger_wins: number;
-  king_wins: number;
-}
-
-export interface AlbedoJudgeSlice {
-  judge: string;
-  short_name: string;
-  duels: number;
-  avg_challenger_score: number;
-  pick_challenger_pct: number;
-  agree_verdict_pct: number;
-}
-
-export interface AlbedoEntityJudgeStats {
-  key: string;
-  label: string;
-  repo?: string | null;
-  coldkey?: string | null;
-  hotkey?: string | null;
-  uid?: number | null;
-  miner_count: number;
-  repos: string[];
-  coldkeys?: string[];
-  duels: number;
-  wins: number;
-  losses: number;
-  win_pct: number;
-  coronations: number;
-  avg_margin?: number | null;
-  avg_judge_spread?: number | null;
-  unanimous_pct?: number | null;
-  judges: AlbedoJudgeSlice[];
-  recent_dq?: number;
-  dq_rate_pct?: number | null;
-  total_attempts?: number;
-}
-
-export interface AlbedoRepoSubmissionStats {
-  key: string;
-  label: string;
-  repo: string;
-  coldkeys: string[];
-  eval_submissions: number;
-  recent_dq: number;
-  total_attempts: number;
-  dq_rate_pct?: number | null;
-}
-
-export interface AlbedoJudgePairwise {
-  judge_a: string;
-  judge_b: string;
-  short_name_a: string;
-  short_name_b: string;
-  duels: number;
-  agree_pct: number;
-  avg_score_delta?: number | null;
-  score_correlation?: number | null;
-}
-
-export interface AlbedoJudgeOutcomeSlice {
-  outcome: string;
-  label: string;
-  duels: number;
-  judges: AlbedoJudgeSlice[];
-}
-
-export interface AlbedoJudgeSpreadSummary {
-  avg_spread?: number | null;
-  high_spread_duels: number;
-  high_spread_pct: number;
-  unanimous_duels: number;
-  unanimous_pct: number;
-  split_duels: number;
-  split_pct: number;
-}
-
-export interface AlbedoJudgeAnalytics {
-  total_submissions: number;
-  judge_models: string[];
-  by_repo: AlbedoEntityJudgeStats[];
-  by_coldkey: AlbedoEntityJudgeStats[];
-  pairwise: AlbedoJudgePairwise[];
-  by_outcome: AlbedoJudgeOutcomeSlice[];
-  spread_summary: AlbedoJudgeSpreadSummary;
-}
-
-export interface AlbedoMetricAggregate {
-  metric: string;
-  avg_challenger_score: number;
-  duels: number;
-}
-
 export interface AlbedoMarginBucket {
   label: string;
   count: number;
@@ -807,6 +682,69 @@ export interface AlbedoDualZeroQuestion {
   king_qwen?: string | null;
 }
 
+export interface GapBucketCounts {
+  close: number;
+  moderate: number;
+  decisive: number;
+  total: number;
+}
+
+export interface GapBucketDistribution {
+  counts: GapBucketCounts;
+  close_pct: number;
+  moderate_pct: number;
+  decisive_pct: number;
+}
+
+export interface JudgeSampleGapSummary {
+  judge_model: string;
+  short_name: string;
+  observations: number;
+  distribution: GapBucketDistribution;
+  avg_challenger_pct: number;
+  avg_king_pct: number;
+  avg_gap_pct: number;
+  pick_challenger_pct: number;
+}
+
+export interface JudgePairAgreement {
+  judge_a: string;
+  judge_b: string;
+  short_name_a: string;
+  short_name_b: string;
+  observations: number;
+  same_bucket_pct: number;
+  same_pick_pct: number;
+  avg_score_delta_pct: number;
+}
+
+export interface DuelSampleGapSummary {
+  eval_run_id: string;
+  finished_at: string;
+  challenger_label: string;
+  king_label: string;
+  winner: string;
+  sample_count: number;
+  judge_count: number;
+  observations: number;
+  distribution: GapBucketDistribution;
+  judges: JudgeSampleGapSummary[];
+}
+
+export interface AlbedoSampleScoreAnalysis {
+  binary_duels_total: number;
+  binary_duels_scanned: number;
+  binary_duels_with_samples: number;
+  total_samples: number;
+  total_observations: number;
+  judge_models: string[];
+  overall: GapBucketDistribution;
+  by_judge: JudgeSampleGapSummary[];
+  judge_pairs: JudgePairAgreement[];
+  duels: DuelSampleGapSummary[];
+  updated_at?: string | null;
+}
+
 export interface AlbedoAnalysisOverview {
   subnet: number;
   source: string;
@@ -839,16 +777,10 @@ export interface AlbedoAnalysisOverview {
   challenger_by_hotkey: AlbedoWinRateRow[];
   challenger_by_repo: AlbedoWinRateRow[];
   king_defense_by_model: AlbedoWinRateRow[];
-  judge_aggregates: AlbedoJudgeAggregate[];
-  judge_details: AlbedoJudgeDetail[];
-  judge_consensus: AlbedoJudgeConsensus[];
-  judge_analytics: AlbedoJudgeAnalytics;
-  metric_aggregates: AlbedoMetricAggregate[];
   margin_histogram: AlbedoMarginBucket[];
   timeline: AlbedoTimelinePoint[];
   pipeline: AlbedoPipelineStage[];
   miner_lookup_coverage_pct?: number | null;
-  repo_submission_stats: AlbedoRepoSubmissionStats[];
   note: string;
 }
 
@@ -1017,6 +949,11 @@ export const api = {
   ) =>
     fetchApi<AlbedoDatasetBuildSummary>(
       `/albedo/scoring-dataset/summary?subnet=${subnet}&polarity=${polarity}`,
+      { forceRefresh }
+    ),
+  getAlbedoSampleScoreAnalysis: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
+    fetchApi<AlbedoSampleScoreAnalysis>(
+      `/albedo/sample-score-analysis?subnet=${subnet}${forceRefresh ? "&fresh=true" : ""}`,
       { forceRefresh }
     ),
   downloadAlbedoDatasetExport: async (
