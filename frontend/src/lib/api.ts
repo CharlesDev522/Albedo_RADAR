@@ -771,8 +771,10 @@ export interface AlbedoDatasetBuildSummary {
   polarity?: ScoringConsensusPolarity;
   export_filename: string;
   dedup_script_filename: string;
+  recent_duels_limit: number;
   binary_duels_total: number;
   binary_duels_with_scoring: number;
+  binary_duels_scanned: number;
   binary_duels_with_dual_zero: number;
   samples_before_dedup: number;
   unique_samples: number;

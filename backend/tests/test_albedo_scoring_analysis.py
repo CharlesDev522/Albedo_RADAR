@@ -235,6 +235,8 @@ def test_build_binary_dual_zero_dataset_dedupes_across_duels(monkeypatch):
     result = asyncio.run(build_binary_dual_zero_dataset(fresh=True))
     assert result.summary.binary_duels_total == 2
     assert result.summary.binary_duels_with_scoring == 2
+    assert result.summary.binary_duels_scanned == 2
+    assert result.summary.recent_duels_limit == 20
     assert result.summary.binary_duels_with_dual_zero == 2
     assert result.summary.samples_before_dedup == 3
     assert result.summary.unique_samples == 2
@@ -281,3 +283,41 @@ def test_build_binary_dual_one_dataset_uses_one_polarity(monkeypatch):
     assert result.summary.export_filename == "binary-dual-one-dataset.jsonl"
     assert result.summary.unique_samples == 1
     assert result.records[0]["questions"][0]["question_id"] == "q_01"
+
+
+def test_build_binary_dataset_scans_only_latest_twenty_duels(monkeypatch):
+    rows = [_sample_row(sample_id="dataset/a:1:1")]
+    fetched_urls: list[str] = []
+
+    async def fake_fetch_dashboard(*, settings=None, fresh=False):
+        runs = []
+        for i in range(25):
+            runs.append(
+                {
+                    "eval_run_id": f"duel-{i:02d}",
+                    "scoring_mode": "binary",
+                    "finished_at": f"2026-06-{(i % 28) + 1:02d}T10:00:00+00:00",
+                    "artifacts": {"SCORING_RESULTS": f"https://example.com/{i:02d}.jsonl"},
+                }
+            )
+        return {"eval_runs": runs}
+
+    async def fake_fetch_scoring_results_jsonl(url, *, settings=None, client=None, fresh=False):
+        fetched_urls.append(url)
+        return rows
+
+    monkeypatch.setattr(
+        "app.services.albedo_scoring_analysis_service.fetch_dashboard",
+        fake_fetch_dashboard,
+    )
+    monkeypatch.setattr(
+        "app.services.albedo_scoring_analysis_service.fetch_scoring_results_jsonl",
+        fake_fetch_scoring_results_jsonl,
+    )
+
+    result = asyncio.run(build_binary_dual_zero_dataset(fresh=True))
+    assert result.summary.binary_duels_with_scoring == 25
+    assert result.summary.binary_duels_scanned == 20
+    assert len(fetched_urls) == 20
+    assert fetched_urls[0].endswith("/24.jsonl")
+    assert fetched_urls[-1].endswith("/05.jsonl")

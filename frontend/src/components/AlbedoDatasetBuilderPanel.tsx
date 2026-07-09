@@ -118,7 +118,8 @@ export default function AlbedoDatasetBuilderPanel() {
             />
           </div>
           <p className="text-[10px] text-zinc-500 mt-0.5 max-w-3xl">
-            Combine {modeLabel} JSONL exports from all binary rubric duels into one file. Duplicate
+            Combine {modeLabel} JSONL exports from the latest{" "}
+            {summary?.recent_duels_limit ?? 20} binary rubric duels into one file. Duplicate
             sample_ids are removed automatically (first occurrence kept).
           </p>
         </div>
@@ -155,9 +156,10 @@ export default function AlbedoDatasetBuilderPanel() {
       {loading && !summary ? (
         <p className="text-[10px] text-zinc-500 mt-3">Scanning binary rubric duels…</p>
       ) : summary ? (
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 mt-3 min-w-0">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-3 mt-3 min-w-0">
           <Stat label="Binary duels" value={summary.binary_duels_total} />
           <Stat label="With scoring" value={summary.binary_duels_with_scoring} />
+          <Stat label="Scanned (recent)" value={summary.binary_duels_scanned} />
           <Stat label={`With ${modeLabel}`} value={summary.binary_duels_with_dual_zero} />
           <Stat label="Lines before dedup" value={summary.samples_before_dedup} />
           <Stat label="Unique samples" value={summary.unique_samples} />

@@ -29,6 +29,7 @@ QWEN_JUDGE_HINT = "qwen"
 CHALLENGER_SIDE = "challenger"
 KING_SIDE_RAW = "previous_king"
 
+_DATASET_RECENT_DUELS_LIMIT = 20
 _DATASET_EXPORT_FILENAMES: dict[ScoringConsensusPolarity, str] = {
     "zero": "binary-dual-zero-dataset.jsonl",
     "one": "binary-dual-one-dataset.jsonl",
@@ -317,6 +318,17 @@ def _binary_eval_runs(eval_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _recent_binary_eval_runs(
+    eval_runs: list[dict[str, Any]],
+    *,
+    limit: int = _DATASET_RECENT_DUELS_LIMIT,
+) -> list[dict[str, Any]]:
+    """Latest finished binary duels with scoring artifacts (newest first)."""
+    binary_runs = _binary_eval_runs(eval_runs)
+    binary_runs.sort(key=lambda r: str(r.get("finished_at") or ""), reverse=True)
+    return binary_runs[:limit]
+
+
 def _dataset_cache_key(polarity: ScoringConsensusPolarity) -> str:
     return f"binary_dual_{polarity}"
 
@@ -355,7 +367,8 @@ async def build_binary_consensus_dataset(
     dashboard = await fetch_dashboard(settings=settings, fresh=fresh)
     eval_runs: list[dict[str, Any]] = list(dashboard.get("eval_runs") or [])
     binary_total = sum(1 for run in eval_runs if run.get("scoring_mode") == "binary")
-    binary_runs = _binary_eval_runs(eval_runs)
+    binary_runs_all = _binary_eval_runs(eval_runs)
+    binary_runs = _recent_binary_eval_runs(eval_runs)
 
     all_records: list[dict[str, Any]] = []
     duels_with_matches = 0
@@ -393,8 +406,10 @@ async def build_binary_consensus_dataset(
         polarity=polarity,
         export_filename=_DATASET_EXPORT_FILENAMES[polarity],
         dedup_script_filename=_DEDUP_SCRIPT_FILENAME,
+        recent_duels_limit=_DATASET_RECENT_DUELS_LIMIT,
         binary_duels_total=binary_total,
-        binary_duels_with_scoring=len(binary_runs),
+        binary_duels_with_scoring=len(binary_runs_all),
+        binary_duels_scanned=len(binary_runs),
         binary_duels_with_dual_zero=duels_with_matches,
         samples_before_dedup=len(all_records),
         unique_samples=len(unique_records),
