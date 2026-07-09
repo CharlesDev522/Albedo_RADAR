@@ -293,7 +293,7 @@ class NotificationWatcher:
         marked = 0
         self._bootstrapped = False
         try:
-            await self.bootstrap(session)
+            await self.bootstrap(None)
         except Exception:
             logger.warning("notification dashboard bootstrap failed (HTTP-only)", exc_info=True)
         marked += await self._seed_hub_index_keys()

@@ -1,5 +1,6 @@
 """Tests for alert notification dispatcher, messages, and watcher."""
 
+import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -778,3 +779,37 @@ async def test_watcher_skips_eval_dq_when_already_seen():
 
     assert sent == 0
     dispatcher.notify_content.assert_not_awaited()
+
+
+def test_finalize_startup_seed_http_only_bootstraps_dashboard():
+    settings = Settings(notifications_enabled=True, default_subnet=97)
+    dispatcher = NotificationDispatcher(settings)
+    watcher = NotificationWatcher(dispatcher=dispatcher, settings=settings)
+
+    dashboard = {
+        "reign": {"members": [{"king_version": 3, "model_uri": "org/king@sha256:1"}]},
+        "current_eval": {"eval_run_id": "live-1"},
+        "eval_runs": [
+            {
+                "eval_run_id": "done-1",
+                "coronated": True,
+                "model_uri": "org/king@sha256:1",
+                "finished_at": "2026-06-27T10:00:00+00:00",
+            }
+        ],
+        "fails": [],
+    }
+
+    async def run() -> int:
+        with (
+            patch("app.notifications.watcher.fetch_dashboard", return_value=dashboard),
+            patch.object(watcher, "_seed_hub_index_keys", AsyncMock(return_value=2)),
+        ):
+            return await watcher.finalize_startup_seed_http_only()
+
+    marked = asyncio.run(run())
+
+    assert marked == 2
+    assert watcher._bootstrapped is True
+    assert dispatcher.is_seen("duel_new:live-1")
+    assert dispatcher.is_seen("crown_won:done-1:org/king@sha256:1")
