@@ -22,14 +22,13 @@ GAP_TYPE_CRITERIA: dict[SampleGapBucket, str] = {
 
 
 class GapDiffBin(BaseModel):
-    """Histogram bin for score-difference distribution within a gap type."""
+    """Score-difference bin; share_pct is % of total margin (all slices sum to 100)."""
 
     label: str
     bin_min: float
     bin_max: float
     gap_points_sum: float = 0.0
-    share_of_total_margin_pct: float = 0.0
-    share_within_type_pct: float = 0.0
+    share_pct: float = 0.0
 
 
 class GapTypeSummary(BaseModel):
@@ -37,7 +36,7 @@ class GapTypeSummary(BaseModel):
     label: str
     criteria: str
     total_gap_points: float = 0.0
-    margin_share_pct: float = 0.0
+    share_pct: float = 0.0
     avg_gap: float = 0.0
     gap_distribution: list[GapDiffBin] = Field(default_factory=list)
 
@@ -47,7 +46,7 @@ class JudgeMarginShare(BaseModel):
     short_name: str
     observations: int = 0
     total_gap_points: float = 0.0
-    gap_share_pct: float = 0.0
+    share_pct: float = 0.0
     avg_gap: float = 0.0
     pick_challenger_pct: float = 0.0
     by_gap_type: list[GapTypeSummary] = Field(default_factory=list)
@@ -62,7 +61,7 @@ class JudgeSampleGapSummary(BaseModel):
     avg_gap_pct: float = 0.0
     pick_challenger_pct: float = 0.0
     total_gap_points: float = 0.0
-    gap_share_pct: float = 0.0
+    share_pct: float = 0.0
 
 
 class JudgePairAgreement(BaseModel):

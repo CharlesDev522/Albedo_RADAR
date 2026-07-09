@@ -144,7 +144,6 @@ def _build_gap_distribution(
     *,
     total_margin: float,
 ) -> list[GapDiffBin]:
-    type_gap_sum = sum(o.gap_pct for o in observations)
     specs = _GAP_TYPE_BIN_SPECS[gap_type]
     bins: list[GapDiffBin] = []
     for idx, (label, bin_min, bin_max) in enumerate(specs):
@@ -160,8 +159,7 @@ def _build_gap_distribution(
                 bin_min=bin_min,
                 bin_max=bin_max,
                 gap_points_sum=round(bin_gap_sum, 2),
-                share_of_total_margin_pct=round(bin_gap_sum / total_margin * 100, 1) if total_margin else 0.0,
-                share_within_type_pct=round(bin_gap_sum / type_gap_sum * 100, 1) if type_gap_sum else 0.0,
+                share_pct=round(bin_gap_sum / total_margin * 100, 1) if total_margin else 0.0,
             )
         )
     return bins
@@ -186,7 +184,7 @@ def _build_gap_type_summaries(
                 label=GAP_TYPE_LABELS[gap_type],
                 criteria=GAP_TYPE_CRITERIA[gap_type],
                 total_gap_points=round(type_gap_sum, 2),
-                margin_share_pct=round(type_gap_sum / total_margin * 100, 1) if total_margin else 0.0,
+                share_pct=round(type_gap_sum / total_margin * 100, 1) if total_margin else 0.0,
                 avg_gap=round(mean(o.gap_pct for o in type_obs), 2) if type_obs else 0.0,
                 gap_distribution=_build_gap_distribution(type_obs, gap_type, total_margin=total_margin),
             )
@@ -212,13 +210,13 @@ def _build_judge_margin_shares(observations: list[_Observation]) -> list[JudgeMa
                 short_name=judge_short_name(judge_model),
                 observations=n,
                 total_gap_points=round(gap_sum, 2),
-                gap_share_pct=round(gap_sum / total_gap * 100, 1) if total_gap else 0.0,
+                share_pct=round(gap_sum / total_gap * 100, 1) if total_gap else 0.0,
                 avg_gap=round(gap_sum / n, 2) if n else 0.0,
                 pick_challenger_pct=round(pick_ch / n * 100, 1) if n else 0.0,
                 by_gap_type=_build_gap_type_summaries(obs_list, total_margin=total_gap),
             )
         )
-    shares.sort(key=lambda s: (-s.gap_share_pct, s.judge_model))
+    shares.sort(key=lambda s: (-s.share_pct, s.judge_model))
     return shares
 
 
@@ -314,7 +312,7 @@ def _finalize_judge_summary(
         avg_gap_pct=round(mean(acc.gaps), 2) if n else 0.0,
         pick_challenger_pct=round(acc.pick_ch / n * 100, 1) if n else 0.0,
         total_gap_points=round(gap_sum, 2),
-        gap_share_pct=round(gap_sum / total_gap * 100, 1) if total_gap else 0.0,
+        share_pct=round(gap_sum / total_gap * 100, 1) if total_gap else 0.0,
     )
 
 

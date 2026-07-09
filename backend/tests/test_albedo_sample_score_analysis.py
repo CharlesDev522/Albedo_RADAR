@@ -71,16 +71,16 @@ def test_gap_type_margin_share_and_distribution():
     assert result.total_gap_points == 300.0
     assert len(result.gap_types) == 3
     decisive = next(t for t in result.gap_types if t.gap_type == "decisive")
-    assert decisive.margin_share_pct == 100.0
+    assert decisive.share_pct == 100.0
     assert decisive.total_gap_points == 300.0
     assert len(decisive.gap_distribution) == 5
     top_bin = max(decisive.gap_distribution, key=lambda b: b.gap_points_sum)
-    assert top_bin.share_of_total_margin_pct == 100.0
+    assert top_bin.share_pct == 100.0
 
     assert len(result.judge_margin_shares) == 3
-    assert result.judge_margin_shares[0].gap_share_pct == 33.3
+    assert result.judge_margin_shares[0].share_pct == 33.3
     assert len(result.judge_margin_shares[0].by_gap_type) == 3
-    assert result.duels[0].gap_types[2].margin_share_pct == 100.0
+    assert result.duels[0].gap_types[2].share_pct == 100.0
 
 
 def test_build_sample_score_analysis_aggregates_duels_and_judges():

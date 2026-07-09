@@ -689,8 +689,7 @@ export interface GapDiffBin {
   bin_min: number;
   bin_max: number;
   gap_points_sum: number;
-  share_of_total_margin_pct: number;
-  share_within_type_pct: number;
+  share_pct: number;
 }
 
 export interface GapTypeSummary {
@@ -698,7 +697,7 @@ export interface GapTypeSummary {
   label: string;
   criteria: string;
   total_gap_points: number;
-  margin_share_pct: number;
+  share_pct: number;
   avg_gap: number;
   gap_distribution: GapDiffBin[];
 }
@@ -708,7 +707,7 @@ export interface JudgeMarginShare {
   short_name: string;
   observations: number;
   total_gap_points: number;
-  gap_share_pct: number;
+  share_pct: number;
   avg_gap: number;
   pick_challenger_pct: number;
   by_gap_type: GapTypeSummary[];
@@ -723,7 +722,7 @@ export interface JudgeSampleGapSummary {
   avg_gap_pct: number;
   pick_challenger_pct: number;
   total_gap_points: number;
-  gap_share_pct: number;
+  share_pct: number;
 }
 
 export interface JudgePairAgreement {
@@ -811,6 +810,15 @@ import { fetchWithCache, invalidateApiCache } from "@/lib/apiCache";
 
 const EMPTY_GAP_TYPES: GapTypeSummary[] = [];
 
+function readSharePct(row: Record<string, unknown>): number {
+  const candidates = [row.share_pct, row.margin_share_pct, row.gap_share_pct, row.share_of_total_margin_pct];
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
 function normalizeGapTypeSummary(raw: unknown): GapTypeSummary | null {
   if (!raw || typeof raw !== "object") return null;
   const row = raw as Record<string, unknown>;
@@ -822,7 +830,7 @@ function normalizeGapTypeSummary(raw: unknown): GapTypeSummary | null {
     label: typeof row.label === "string" ? row.label : gapType,
     criteria: typeof row.criteria === "string" ? row.criteria : "",
     total_gap_points: Number(row.total_gap_points) || 0,
-    margin_share_pct: Number(row.margin_share_pct) || 0,
+    share_pct: readSharePct(row),
     avg_gap: Number(row.avg_gap) || 0,
     gap_distribution: bins
       .map((bin) => {
@@ -833,8 +841,7 @@ function normalizeGapTypeSummary(raw: unknown): GapTypeSummary | null {
           bin_min: Number(b.bin_min) || 0,
           bin_max: Number(b.bin_max) || 0,
           gap_points_sum: Number(b.gap_points_sum) || 0,
-          share_of_total_margin_pct: Number(b.share_of_total_margin_pct) || 0,
-          share_within_type_pct: Number(b.share_within_type_pct) || 0,
+          share_pct: readSharePct(b),
         };
       })
       .filter((bin): bin is GapDiffBin => bin !== null),
@@ -853,6 +860,7 @@ function normalizeSampleScoreAnalysis(
       const j = row as JudgeMarginShare & Record<string, unknown>;
       return {
         ...j,
+        share_pct: readSharePct(j),
         by_gap_type: Array.isArray(j.by_gap_type)
           ? j.by_gap_type.map(normalizeGapTypeSummary).filter((t): t is GapTypeSummary => t !== null)
           : EMPTY_GAP_TYPES,
@@ -868,12 +876,21 @@ function normalizeSampleScoreAnalysis(
         ? duel.gap_types.map(normalizeGapTypeSummary).filter((t): t is GapTypeSummary => t !== null)
         : EMPTY_GAP_TYPES,
       judge_margin_shares: Array.isArray(duel.judge_margin_shares)
-        ? duel.judge_margin_shares.map((j) => ({
-            ...j,
-            by_gap_type: Array.isArray(j.by_gap_type) ? j.by_gap_type : EMPTY_GAP_TYPES,
-          }))
+        ? duel.judge_margin_shares.map((j) => {
+            const row = j as JudgeMarginShare & Record<string, unknown>;
+            return {
+              ...j,
+              share_pct: readSharePct(row),
+              by_gap_type: Array.isArray(j.by_gap_type) ? j.by_gap_type : EMPTY_GAP_TYPES,
+            };
+          })
         : [],
-      judges: Array.isArray(duel.judges) ? duel.judges : [],
+      judges: Array.isArray(duel.judges)
+        ? duel.judges.map((j) => {
+            const row = j as JudgeSampleGapSummary & Record<string, unknown>;
+            return { ...j, share_pct: readSharePct(row) };
+          })
+        : [],
     };
   });
 
@@ -887,7 +904,12 @@ function normalizeSampleScoreAnalysis(
     judge_models: Array.isArray(raw.judge_models) ? raw.judge_models : [],
     gap_types: gapTypes,
     judge_margin_shares: judgeMarginShares,
-    by_judge: Array.isArray(raw.by_judge) ? raw.by_judge : [],
+    by_judge: Array.isArray(raw.by_judge)
+      ? raw.by_judge.map((j) => {
+          const row = j as JudgeSampleGapSummary & Record<string, unknown>;
+          return { ...j, share_pct: readSharePct(row) };
+        })
+      : [],
     judge_pairs: Array.isArray(raw.judge_pairs) ? raw.judge_pairs : [],
     duels,
     updated_at: raw.updated_at ?? null,
