@@ -357,7 +357,7 @@ export default function AlbedoDuelPanel() {
   const [queueData, setQueueData] = useState<AlbedoEvalQueueOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [section, setSection] = useState<Section>("overview");
+  const [section, setSection] = useState<Section>("duels");
   const [scoringDuelId, setScoringDuelId] = useState<string | null>(null);
 
   const queuePollActive = panelActive && (section === "overview" || section === "dq");
@@ -618,9 +618,9 @@ export default function AlbedoDuelPanel() {
           <AlbedoDatasetBuilderPanel />
           <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge duel scores</h3>
           <p className="text-[9px] text-zinc-600 mb-2">
-            Each judge cell: ch/k win-rates and pick with margin. Red = judge picks challenger,
-            green = judge picks king. Click scoring gaps for rubric questions where GLM and Qwen
-            both score 0 on challenger and king sides.
+            Finished duels only ({(data.recent_duels ?? []).length} shown, {data.total_duels} total).
+            In-progress evals appear in the live duel banner above. Each judge cell: red = picks
+            challenger, green = picks king. Click scoring gaps for dual-zero rubric questions.
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-[10px] min-w-[920px]">
@@ -642,7 +642,17 @@ export default function AlbedoDuelPanel() {
                 </tr>
               </thead>
               <tbody>
-                {(data.recent_duels ?? []).map((duel) => (
+                {(data.recent_duels ?? []).length === 0 ? (
+                  <tr>
+                    <td colSpan={duelColSpan} className="py-6 text-center text-[10px] text-zinc-500">
+                      No finished duel results in the dashboard feed.
+                      {data.current_eval
+                        ? " A duel may be in progress — check the live banner above."
+                        : " Check API connectivity or Hippius dashboard.json."}
+                    </td>
+                  </tr>
+                ) : (
+                (data.recent_duels ?? []).map((duel) => (
                   <DuelRow
                     key={duel.eval_run_id}
                     duel={duel}
@@ -653,7 +663,8 @@ export default function AlbedoDuelPanel() {
                       setScoringDuelId((prev) => (prev === duel.eval_run_id ? null : duel.eval_run_id))
                     }
                   />
-                ))}
+                ))
+                )}
               </tbody>
             </table>
           </div>

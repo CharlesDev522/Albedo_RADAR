@@ -1603,7 +1603,12 @@ def build_analysis_overview(
         for day, v in sorted(timeline_raw.items())
     ]
 
-    recent_duels = [_duel_summary(r, miner_lookup) for r in eval_runs[:60]]
+    recent_runs = sorted(
+        eval_runs,
+        key=lambda r: str(r.get("finished_at") or ""),
+        reverse=True,
+    )
+    recent_duels = [_duel_summary(r, miner_lookup) for r in recent_runs[:60]]
 
     lookup_note = ""
     if miner_lookup and miner_lookup.by_hotkey:
