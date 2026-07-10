@@ -38,7 +38,7 @@ class AlbedoDatasetBuildSummary(BaseModel):
     polarity: ScoringConsensusPolarity = "zero"
     export_filename: str = "binary-dual-zero-dataset.jsonl"
     dedup_script_filename: str = "dedup_dual_zero_jsonl.py"
-    recent_duels_limit: int = 20
+    recent_duels_limit: int = 16
     binary_duels_total: int = 0
     binary_duels_with_scoring: int = 0
     binary_duels_scanned: int = 0

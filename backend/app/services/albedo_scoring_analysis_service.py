@@ -29,7 +29,7 @@ QWEN_JUDGE_HINT = "qwen"
 CHALLENGER_SIDE = "challenger"
 KING_SIDE_RAW = "previous_king"
 
-_DATASET_RECENT_DUELS_LIMIT = 20
+_DATASET_RECENT_DUELS_LIMIT = 16
 _DATASET_EXPORT_FILENAMES: dict[ScoringConsensusPolarity, str] = {
     "zero": "binary-dual-zero-dataset.jsonl",
     "one": "binary-dual-one-dataset.jsonl",

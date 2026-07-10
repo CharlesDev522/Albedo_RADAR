@@ -236,7 +236,7 @@ def test_build_binary_dual_zero_dataset_dedupes_across_duels(monkeypatch):
     assert result.summary.binary_duels_total == 2
     assert result.summary.binary_duels_with_scoring == 2
     assert result.summary.binary_duels_scanned == 2
-    assert result.summary.recent_duels_limit == 20
+    assert result.summary.recent_duels_limit == 16
     assert result.summary.binary_duels_with_dual_zero == 2
     assert result.summary.samples_before_dedup == 3
     assert result.summary.unique_samples == 2
@@ -285,7 +285,7 @@ def test_build_binary_dual_one_dataset_uses_one_polarity(monkeypatch):
     assert result.records[0]["questions"][0]["question_id"] == "q_01"
 
 
-def test_build_binary_dataset_scans_only_latest_twenty_duels(monkeypatch):
+def test_build_binary_dataset_scans_only_latest_sixteen_duels(monkeypatch):
     rows = [_sample_row(sample_id="dataset/a:1:1")]
     fetched_urls: list[str] = []
 
