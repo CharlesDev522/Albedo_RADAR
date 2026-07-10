@@ -22,6 +22,12 @@ import {
 } from "@/lib/api";
 import { useSubnet } from "@/lib/useSubnet";
 import { usePageVisibility } from "@/lib/usePageVisibility";
+import {
+  DEFAULT_JUDGE_COLUMNS,
+  judgeColumnHeader,
+  judgeShortFromModel,
+  normalizeJudgeColumnKey,
+} from "@/lib/judgeLabels";
 
 const POLL_MS = 30_000;
 const QUEUE_POLL_MS = 8_000;
@@ -180,18 +186,6 @@ function KingTenureCard({ tenure }: { tenure: AlbedoKingTenure }) {
   );
 }
 
-function judgeShortFromModel(judge: string): string {
-  const slash = judge.lastIndexOf("/");
-  return slash >= 0 ? judge.slice(slash + 1) : judge;
-}
-
-function judgeShortHeader(name: string): string {
-  if (name.startsWith("glm")) return "GLM";
-  if (name.startsWith("qwen")) return "Qwen";
-  if (name.startsWith("deepseek")) return "DS";
-  return name.split("-")[0];
-}
-
 function JudgeScoreCell({ vote }: { vote: AlbedoDuelJudgeVote | undefined }) {
   if (!vote) {
     return <td className="py-1.5 px-1 text-center text-zinc-700 border-l border-zinc-800/50">—</td>;
@@ -231,13 +225,15 @@ function judgeVoteMap(duel: AlbedoDuelSummary): Record<string, AlbedoDuelJudgeVo
   const map: Record<string, AlbedoDuelJudgeVote> = {};
   for (const v of duel.judge_votes ?? []) {
     for (const key of [v.short_name, v.judge, judgeShortFromModel(v.judge)]) {
-      if (key) map[key] = v;
+      if (!key) continue;
+      map[key] = v;
+      map[normalizeJudgeColumnKey(key)] = v;
     }
   }
   return map;
 }
 
-const JUDGE_COLUMNS = ["glm-5.2", "qwen3.5-397b-a17b", "deepseek-v3.2"];
+const JUDGE_COLUMNS = [...DEFAULT_JUDGE_COLUMNS];
 
 function DuelRow({
   duel,
@@ -409,15 +405,22 @@ export default function AlbedoDuelPanel() {
   }, [queuePollActive, refreshQueue]);
 
   const judgeOrder = useMemo(() => {
-    const fromChain = (data?.judge_models ?? []).map(judgeShortFromModel).filter(Boolean);
-    if (fromChain.length > 0) return fromChain;
     const seen = new Set<string>();
+    const order: string[] = [];
+    const push = (raw: string) => {
+      const key = normalizeJudgeColumnKey(judgeShortFromModel(raw) || raw);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      order.push(key);
+    };
+    for (const j of data?.judge_models ?? []) push(j);
     for (const duel of data?.recent_duels ?? []) {
       for (const v of duel.judge_votes ?? []) {
-        if (v.short_name) seen.add(v.short_name);
+        push(v.short_name);
+        push(v.judge);
       }
     }
-    return seen.size > 0 ? [...seen] : JUDGE_COLUMNS;
+    return order.length > 0 ? order : [...JUDGE_COLUMNS];
   }, [data]);
 
   const duelColSpan = 7 + judgeOrder.length;
@@ -624,7 +627,7 @@ export default function AlbedoDuelPanel() {
                   <th className="text-left py-1 pr-2">King</th>
                   {judgeOrder.map((name) => (
                     <th key={name} className="text-center py-1 px-1 border-l border-zinc-800/50 text-zinc-400 min-w-[68px]">
-                      <div>{judgeShortHeader(name)}</div>
+                      <div>{judgeColumnHeader(name)}</div>
                       <div className="text-[8px] font-normal text-zinc-600">pick / Δ</div>
                     </th>
                   ))}

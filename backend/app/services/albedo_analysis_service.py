@@ -73,9 +73,10 @@ def parse_model_uri(model_uri: str | None) -> tuple[str, str, str]:
 
 
 def judge_short_name(judge: str) -> str:
-    if "/" in judge:
-        return judge.rsplit("/", 1)[-1]
-    return judge
+    name = judge.rsplit("/", 1)[-1] if "/" in judge else judge
+    if name.lower().startswith("glm"):
+        return "glm"
+    return name
 
 
 def _parse_iso_dt(iso: str | None) -> datetime | None:

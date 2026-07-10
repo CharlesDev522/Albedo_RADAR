@@ -1,6 +1,6 @@
 """Tests for Albedo duel analysis service."""
 
-from app.services.albedo_analysis_service import build_analysis_overview, parse_model_uri
+from app.services.albedo_analysis_service import build_analysis_overview, judge_short_name, parse_model_uri
 
 
 def test_parse_model_uri():
@@ -10,6 +10,12 @@ def test_parse_model_uri():
     assert ns == "arboshelper"
     assert name == "albedo-qwen3.6-35b-1-3-final"
     assert uri.startswith("arboshelper/")
+
+
+def test_judge_short_name_normalizes_glm_versions():
+    assert judge_short_name("z-ai/glm-5.1") == "glm"
+    assert judge_short_name("z-ai/glm-5.2") == "glm"
+    assert judge_short_name("qwen/qwen3.5-397b-a17b") == "qwen3.5-397b-a17b"
 
 
 def test_build_analysis_overview_counts_and_history():
