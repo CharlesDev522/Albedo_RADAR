@@ -3,10 +3,15 @@
 from app.integrations.model_registry import infer_repo_host, remote_digests_match
 
 
+_HF_SHA40 = "a" * 40
+
+
 def test_infer_repo_host():
-    assert infer_repo_host("sha256:abc") == "hippius"
+    assert infer_repo_host("sha256:" + "a" * 64) == "hippius"
     assert infer_repo_host("revision:deadbeef") == "huggingface"
     assert infer_repo_host("hf:deadbeef") == "huggingface"
+    assert infer_repo_host(_HF_SHA40) == "huggingface"
+    assert infer_repo_host("a" * 64) == "huggingface"
 
 
 def test_remote_digests_match_revision():

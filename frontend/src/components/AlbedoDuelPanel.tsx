@@ -11,7 +11,7 @@ import AlbedoKingReignDatasetPanel from "@/components/AlbedoKingReignDatasetPane
 import AlbedoSampleScoreAnalysisPanel from "@/components/AlbedoSampleScoreAnalysisPanel";
 import {
   api,
-  hippiusModelUrl,
+  modelLinkFromUri,
   shortAddr,
   shortRepo,
   type AlbedoAnalysisOverview,
@@ -60,8 +60,8 @@ function fmtTime(iso: string | null | undefined): string {
   });
 }
 
-function modelLink(modelUri: string): string {
-  return hippiusModelUrl(modelUri.split("@")[0]);
+function modelLink(modelUri: string): string | null {
+  return modelLinkFromUri(modelUri);
 }
 
 function scoringModeLabel(mode: string | null | undefined): string {
@@ -237,7 +237,7 @@ function judgeVoteMap(duel: AlbedoDuelSummary): Record<string, AlbedoDuelJudgeVo
   return map;
 }
 
-const JUDGE_COLUMNS = ["glm-5.1", "qwen3.5-397b-a17b", "deepseek-v3.2"];
+const JUDGE_COLUMNS = ["glm-5.2", "qwen3.5-397b-a17b", "deepseek-v3.2"];
 
 function DuelRow({
   duel,
@@ -272,9 +272,20 @@ function DuelRow({
         )}
       </td>
       <td className="py-1.5 pr-2">
-        <a href={modelLink(duel.model_uri)} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline block truncate max-w-[130px]">
-          {shortRepo(duel.repo ?? `${duel.namespace}/${duel.model_name}`, 26)}
-        </a>
+        {modelLink(duel.model_uri) ? (
+          <a
+            href={modelLink(duel.model_uri)!}
+            target="_blank"
+            rel="noreferrer"
+            className="text-sky-300 hover:underline block truncate max-w-[130px]"
+          >
+            {shortRepo(duel.repo ?? `${duel.namespace}/${duel.model_name}`, 26)}
+          </a>
+        ) : (
+          <span className="block truncate max-w-[130px] text-zinc-300">
+            {shortRepo(duel.repo ?? `${duel.namespace}/${duel.model_name}`, 26)}
+          </span>
+        )}
         <span className="text-[9px] text-zinc-600">uid {duel.uid}</span>
       </td>
       <td className="py-1.5 pr-2 text-zinc-500 truncate max-w-[90px]">
@@ -574,7 +585,11 @@ export default function AlbedoDuelPanel() {
                       <td className="py-1 pr-2 mono text-amber-300">v{entry.king_version}</td>
                       <td className="py-1 pr-2 text-zinc-500 whitespace-nowrap">{fmtTime(entry.finished_at)}</td>
                       <td className="py-1 pr-2 truncate max-w-[160px]" title={entry.repo ?? entry.model_name}>
-                        <EntityNameCell repo={entry.repo ?? entry.model_name} coldkey={entry.coldkey} />
+                        <EntityNameCell
+                          repo={entry.repo ?? entry.model_name}
+                          coldkey={entry.coldkey}
+                          modelUri={entry.model_uri}
+                        />
                       </td>
                       <td className="py-1 pr-2 text-zinc-500">
                         {entry.defeated_model_name ? `v${entry.defeated_king_version}` : "—"}

@@ -32,6 +32,8 @@ MODEL_COMMIT_VERSIONS = ALL_MODEL_VERSIONS  # backwards-compatible alias
 _PIPE_PREFIX_RE = re.compile(r"^v\d+\|")
 # Backwards-compatible alias
 _MODEL_COMMIT_RE = _PIPE_PREFIX_RE
+_HIPPIUS_PIN_RE = re.compile(r"^sha256:[0-9a-f]{64}$", re.IGNORECASE)
+_V7_PIN_RE = re.compile(r"^(sha256:[0-9a-f]{64}|[0-9a-f]{40}|[0-9a-f]{64})$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -50,12 +52,18 @@ class Commit:
     commit_source: str  # "active" | "revealed"
 
 
+def _valid_pipe_digest(version: str, digest: str) -> bool:
+    if version == "v7":
+        return bool(_V7_PIN_RE.match(digest))
+    return bool(_HIPPIUS_PIN_RE.match(digest))
+
+
 def parse_pipe_commit(
     data: str,
     chain_hotkey: str,
     allowed_versions: frozenset[str],
 ) -> dict[str, Any] | None:
-    """Parse a pipe reveal (v5/v6/v7|repo|sha256:…) when version is allowed."""
+    """Parse a pipe reveal (v5/v6/v7|repo|pin) when version is allowed."""
     if not data or not _PIPE_PREFIX_RE.match(data):
         return None
     parts = data.split("|")
@@ -64,7 +72,7 @@ def parse_pipe_commit(
     version, repo, digest = parts
     if version not in allowed_versions:
         return None
-    if "/" not in repo or not digest.startswith("sha256:"):
+    if "/" not in repo or not _valid_pipe_digest(version, digest):
         return None
     return {
         "version": version,

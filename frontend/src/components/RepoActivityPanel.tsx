@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import LatestHippiusReposPanel from "@/components/LatestHippiusReposPanel";
+import LatestHuggingFaceReposPanel from "@/components/LatestHuggingFaceReposPanel";
 import {
   api,
   hfModelUrl,
@@ -11,6 +12,7 @@ import {
   shortHash,
   shortRepo,
   type HippiusLatestRepo,
+  type HuggingFaceLatestRepo,
   type RepoActivityEvent,
   type RepoActivityOverview,
   type RepoTrackEntry,
@@ -135,6 +137,9 @@ export default function RepoActivityPanel() {
   const [hippiusLatest, setHippiusLatest] = useState<HippiusLatestRepo[]>([]);
   const [hippiusIndexTotal, setHippiusIndexTotal] = useState<number | null>(null);
   const [hippiusLatestError, setHippiusLatestError] = useState<string | null>(null);
+  const [hfLatest, setHfLatest] = useState<HuggingFaceLatestRepo[]>([]);
+  const [hfIndexTotal, setHfIndexTotal] = useState<number | null>(null);
+  const [hfLatestError, setHfLatestError] = useState<string | null>(null);
   const [tracks, setTracks] = useState<RepoTrackEntry[]>([]);
   const [feed, setFeed] = useState<RepoActivityEvent[]>([]);
   const [family, setFamily] = useState<FamilyFilter>("all");
@@ -177,6 +182,17 @@ export default function RepoActivityPanel() {
       setHippiusLatestError(
         e instanceof Error ? e.message : "Hippius Hub index unavailable"
       );
+    }
+
+    try {
+      const latest = await api.getHuggingFaceLatestRepos(TRACKED_REPOS_PREVIEW, forceRefresh);
+      setHfLatest(latest.repos);
+      setHfIndexTotal(latest.total_indexed);
+      setHfLatestError(null);
+    } catch (e) {
+      setHfLatest([]);
+      setHfIndexTotal(null);
+      setHfLatestError(e instanceof Error ? e.message : "Hugging Face Hub unavailable");
     }
   }, [subnet, familyParam]);
 
@@ -338,12 +354,20 @@ export default function RepoActivityPanel() {
         </div>
       )}
 
-      <LatestHippiusReposPanel
-        repos={hippiusLatest}
-        loading={loading && hippiusLatest.length === 0 && !hippiusLatestError}
-        totalHint={hippiusIndexTotal}
-        error={hippiusLatestError}
-      />
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+        <LatestHippiusReposPanel
+          repos={hippiusLatest}
+          loading={loading && hippiusLatest.length === 0 && !hippiusLatestError}
+          totalHint={hippiusIndexTotal}
+          error={hippiusLatestError}
+        />
+        <LatestHuggingFaceReposPanel
+          repos={hfLatest}
+          loading={loading && hfLatest.length === 0 && !hfLatestError}
+          totalHint={hfIndexTotal}
+          error={hfLatestError}
+        />
+      </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
         <section className="panel xl:col-span-5">

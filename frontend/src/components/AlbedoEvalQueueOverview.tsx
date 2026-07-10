@@ -1,6 +1,6 @@
 "use client";
 
-import { hippiusModelUrl, shortAddr, shortRepo, type AlbedoEvalQueueOverview } from "@/lib/api";
+import { modelLinkFromUri, shortAddr, shortRepo, type AlbedoEvalQueueOverview } from "@/lib/api";
 
 function fmtTime(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -14,7 +14,7 @@ function fmtTime(iso: string | null | undefined): string {
 
 function modelLink(modelUri: string | null | undefined): string | null {
   if (!modelUri) return null;
-  return hippiusModelUrl(modelUri.split("@")[0]);
+  return modelLinkFromUri(modelUri);
 }
 
 function repoLabel(

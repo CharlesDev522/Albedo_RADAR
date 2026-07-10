@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -20,6 +21,10 @@ from app.integrations.huggingface_registry import HuggingFaceRegistryClient
 logger = logging.getLogger(__name__)
 
 RepoHost = Literal["hippius", "huggingface"]
+
+_HIPPIUS_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$", re.IGNORECASE)
+_HF_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
+_HF_GIT_SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -52,6 +57,10 @@ def infer_repo_host(digest: str | None) -> RepoHost:
     """Infer registry from on-chain digest format."""
     d = (digest or "").strip().lower()
     if d.startswith("revision:") or d.startswith("hf:"):
+        return "huggingface"
+    if _HIPPIUS_DIGEST_RE.match(d):
+        return "hippius"
+    if _HF_GIT_SHA_RE.match(d) or _HF_GIT_SHA256_RE.match(d):
         return "huggingface"
     return "hippius"
 

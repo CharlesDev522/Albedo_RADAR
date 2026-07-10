@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { EntityNameCell } from "@/lib/entityLabels";
-import { hippiusModelUrl, shortAddr, type AlbedoEvalFail, type AlbedoEvalQueueOverview } from "@/lib/api";
+import { modelLinkFromUri, shortAddr, type AlbedoEvalFail, type AlbedoEvalQueueOverview } from "@/lib/api";
 
 type FaultFilter = "all" | "MINER_FAULT" | "INFRA_FAULT";
 
@@ -27,7 +27,7 @@ function faultBadge(faultClass: string | null | undefined): string {
 }
 
 function FailRow({ row }: { row: AlbedoEvalFail }) {
-  const url = row.model_uri ? hippiusModelUrl(row.model_uri.split("@")[0]) : null;
+  const url = row.model_uri ? modelLinkFromUri(row.model_uri) : null;
 
   return (
     <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/20 align-top">
@@ -35,11 +35,11 @@ function FailRow({ row }: { row: AlbedoEvalFail }) {
       <td className="py-1.5 pr-2">
         {url ? (
           <a href={url} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline block truncate max-w-[180px]">
-            <EntityNameCell repo={row.repo ?? undefined} coldkey={row.coldkey} />
+            <EntityNameCell repo={row.repo ?? undefined} coldkey={row.coldkey} modelUri={row.model_uri} />
           </a>
         ) : (
           <span className="block truncate max-w-[180px]">
-            <EntityNameCell repo={row.repo ?? undefined} coldkey={row.coldkey} />
+            <EntityNameCell repo={row.repo ?? undefined} coldkey={row.coldkey} modelUri={row.model_uri} />
           </span>
         )}
         <span className="text-[9px] text-zinc-600">uid {row.uid ?? "—"}</span>

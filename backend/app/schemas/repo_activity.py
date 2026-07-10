@@ -103,3 +103,18 @@ class HippiusLatestRepo(BaseModel):
 class HippiusLatestResponse(BaseModel):
     total_indexed: int
     repos: list[HippiusLatestRepo] = Field(default_factory=list)
+
+
+class HuggingFaceLatestRepo(BaseModel):
+    repo: str
+    model_family: str | None = None
+    digest: str
+    indexed_at: datetime | None = None
+    file_count: int | None = None
+    total_size_bytes: int | None = None
+    hub_url: str
+
+
+class HuggingFaceLatestResponse(BaseModel):
+    total_indexed: int
+    repos: list[HuggingFaceLatestRepo] = Field(default_factory=list)

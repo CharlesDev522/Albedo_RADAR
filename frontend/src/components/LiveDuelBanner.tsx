@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, hippiusModelUrl, shortRepo, type AlbedoLiveDuel, type AlbedoLiveDuelParticipant } from "@/lib/api";
+import { api, modelLinkFromUri, shortRepo, type AlbedoLiveDuel, type AlbedoLiveDuelParticipant } from "@/lib/api";
 import { DEFAULT_SUBNET } from "@/lib/subnets";
 import { useSubnet } from "@/lib/useSubnet";
 import { usePageVisibility } from "@/lib/usePageVisibility";
@@ -18,7 +18,7 @@ function fmtElapsed(sec: number | null | undefined): string {
 
 function modelUrl(p: AlbedoLiveDuelParticipant | null | undefined): string | null {
   if (!p?.model_uri) return null;
-  return hippiusModelUrl(p.model_uri.split("@")[0]);
+  return modelLinkFromUri(p.model_uri);
 }
 
 function repoLabel(p: AlbedoLiveDuelParticipant | null | undefined): string {

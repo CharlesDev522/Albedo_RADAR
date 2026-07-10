@@ -253,6 +253,13 @@ export interface HippiusLatestRepo {
   hub_url: string;
 }
 
+export interface HuggingFaceLatestResponse {
+  total_indexed: number;
+  repos: HuggingFaceLatestRepo[];
+}
+
+export type HuggingFaceLatestRepo = HippiusLatestRepo;
+
 export interface RepoTrackEntry {
   id: number;
   subnet: number;
@@ -1051,6 +1058,10 @@ export const api = {
     fetchApi<HippiusLatestResponse>(`/repo-activity/hippius-latest?limit=${limit}`, {
       forceRefresh,
     }),
+  getHuggingFaceLatestRepos: (limit = 10, forceRefresh = false) =>
+    fetchApi<HuggingFaceLatestResponse>(`/repo-activity/huggingface-latest?limit=${limit}`, {
+      forceRefresh,
+    }),
   syncRepoActivity: async (subnet = DEFAULT_SUBNET) => {
     const res = await fetch(`${apiBase()}/repo-activity/sync?subnet=${subnet}`, {
       method: "POST",
@@ -1262,19 +1273,17 @@ export const api = {
   },
 };
 
-export function hippiusModelUrl(repo: string, branch = "main"): string {
-  const clean = repo.replace(/^\/+|\/+$/g, "");
-  return `https://hub.hippius.com/models/${clean}/${branch}`;
-}
-
-export function hfModelUrl(repo: string, digest?: string): string {
-  const clean = repo.replace(/^\/+|\/+$/g, "");
-  if (digest?.startsWith("revision:")) {
-    return `https://huggingface.co/${clean}/tree/${digest.slice("revision:".length)}`;
-  }
-  if (digest) return `https://huggingface.co/${clean}/tree/${digest}`;
-  return `https://huggingface.co/${clean}`;
-}
+export {
+  hfModelUrl,
+  hippiusModelUrl,
+  hubRepoUrl,
+  inferRepoHostFromDigest,
+  inferRepoHostFromModelUri,
+  isHfModelUri,
+  modelLinkFromUri,
+  parseModelRepo,
+  type RepoHost,
+} from "@/lib/modelHub";
 
 export function modelCommitUrl(
   repo: string,
@@ -1298,7 +1307,8 @@ export function shortRepo(repo: string, max = 28): string {
 }
 
 export function shortHash(digest: string): string {
-  return digest.replace("sha256:", "").slice(0, 10);
+  const d = digest.replace(/^revision:/, "").replace(/^hf:/, "").replace("sha256:", "");
+  return d.slice(0, 10);
 }
 
 export { DEFAULT_SUBNET };

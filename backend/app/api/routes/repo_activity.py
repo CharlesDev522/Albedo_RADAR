@@ -12,12 +12,14 @@ from app.db.session import get_db
 from app.processing.repo_track_builder import RepoTrackBuilder
 from app.schemas.repo_activity import (
     HippiusLatestResponse,
+    HuggingFaceLatestResponse,
     RepoActivityEventResponse,
     RepoActivityOverview,
     RepoRevisionResponse,
     RepoTrackEntry,
 )
 from app.services.hippius_latest_service import fetch_latest_hippius_repos
+from app.services.huggingface_latest_service import fetch_latest_huggingface_repos
 from app.services.repo_activity_service import merged_repo_tracks
 
 logger = logging.getLogger(__name__)
@@ -158,6 +160,19 @@ async def repo_revision_history(
     )
     rows = (await db.execute(q)).scalars().all()
     return [RepoRevisionResponse.model_validate(r) for r in rows]
+
+
+@router.get("/huggingface-latest", response_model=HuggingFaceLatestResponse)
+async def huggingface_latest_repos(
+    limit: int = Query(default=10, ge=1, le=50),
+) -> HuggingFaceLatestResponse:
+    """Live latest Albedo repos from Hugging Face Hub search."""
+    try:
+        total, repos = await fetch_latest_huggingface_repos(limit=limit)
+        return HuggingFaceLatestResponse(total_indexed=total, repos=repos)
+    except Exception:
+        logger.warning("huggingface-latest fetch failed", exc_info=True)
+        return HuggingFaceLatestResponse(total_indexed=0, repos=[])
 
 
 @router.get("/hippius-latest", response_model=HippiusLatestResponse)
