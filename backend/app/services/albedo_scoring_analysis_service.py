@@ -31,6 +31,7 @@ CHALLENGER_SIDE = "challenger"
 KING_SIDE_RAW = "previous_king"
 
 _DATASET_RECENT_DUELS_LIMIT = 20
+_DATASET_MIN_QUESTIONS_PER_SAMPLE = 5
 _DATASET_EXPORT_FILENAMES: dict[ScoringConsensusPolarity, str] = {
     "zero": "binary-dual-zero-dataset.jsonl",
     "one": "binary-dual-one-dataset.jsonl",
@@ -269,16 +270,32 @@ def build_sample_export_record(sample: AlbedoSampleDualZeros) -> dict[str, Any]:
     }
 
 
+def sample_meets_export_question_minimum(sample: AlbedoSampleDualZeros) -> bool:
+    """Exported JSONL rows require more than five consensus question_ids per sample."""
+    return len(sample.questions) > _DATASET_MIN_QUESTIONS_PER_SAMPLE
+
+
+def export_records_from_analysis(
+    analysis: AlbedoScoringAnalysis,
+) -> tuple[list[dict[str, Any]], int]:
+    records: list[dict[str, Any]] = []
+    skipped = 0
+    for sample in analysis.samples:
+        if sample_meets_export_question_minimum(sample):
+            records.append(build_sample_export_record(sample))
+        else:
+            skipped += 1
+    return records, skipped
+
+
 def build_sample_export_json(sample: AlbedoSampleDualZeros) -> str:
     return json.dumps(build_sample_export_record(sample), ensure_ascii=False) + "\n"
 
 
 def build_consensus_export_jsonl(analysis: AlbedoScoringAnalysis) -> str:
     """One JSON line per matching sample in a single JSONL file."""
-    lines = [
-        json.dumps(build_sample_export_record(sample), ensure_ascii=False)
-        for sample in analysis.samples
-    ]
+    records, _ = export_records_from_analysis(analysis)
+    lines = [json.dumps(record, ensure_ascii=False) for record in records]
     return "\n".join(lines) + ("\n" if lines else "")
 
 
@@ -403,9 +420,10 @@ async def _collect_consensus_records(
     fresh: bool,
     polarity: ScoringConsensusPolarity,
     client: httpx.AsyncClient,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, int]:
     all_records: list[dict[str, Any]] = []
     duels_with_matches = 0
+    skipped_samples = 0
     for run in binary_runs:
         url = _scoring_results_url(run)
         if not url:
@@ -426,12 +444,13 @@ async def _collect_consensus_records(
                 exc_info=True,
             )
             continue
-        if not analysis.samples:
+        run_records, run_skipped = export_records_from_analysis(analysis)
+        skipped_samples += run_skipped
+        if not run_records:
             continue
         duels_with_matches += 1
-        for sample in analysis.samples:
-            all_records.append(build_sample_export_record(sample))
-    return all_records, duels_with_matches
+        all_records.extend(run_records)
+    return all_records, duels_with_matches, skipped_samples
 
 
 def _dataset_cache_key(polarity: ScoringConsensusPolarity) -> str:
@@ -476,7 +495,7 @@ async def build_binary_consensus_dataset(
     binary_runs = _recent_binary_eval_runs(eval_runs)
 
     async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:
-        all_records, duels_with_matches = await _collect_consensus_records(
+        all_records, duels_with_matches, skipped_samples = await _collect_consensus_records(
             binary_runs,
             settings=settings,
             fresh=fresh,
@@ -491,6 +510,7 @@ async def build_binary_consensus_dataset(
         export_filename=_DATASET_EXPORT_FILENAMES[polarity],
         dedup_script_filename=_DEDUP_SCRIPT_FILENAME,
         build_mode="recent",
+        min_questions_per_sample=_DATASET_MIN_QUESTIONS_PER_SAMPLE + 1,
         recent_duels_limit=_DATASET_RECENT_DUELS_LIMIT,
         binary_duels_total=binary_total,
         binary_duels_with_scoring=len(binary_runs_all),
@@ -499,6 +519,7 @@ async def build_binary_consensus_dataset(
         samples_before_dedup=len(all_records),
         unique_samples=len(unique_records),
         duplicates_removed=duplicates_removed,
+        samples_skipped_min_questions=skipped_samples,
         total_dual_zero_questions=total_questions,
     )
     result = DatasetBuildResult(summary=summary, records=unique_records)
@@ -568,6 +589,7 @@ async def build_binary_consensus_dataset_for_kings(
     async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:
         all_records: list[dict[str, Any]] = []
         duels_with_matches = 0
+        skipped_samples = 0
         matches_by_king: dict[int, int] = {v: 0 for v in ordered_versions}
         for run in binary_runs:
             url = _scoring_results_url(run)
@@ -589,14 +611,15 @@ async def build_binary_consensus_dataset_for_kings(
                     exc_info=True,
                 )
                 continue
-            if not analysis.samples:
+            run_records, run_skipped = export_records_from_analysis(analysis)
+            skipped_samples += run_skipped
+            if not run_records:
                 continue
             duels_with_matches += 1
             king_version = run_king.get(str(run.get("eval_run_id") or ""))
             if king_version is not None:
                 matches_by_king[king_version] = matches_by_king.get(king_version, 0) + 1
-            for sample in analysis.samples:
-                all_records.append(build_sample_export_record(sample))
+            all_records.extend(run_records)
 
     for slice_row in breakdown:
         slice_row.binary_duels_with_dual_zero = matches_by_king.get(slice_row.king_version, 0)
@@ -610,6 +633,7 @@ async def build_binary_consensus_dataset_for_kings(
         build_mode="king_reign",
         king_versions=ordered_versions,
         king_reign_breakdown=breakdown,
+        min_questions_per_sample=_DATASET_MIN_QUESTIONS_PER_SAMPLE + 1,
         recent_duels_limit=_DATASET_RECENT_DUELS_LIMIT,
         binary_duels_total=binary_total,
         binary_duels_with_scoring=len(binary_runs_all),
@@ -618,6 +642,7 @@ async def build_binary_consensus_dataset_for_kings(
         samples_before_dedup=len(all_records),
         unique_samples=len(unique_records),
         duplicates_removed=duplicates_removed,
+        samples_skipped_min_questions=skipped_samples,
         total_dual_zero_questions=total_questions,
     )
     result = DatasetBuildResult(summary=summary, records=unique_records)
@@ -731,8 +756,12 @@ def build_consensus_export(
     winner: str,
 ) -> ExportPayload:
     polarity = analysis.polarity
-    if not analysis.samples:
-        raise LookupError(f"No {_polarity_label(polarity)} samples to export")
+    exportable = [s for s in analysis.samples if sample_meets_export_question_minimum(s)]
+    if not exportable:
+        raise LookupError(
+            f"No {_polarity_label(polarity)} samples with more than "
+            f"{_DATASET_MIN_QUESTIONS_PER_SAMPLE} questions to export"
+        )
 
     filename = duel_export_filename(
         king_uid=king_uid,
@@ -740,8 +769,9 @@ def build_consensus_export(
         winner=winner,
         polarity=polarity,
     )
+    filtered = analysis.model_copy(update={"samples": exportable})
     return ExportPayload(
-        content=build_consensus_export_jsonl(analysis).encode("utf-8"),
+        content=build_consensus_export_jsonl(filtered).encode("utf-8"),
         filename=filename,
         media_type="application/x-ndjson",
     )

@@ -49,6 +49,7 @@ class AlbedoDatasetBuildSummary(BaseModel):
     build_mode: Literal["recent", "king_reign"] = "recent"
     king_versions: list[int] = Field(default_factory=list)
     king_reign_breakdown: list[KingReignDatasetSlice] = Field(default_factory=list)
+    min_questions_per_sample: int = 6
     recent_duels_limit: int = 20
     binary_duels_total: int = 0
     binary_duels_with_scoring: int = 0
@@ -57,4 +58,5 @@ class AlbedoDatasetBuildSummary(BaseModel):
     samples_before_dedup: int = 0
     unique_samples: int = 0
     duplicates_removed: int = 0
+    samples_skipped_min_questions: int = 0
     total_dual_zero_questions: int = 0

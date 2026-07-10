@@ -657,6 +657,7 @@ export interface AlbedoDatasetBuildSummary {
   build_mode?: "recent" | "king_reign";
   king_versions?: number[];
   king_reign_breakdown?: KingReignDatasetSlice[];
+  min_questions_per_sample?: number;
   recent_duels_limit: number;
   binary_duels_total: number;
   binary_duels_with_scoring: number;
@@ -665,6 +666,7 @@ export interface AlbedoDatasetBuildSummary {
   samples_before_dedup: number;
   unique_samples: number;
   duplicates_removed: number;
+  samples_skipped_min_questions?: number;
   total_dual_zero_questions: number;
 }
 

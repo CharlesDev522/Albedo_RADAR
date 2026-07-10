@@ -119,8 +119,9 @@ export default function AlbedoDatasetBuilderPanel() {
           </div>
           <p className="text-[10px] text-zinc-500 mt-0.5 max-w-3xl">
             Combine {modeLabel} JSONL exports from the latest{" "}
-            {summary?.recent_duels_limit ?? 20} binary rubric duels into one file. Duplicate
-            sample_ids are removed automatically (first occurrence kept).
+            {summary?.recent_duels_limit ?? 20} binary rubric duels into one file. Only samples
+            with more than 5 consensus questions are included. Duplicate sample_ids are removed
+            automatically (first occurrence kept).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -164,6 +165,10 @@ export default function AlbedoDatasetBuilderPanel() {
           <Stat label="Lines before dedup" value={summary.samples_before_dedup} />
           <Stat label="Unique samples" value={summary.unique_samples} />
           <Stat label="Duplicates removed" value={summary.duplicates_removed} />
+          <Stat
+            label="Skipped (≤5 questions)"
+            value={summary.samples_skipped_min_questions ?? 0}
+          />
           <Stat label={`${modeLabel} questions`} value={summary.total_dual_zero_questions} />
           <Stat label="Output file" value={summary.export_filename} />
         </div>

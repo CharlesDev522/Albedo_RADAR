@@ -15,6 +15,7 @@ from app.services.albedo_scoring_analysis_service import (
     build_sample_export_json,
     dedupe_records_by_sample_id,
     duel_export_filename,
+    sample_meets_export_question_minimum,
 )
 
 
@@ -75,6 +76,28 @@ def _sample_row(
     }
 
 
+def _sample_row_with_questions(
+    *,
+    sample_id: str,
+    question_count: int,
+    polarity: str = "zero",
+) -> dict:
+    score = "0" if polarity == "zero" else "1"
+    questions = [
+        {"id": f"q_{i:02d}", "category": "overall", "text": f"Question {i}?"}
+        for i in range(1, question_count + 1)
+    ]
+    answers = {f"q_{i:02d}": score for i in range(1, question_count + 1)}
+    explanations = {qid: f"{qid} reason" for qid in answers}
+    judge_results = [
+        {"judge_model": "z-ai/glm-5.1", "side": "challenger", "answers": answers, "explanations": explanations},
+        {"judge_model": "qwen/qwen3.5-397b-a17b", "side": "challenger", "answers": answers, "explanations": explanations},
+        {"judge_model": "z-ai/glm-5.1", "side": "previous_king", "answers": answers, "explanations": explanations},
+        {"judge_model": "qwen/qwen3.5-397b-a17b", "side": "previous_king", "answers": answers, "explanations": explanations},
+    ]
+    return {"sample_id": sample_id, "questions": questions, "judge_results": judge_results}
+
+
 def test_parse_scoring_results_jsonl():
     payload = "\n".join(
         [
@@ -133,8 +156,8 @@ def test_analyze_dual_one_requires_both_sides():
 
 def test_build_dual_zero_export_jsonl_is_multiline_jsonl():
     rows = [
-        _sample_row(sample_id="dataset/a:1:1"),
-        _sample_row(sample_id="dataset/e:5:5"),
+        _sample_row_with_questions(sample_id="dataset/a:1:1", question_count=6),
+        _sample_row_with_questions(sample_id="dataset/e:5:5", question_count=6),
     ]
     analysis = analyze_dual_zero_questions(rows)
     payload = build_dual_zero_export_jsonl(analysis)
@@ -143,8 +166,24 @@ def test_build_dual_zero_export_jsonl_is_multiline_jsonl():
     assert json.loads(lines[0])["sample_id"] == "dataset/a:1:1"
 
 
+def test_build_dual_zero_export_skips_samples_with_five_or_fewer_questions():
+    rows = [
+        _sample_row_with_questions(sample_id="dataset/short:1:1", question_count=5),
+        _sample_row_with_questions(sample_id="dataset/long:2:2", question_count=6),
+    ]
+    analysis = analyze_dual_zero_questions(rows)
+    by_id = {sample.sample_id: sample for sample in analysis.samples}
+    assert sample_meets_export_question_minimum(by_id["dataset/short:1:1"]) is False
+    assert sample_meets_export_question_minimum(by_id["dataset/long:2:2"]) is True
+    payload = build_dual_zero_export_jsonl(analysis)
+    lines = [line for line in payload.splitlines() if line.strip()]
+    assert len(lines) == 1
+    assert json.loads(lines[0])["sample_id"] == "dataset/long:2:2"
+    assert len(json.loads(lines[0])["questions"]) == 6
+
+
 def test_build_dual_zero_export_single_jsonl_file():
-    rows = [_sample_row(sample_id="dataset/a:1:1")]
+    rows = [_sample_row_with_questions(sample_id="dataset/a:1:1", question_count=6)]
     analysis = analyze_dual_zero_questions(rows)
     payload = build_consensus_export(
         analysis,
@@ -168,8 +207,8 @@ def test_build_dual_zero_export_single_jsonl_file():
         "king_glm",
         "king_qwen",
     }
-    assert record["questions"][0]["text"] == "Runs test suite?"
-    assert record["questions"][0]["example_bad"] == "Only runs git diff."
+    assert record["questions"][0]["text"] == "Question 1?"
+    assert record["questions"][0]["example_bad"] is None
 
 
 def test_build_sample_export_json_minimal_shape():
@@ -193,8 +232,11 @@ def test_dedupe_records_by_sample_id_keeps_first():
 
 
 def test_build_binary_dual_zero_dataset_dedupes_across_duels(monkeypatch):
-    rows_a = [_sample_row(sample_id="dataset/a:1:1")]
-    rows_b = [_sample_row(sample_id="dataset/a:1:1"), _sample_row(sample_id="dataset/c:3:3")]
+    rows_a = [_sample_row_with_questions(sample_id="dataset/a:1:1", question_count=6)]
+    rows_b = [
+        _sample_row_with_questions(sample_id="dataset/a:1:1", question_count=6),
+        _sample_row_with_questions(sample_id="dataset/c:3:3", question_count=6),
+    ]
 
     async def fake_fetch_dashboard(*, settings=None, fresh=False):
         return {
@@ -246,15 +288,7 @@ def test_build_binary_dual_zero_dataset_dedupes_across_duels(monkeypatch):
 
 
 def test_build_binary_dual_one_dataset_uses_one_polarity(monkeypatch):
-    rows = [
-        _sample_row(
-            sample_id="dataset/a:1:1",
-            glm_q1="1",
-            qwen_q1="1",
-            king_glm_q1="1",
-            king_qwen_q1="1",
-        )
-    ]
+    rows = [_sample_row_with_questions(sample_id="dataset/a:1:1", question_count=6, polarity="one")]
 
     async def fake_fetch_dashboard(*, settings=None, fresh=False):
         return {
@@ -287,7 +321,7 @@ def test_build_binary_dual_one_dataset_uses_one_polarity(monkeypatch):
 
 
 def test_build_binary_dataset_scans_only_latest_twenty_duels(monkeypatch):
-    rows = [_sample_row(sample_id="dataset/a:1:1")]
+    rows = [_sample_row_with_questions(sample_id="dataset/a:1:1", question_count=6)]
     fetched_urls: list[str] = []
 
     async def fake_fetch_dashboard(*, settings=None, fresh=False):
@@ -325,8 +359,8 @@ def test_build_binary_dataset_scans_only_latest_twenty_duels(monkeypatch):
 
 
 def test_build_king_reign_dataset_filters_duels_by_reign_window(monkeypatch):
-    rows_v1 = [_sample_row(sample_id="dataset/king1:1:1")]
-    rows_v2 = [_sample_row(sample_id="dataset/king2:2:2")]
+    rows_v1 = [_sample_row_with_questions(sample_id="dataset/king1:1:1", question_count=6)]
+    rows_v2 = [_sample_row_with_questions(sample_id="dataset/king2:2:2", question_count=6)]
     fetched_urls: list[str] = []
 
     async def fake_fetch_dashboard(*, settings=None, fresh=False):
