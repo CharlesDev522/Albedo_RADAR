@@ -19,6 +19,7 @@ from app.schemas.albedo_scoring_analysis import (
     AlbedoDualZeroQuestion,
     AlbedoSampleDualZeros,
     AlbedoScoringAnalysis,
+    KingReignDatasetSlice,
     ScoringConsensusPolarity,
 )
 
@@ -29,7 +30,7 @@ QWEN_JUDGE_HINT = "qwen"
 CHALLENGER_SIDE = "challenger"
 KING_SIDE_RAW = "previous_king"
 
-_DATASET_RECENT_DUELS_LIMIT = 16
+_DATASET_RECENT_DUELS_LIMIT = 20
 _DATASET_EXPORT_FILENAMES: dict[ScoringConsensusPolarity, str] = {
     "zero": "binary-dual-zero-dataset.jsonl",
     "one": "binary-dual-one-dataset.jsonl",
@@ -329,6 +330,110 @@ def _recent_binary_eval_runs(
     return binary_runs[:limit]
 
 
+def _coronations_from_eval_runs(eval_runs: list[dict[str, Any]]) -> list[Any]:
+    from app.services.albedo_king_history import coronation_from_eval_run
+
+    coronations = []
+    for run in eval_runs:
+        cor = coronation_from_eval_run(run, None)
+        if cor:
+            coronations.append(cor)
+    return sorted(coronations, key=lambda c: c.king_version)
+
+
+def _king_reign_windows(
+    coronations: list[Any],
+) -> dict[int, tuple[str, str | None]]:
+    """Map king_version -> (coronation_at, active_until). active_until is next coronation."""
+    sorted_asc = sorted(coronations, key=lambda c: c.king_version)
+    windows: dict[int, tuple[str, str | None]] = {}
+    for idx, cor in enumerate(sorted_asc):
+        active_until = sorted_asc[idx + 1].finished_at if idx + 1 < len(sorted_asc) else None
+        windows[cor.king_version] = (cor.finished_at, active_until)
+    return windows
+
+
+def _binary_eval_runs_for_king_reign(
+    eval_runs: list[dict[str, Any]],
+    *,
+    king_version: int,
+    coronation_at: str,
+    active_until: str | None,
+) -> list[dict[str, Any]]:
+    """Binary rubric duels defended by this king during their reign window."""
+    runs: list[dict[str, Any]] = []
+    for run in _binary_eval_runs(eval_runs):
+        king = run.get("king") or {}
+        if king.get("king_version") != king_version:
+            continue
+        finished = str(run.get("finished_at") or "")
+        if finished < coronation_at:
+            continue
+        if active_until and finished > active_until:
+            continue
+        runs.append(run)
+    runs.sort(key=lambda r: str(r.get("finished_at") or ""), reverse=True)
+    return runs
+
+
+def _kings_dataset_export_filename(
+    polarity: ScoringConsensusPolarity,
+    king_versions: list[int],
+) -> str:
+    suffix = "dual-zero" if polarity == "zero" else "dual-one"
+    ordered = sorted(king_versions)
+    if len(ordered) == 1:
+        return f"binary-{suffix}-king-v{ordered[0]}-dataset.jsonl"
+    version_tag = "-".join(str(v) for v in ordered)
+    return f"binary-{suffix}-kings-v{version_tag}-dataset.jsonl"
+
+
+def _king_reign_dataset_cache_key(
+    polarity: ScoringConsensusPolarity,
+    king_versions: list[int],
+) -> str:
+    versions = ",".join(str(v) for v in sorted(king_versions))
+    return f"binary_dual_{polarity}_kings_{versions}"
+
+
+async def _collect_consensus_records(
+    binary_runs: list[dict[str, Any]],
+    *,
+    settings: Settings,
+    fresh: bool,
+    polarity: ScoringConsensusPolarity,
+    client: httpx.AsyncClient,
+) -> tuple[list[dict[str, Any]], int]:
+    all_records: list[dict[str, Any]] = []
+    duels_with_matches = 0
+    for run in binary_runs:
+        url = _scoring_results_url(run)
+        if not url:
+            continue
+        try:
+            rows = await fetch_scoring_results_jsonl(
+                url,
+                settings=settings,
+                client=client,
+                fresh=fresh,
+            )
+            analysis = analyze_dual_consensus_questions(rows, polarity=polarity)
+        except Exception:
+            logger.warning(
+                "Skipping binary duel dataset row eval_run_id=%s polarity=%s",
+                run.get("eval_run_id"),
+                polarity,
+                exc_info=True,
+            )
+            continue
+        if not analysis.samples:
+            continue
+        duels_with_matches += 1
+        for sample in analysis.samples:
+            all_records.append(build_sample_export_record(sample))
+    return all_records, duels_with_matches
+
+
 def _dataset_cache_key(polarity: ScoringConsensusPolarity) -> str:
     return f"binary_dual_{polarity}"
 
@@ -370,10 +475,100 @@ async def build_binary_consensus_dataset(
     binary_runs_all = _binary_eval_runs(eval_runs)
     binary_runs = _recent_binary_eval_runs(eval_runs)
 
-    all_records: list[dict[str, Any]] = []
-    duels_with_matches = 0
+    async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:
+        all_records, duels_with_matches = await _collect_consensus_records(
+            binary_runs,
+            settings=settings,
+            fresh=fresh,
+            polarity=polarity,
+            client=client,
+        )
+
+    unique_records, duplicates_removed = dedupe_records_by_sample_id(all_records)
+    total_questions = sum(len(record.get("questions") or []) for record in unique_records)
+    summary = AlbedoDatasetBuildSummary(
+        polarity=polarity,
+        export_filename=_DATASET_EXPORT_FILENAMES[polarity],
+        dedup_script_filename=_DEDUP_SCRIPT_FILENAME,
+        build_mode="recent",
+        recent_duels_limit=_DATASET_RECENT_DUELS_LIMIT,
+        binary_duels_total=binary_total,
+        binary_duels_with_scoring=len(binary_runs_all),
+        binary_duels_scanned=len(binary_runs),
+        binary_duels_with_dual_zero=duels_with_matches,
+        samples_before_dedup=len(all_records),
+        unique_samples=len(unique_records),
+        duplicates_removed=duplicates_removed,
+        total_dual_zero_questions=total_questions,
+    )
+    result = DatasetBuildResult(summary=summary, records=unique_records)
+    if not fresh:
+        _dataset_cache_set(polarity, result)
+    return result
+
+
+async def build_binary_consensus_dataset_for_kings(
+    king_versions: list[int],
+    *,
+    settings: Settings | None = None,
+    fresh: bool = False,
+    polarity: ScoringConsensusPolarity = "zero",
+) -> DatasetBuildResult:
+    settings = settings or get_settings()
+    ordered_versions = sorted({int(v) for v in king_versions if int(v) > 0})
+    if not ordered_versions:
+        raise ValueError("At least one king_version is required")
+
+    cache_key = _king_reign_dataset_cache_key(polarity, ordered_versions)
+    if not fresh:
+        cached = _DATASET_CACHE.get(cache_key)
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
+
+    dashboard = await fetch_dashboard(settings=settings, fresh=fresh)
+    eval_runs: list[dict[str, Any]] = list(dashboard.get("eval_runs") or [])
+    binary_total = sum(1 for run in eval_runs if run.get("scoring_mode") == "binary")
+    binary_runs_all = _binary_eval_runs(eval_runs)
+
+    coronations = _coronations_from_eval_runs(eval_runs)
+    windows = _king_reign_windows(coronations)
+    missing = [v for v in ordered_versions if v not in windows]
+    if missing:
+        raise LookupError(f"No coronation data for king version(s): {', '.join(map(str, missing))}")
+
+    seen_run_ids: set[str] = set()
+    binary_runs: list[dict[str, Any]] = []
+    breakdown: list[KingReignDatasetSlice] = []
+    run_king: dict[str, int] = {}
+
+    for king_version in ordered_versions:
+        coronation_at, active_until = windows[king_version]
+        king_runs = _binary_eval_runs_for_king_reign(
+            eval_runs,
+            king_version=king_version,
+            coronation_at=coronation_at,
+            active_until=active_until,
+        )
+        breakdown.append(
+            KingReignDatasetSlice(
+                king_version=king_version,
+                coronation_at=coronation_at,
+                active_until=active_until,
+                binary_duels_scanned=len(king_runs),
+            )
+        )
+        for run in king_runs:
+            eval_run_id = str(run.get("eval_run_id") or "")
+            if not eval_run_id or eval_run_id in seen_run_ids:
+                continue
+            seen_run_ids.add(eval_run_id)
+            run_king[eval_run_id] = king_version
+            binary_runs.append(run)
 
     async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:
+        all_records: list[dict[str, Any]] = []
+        duels_with_matches = 0
+        matches_by_king: dict[int, int] = {v: 0 for v in ordered_versions}
         for run in binary_runs:
             url = _scoring_results_url(run)
             if not url:
@@ -388,7 +583,7 @@ async def build_binary_consensus_dataset(
                 analysis = analyze_dual_consensus_questions(rows, polarity=polarity)
             except Exception:
                 logger.warning(
-                    "Skipping binary duel dataset row eval_run_id=%s polarity=%s",
+                    "Skipping king reign dataset eval_run_id=%s polarity=%s",
                     run.get("eval_run_id"),
                     polarity,
                     exc_info=True,
@@ -397,15 +592,24 @@ async def build_binary_consensus_dataset(
             if not analysis.samples:
                 continue
             duels_with_matches += 1
+            king_version = run_king.get(str(run.get("eval_run_id") or ""))
+            if king_version is not None:
+                matches_by_king[king_version] = matches_by_king.get(king_version, 0) + 1
             for sample in analysis.samples:
                 all_records.append(build_sample_export_record(sample))
+
+    for slice_row in breakdown:
+        slice_row.binary_duels_with_dual_zero = matches_by_king.get(slice_row.king_version, 0)
 
     unique_records, duplicates_removed = dedupe_records_by_sample_id(all_records)
     total_questions = sum(len(record.get("questions") or []) for record in unique_records)
     summary = AlbedoDatasetBuildSummary(
         polarity=polarity,
-        export_filename=_DATASET_EXPORT_FILENAMES[polarity],
+        export_filename=_kings_dataset_export_filename(polarity, ordered_versions),
         dedup_script_filename=_DEDUP_SCRIPT_FILENAME,
+        build_mode="king_reign",
+        king_versions=ordered_versions,
+        king_reign_breakdown=breakdown,
         recent_duels_limit=_DATASET_RECENT_DUELS_LIMIT,
         binary_duels_total=binary_total,
         binary_duels_with_scoring=len(binary_runs_all),
@@ -418,7 +622,7 @@ async def build_binary_consensus_dataset(
     )
     result = DatasetBuildResult(summary=summary, records=unique_records)
     if not fresh:
-        _dataset_cache_set(polarity, result)
+        _DATASET_CACHE[cache_key] = (time.monotonic() + _DATASET_CACHE_TTL_SECONDS, result)
     return result
 
 
@@ -447,6 +651,23 @@ async def get_binary_dataset_summary(
     return (await build_binary_consensus_dataset(settings=settings, fresh=fresh, polarity=polarity)).summary
 
 
+async def get_king_reign_dataset_summary(
+    king_versions: list[int],
+    *,
+    settings: Settings | None = None,
+    fresh: bool = False,
+    polarity: ScoringConsensusPolarity = "zero",
+) -> AlbedoDatasetBuildSummary:
+    return (
+        await build_binary_consensus_dataset_for_kings(
+            king_versions,
+            settings=settings,
+            fresh=fresh,
+            polarity=polarity,
+        )
+    ).summary
+
+
 async def get_binary_dataset_export(
     *,
     settings: Settings | None = None,
@@ -457,6 +678,32 @@ async def get_binary_dataset_export(
     if not result.records:
         raise LookupError(
             f"No {_polarity_label(polarity)} samples found across binary rubric duels"
+        )
+
+    return ExportPayload(
+        content=build_dataset_export_jsonl(result.records).encode("utf-8"),
+        filename=result.summary.export_filename,
+        media_type="application/x-ndjson",
+    )
+
+
+async def get_king_reign_dataset_export(
+    king_versions: list[int],
+    *,
+    settings: Settings | None = None,
+    fresh: bool = False,
+    polarity: ScoringConsensusPolarity = "zero",
+) -> ExportPayload:
+    result = await build_binary_consensus_dataset_for_kings(
+        king_versions,
+        settings=settings,
+        fresh=fresh,
+        polarity=polarity,
+    )
+    if not result.records:
+        raise LookupError(
+            f"No {_polarity_label(polarity)} samples found for king reign dataset "
+            f"(versions {sorted(set(king_versions))})"
         )
 
     return ExportPayload(

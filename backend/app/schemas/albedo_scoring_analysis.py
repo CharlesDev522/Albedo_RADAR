@@ -34,11 +34,22 @@ class AlbedoScoringAnalysis(BaseModel):
     samples: list[AlbedoSampleDualZeros] = Field(default_factory=list)
 
 
+class KingReignDatasetSlice(BaseModel):
+    king_version: int
+    coronation_at: str = ""
+    active_until: str | None = None
+    binary_duels_scanned: int = 0
+    binary_duels_with_dual_zero: int = 0
+
+
 class AlbedoDatasetBuildSummary(BaseModel):
     polarity: ScoringConsensusPolarity = "zero"
     export_filename: str = "binary-dual-zero-dataset.jsonl"
     dedup_script_filename: str = "dedup_dual_zero_jsonl.py"
-    recent_duels_limit: int = 16
+    build_mode: Literal["recent", "king_reign"] = "recent"
+    king_versions: list[int] = Field(default_factory=list)
+    king_reign_breakdown: list[KingReignDatasetSlice] = Field(default_factory=list)
+    recent_duels_limit: int = 20
     binary_duels_total: int = 0
     binary_duels_with_scoring: int = 0
     binary_duels_scanned: int = 0

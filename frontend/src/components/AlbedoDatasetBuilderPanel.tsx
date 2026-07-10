@@ -119,7 +119,7 @@ export default function AlbedoDatasetBuilderPanel() {
           </div>
           <p className="text-[10px] text-zinc-500 mt-0.5 max-w-3xl">
             Combine {modeLabel} JSONL exports from the latest{" "}
-            {summary?.recent_duels_limit ?? 16} binary rubric duels into one file. Duplicate
+            {summary?.recent_duels_limit ?? 20} binary rubric duels into one file. Duplicate
             sample_ids are removed automatically (first occurrence kept).
           </p>
         </div>

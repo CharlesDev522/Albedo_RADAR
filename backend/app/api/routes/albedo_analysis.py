@@ -25,10 +25,32 @@ from app.services.albedo_scoring_analysis_service import (
     get_binary_dataset_summary,
     get_consensus_export,
     get_dedup_script_export,
+    get_king_reign_dataset_export,
+    get_king_reign_dataset_summary,
     get_scoring_analysis_for_eval,
 )
 
 router = APIRouter(prefix="/albedo", tags=["albedo"])
+
+
+def _parse_king_versions(raw: str) -> list[int]:
+    versions: list[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            value = int(part)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid king_version: {part!r}",
+            ) from exc
+        if value > 0:
+            versions.append(value)
+    if not versions:
+        raise HTTPException(status_code=400, detail="At least one king_version is required")
+    return versions
 
 
 async def _load_miner_lookup(db: AsyncSession, subnet: int):
@@ -242,6 +264,88 @@ async def albedo_sample_score_analysis(
         raise HTTPException(
             status_code=502,
             detail=f"Failed to analyze sample scores: {exc}",
+        ) from exc
+
+
+@router.get("/scoring-dataset/king-reign/summary", response_model=AlbedoDatasetBuildSummary)
+async def albedo_king_reign_dataset_summary(
+    king_versions: str = Query(
+        ...,
+        min_length=1,
+        description="Comma-separated king versions, e.g. 12,13",
+    ),
+    subnet: int = Query(default=97, ge=0),
+    fresh: bool = Query(default=False),
+    polarity: ScoringConsensusPolarity = Query(
+        default="zero",
+        description="Consensus polarity: zero or one",
+    ),
+) -> AlbedoDatasetBuildSummary:
+    """Summarize dual-zero or dual-one JSONL for binary duels during selected king reigns."""
+    if subnet != 97:
+        raise HTTPException(status_code=400, detail="Albedo scoring dataset is only available for SN97")
+    settings = get_settings()
+    versions = _parse_king_versions(king_versions)
+    try:
+        return await get_king_reign_dataset_summary(
+            versions,
+            settings=settings,
+            fresh=fresh,
+            polarity=polarity,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to build king reign dataset summary: {exc}",
+        ) from exc
+
+
+@router.get("/scoring-dataset/king-reign/export")
+async def albedo_king_reign_dataset_export(
+    king_versions: str = Query(
+        ...,
+        min_length=1,
+        description="Comma-separated king versions, e.g. 12,13",
+    ),
+    subnet: int = Query(default=97, ge=0),
+    fresh: bool = Query(default=False),
+    polarity: ScoringConsensusPolarity = Query(
+        default="zero",
+        description="Consensus polarity: zero or one",
+    ),
+) -> Response:
+    """Download combined dual-zero or dual-one JSONL for duels during selected king reigns."""
+    if subnet != 97:
+        raise HTTPException(status_code=400, detail="Albedo scoring dataset is only available for SN97")
+    settings = get_settings()
+    versions = _parse_king_versions(king_versions)
+    try:
+        payload = await get_king_reign_dataset_export(
+            versions,
+            settings=settings,
+            fresh=fresh,
+            polarity=polarity,
+        )
+        return Response(
+            content=payload.content,
+            media_type=payload.media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{payload.filename}"',
+                "X-Export-Filename": payload.filename,
+            },
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to export king reign dataset: {exc}",
         ) from exc
 
 

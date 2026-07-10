@@ -642,10 +642,21 @@ export interface AlbedoRepoCrownAnalysis {
 
 export type ScoringConsensusPolarity = "zero" | "one";
 
+export interface KingReignDatasetSlice {
+  king_version: number;
+  coronation_at: string;
+  active_until?: string | null;
+  binary_duels_scanned: number;
+  binary_duels_with_dual_zero: number;
+}
+
 export interface AlbedoDatasetBuildSummary {
   polarity?: ScoringConsensusPolarity;
   export_filename: string;
   dedup_script_filename: string;
+  build_mode?: "recent" | "king_reign";
+  king_versions?: number[];
+  king_reign_breakdown?: KingReignDatasetSlice[];
   recent_duels_limit: number;
   binary_duels_total: number;
   binary_duels_with_scoring: number;
@@ -1151,6 +1162,76 @@ export const api = {
       exportHeader ??
       match?.[1] ??
       (polarity === "one" ? "binary-dual-one-dataset.jsonl" : "binary-dual-zero-dataset.jsonl");
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
+  },
+  getAlbedoKingReignDatasetSummary: (
+    kingVersions: number[],
+    subnet = DEFAULT_SUBNET,
+    forceRefresh = false,
+    polarity: ScoringConsensusPolarity = "zero"
+  ) => {
+    const versions = [...new Set(kingVersions)].filter((v) => v > 0).sort((a, b) => a - b);
+    if (versions.length === 0) {
+      return Promise.reject(new Error("Select at least one king"));
+    }
+    const qs = [
+      `subnet=${subnet}`,
+      `polarity=${polarity}`,
+      `king_versions=${versions.join(",")}`,
+      forceRefresh ? "fresh=true" : "",
+    ]
+      .filter(Boolean)
+      .join("&");
+    return fetchApi<AlbedoDatasetBuildSummary>(`/albedo/scoring-dataset/king-reign/summary?${qs}`, {
+      forceRefresh,
+    });
+  },
+  downloadAlbedoKingReignDatasetExport: async (
+    kingVersions: number[],
+    subnet = DEFAULT_SUBNET,
+    forceRefresh = false,
+    polarity: ScoringConsensusPolarity = "zero"
+  ) => {
+    const versions = [...new Set(kingVersions)].filter((v) => v > 0).sort((a, b) => a - b);
+    if (versions.length === 0) {
+      throw new Error("Select at least one king");
+    }
+    const qs = [
+      `subnet=${subnet}`,
+      `polarity=${polarity}`,
+      `king_versions=${versions.join(",")}`,
+      forceRefresh ? "fresh=true" : "",
+    ]
+      .filter(Boolean)
+      .join("&");
+    const res = await fetch(`${apiBase()}/albedo/scoring-dataset/king-reign/export?${qs}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      let detail = `Download failed: HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        if (body && typeof body.detail === "string") detail = body.detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail);
+    }
+    const blob = await res.blob();
+    const header = res.headers.get("Content-Disposition");
+    const exportHeader = res.headers.get("X-Export-Filename");
+    const match = header?.match(/filename="?([^";\n]+)"?/i);
+    const suffix = polarity === "one" ? "dual-one" : "dual-zero";
+    const fallback =
+      versions.length === 1
+        ? `binary-${suffix}-king-v${versions[0]}-dataset.jsonl`
+        : `binary-${suffix}-kings-v${versions.join("-")}-dataset.jsonl`;
+    const filename = exportHeader ?? match?.[1] ?? fallback;
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;

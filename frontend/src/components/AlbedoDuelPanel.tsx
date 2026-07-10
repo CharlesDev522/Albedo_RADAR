@@ -7,6 +7,7 @@ import AlbedoEvalQueueOverviewPanel from "@/components/AlbedoEvalQueueOverview";
 import AlbedoEvalFailsPanel from "@/components/AlbedoEvalFailsPanel";
 import AlbedoScoringGapsPanel from "@/components/AlbedoScoringGapsPanel";
 import AlbedoDatasetBuilderPanel from "@/components/AlbedoDatasetBuilderPanel";
+import AlbedoKingReignDatasetPanel from "@/components/AlbedoKingReignDatasetPanel";
 import AlbedoSampleScoreAnalysisPanel from "@/components/AlbedoSampleScoreAnalysisPanel";
 import {
   api,
@@ -498,6 +499,8 @@ export default function AlbedoDuelPanel() {
 
       {section === "kings" && (
         <>
+          <AlbedoKingReignDatasetPanel kingHistory={data.king_history ?? []} />
+
           <section className="panel px-3 py-2.5">
             <div className="flex flex-wrap items-end justify-between gap-2 mb-3">
               <div>

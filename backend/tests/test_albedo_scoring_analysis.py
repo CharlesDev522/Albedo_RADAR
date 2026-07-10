@@ -7,6 +7,7 @@ from app.integrations.albedo_scoring_results import parse_scoring_results_jsonl
 from app.services.albedo_scoring_analysis_service import (
     analyze_dual_one_questions,
     analyze_dual_zero_questions,
+    build_binary_consensus_dataset_for_kings,
     build_binary_dual_one_dataset,
     build_binary_dual_zero_dataset,
     build_consensus_export,
@@ -236,7 +237,7 @@ def test_build_binary_dual_zero_dataset_dedupes_across_duels(monkeypatch):
     assert result.summary.binary_duels_total == 2
     assert result.summary.binary_duels_with_scoring == 2
     assert result.summary.binary_duels_scanned == 2
-    assert result.summary.recent_duels_limit == 16
+    assert result.summary.recent_duels_limit == 20
     assert result.summary.binary_duels_with_dual_zero == 2
     assert result.summary.samples_before_dedup == 3
     assert result.summary.unique_samples == 2
@@ -285,7 +286,7 @@ def test_build_binary_dual_one_dataset_uses_one_polarity(monkeypatch):
     assert result.records[0]["questions"][0]["question_id"] == "q_01"
 
 
-def test_build_binary_dataset_scans_only_latest_sixteen_duels(monkeypatch):
+def test_build_binary_dataset_scans_only_latest_twenty_duels(monkeypatch):
     rows = [_sample_row(sample_id="dataset/a:1:1")]
     fetched_urls: list[str] = []
 
@@ -321,3 +322,96 @@ def test_build_binary_dataset_scans_only_latest_sixteen_duels(monkeypatch):
     assert len(fetched_urls) == 20
     assert fetched_urls[0].endswith("/24.jsonl")
     assert fetched_urls[-1].endswith("/05.jsonl")
+
+
+def test_build_king_reign_dataset_filters_duels_by_reign_window(monkeypatch):
+    rows_v1 = [_sample_row(sample_id="dataset/king1:1:1")]
+    rows_v2 = [_sample_row(sample_id="dataset/king2:2:2")]
+    fetched_urls: list[str] = []
+
+    async def fake_fetch_dashboard(*, settings=None, fresh=False):
+        return {
+            "eval_runs": [
+                {
+                    "eval_run_id": "coronation-v1",
+                    "coronated": True,
+                    "king_version": 1,
+                    "finished_at": "2026-06-01T10:00:00+00:00",
+                    "model_uri": "org/king-v1@sha256:1",
+                    "uid": 1,
+                    "hotkey": "hk_v1",
+                    "king": {"king_version": 0, "model_uri": "org/genesis@sha256:0", "uid": 0, "hotkey": "hk0"},
+                },
+                {
+                    "eval_run_id": "coronation-v2",
+                    "coronated": True,
+                    "king_version": 2,
+                    "finished_at": "2026-06-10T10:00:00+00:00",
+                    "model_uri": "org/king-v2@sha256:2",
+                    "uid": 2,
+                    "hotkey": "hk_v2",
+                    "king": {"king_version": 1, "model_uri": "org/king-v1@sha256:1", "uid": 1, "hotkey": "hk_v1"},
+                },
+                {
+                    "eval_run_id": "duel-v1-early",
+                    "scoring_mode": "binary",
+                    "finished_at": "2026-05-31T10:00:00+00:00",
+                    "king": {"king_version": 1},
+                    "artifacts": {"SCORING_RESULTS": "https://example.com/v1-early.jsonl"},
+                },
+                {
+                    "eval_run_id": "duel-v1-mid",
+                    "scoring_mode": "binary",
+                    "finished_at": "2026-06-05T10:00:00+00:00",
+                    "king": {"king_version": 1},
+                    "artifacts": {"SCORING_RESULTS": "https://example.com/v1-mid.jsonl"},
+                },
+                {
+                    "eval_run_id": "duel-v2-mid",
+                    "scoring_mode": "binary",
+                    "finished_at": "2026-06-15T10:00:00+00:00",
+                    "king": {"king_version": 2},
+                    "artifacts": {"SCORING_RESULTS": "https://example.com/v2-mid.jsonl"},
+                },
+                {
+                    "eval_run_id": "duel-v1-wrong-king",
+                    "scoring_mode": "binary",
+                    "finished_at": "2026-06-06T10:00:00+00:00",
+                    "king": {"king_version": 2},
+                    "artifacts": {"SCORING_RESULTS": "https://example.com/wrong.jsonl"},
+                },
+            ]
+        }
+
+    async def fake_fetch_scoring_results_jsonl(url, *, settings=None, client=None, fresh=False):
+        fetched_urls.append(url)
+        if url.endswith("/v1-mid.jsonl"):
+            return rows_v1
+        if url.endswith("/v2-mid.jsonl"):
+            return rows_v2
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setattr(
+        "app.services.albedo_scoring_analysis_service.fetch_dashboard",
+        fake_fetch_dashboard,
+    )
+    monkeypatch.setattr(
+        "app.services.albedo_scoring_analysis_service.fetch_scoring_results_jsonl",
+        fake_fetch_scoring_results_jsonl,
+    )
+
+    result = asyncio.run(build_binary_consensus_dataset_for_kings([1, 2], fresh=True))
+    assert result.summary.build_mode == "king_reign"
+    assert result.summary.king_versions == [1, 2]
+    assert result.summary.binary_duels_scanned == 2
+    assert len(fetched_urls) == 2
+    assert result.summary.unique_samples == 2
+    assert {record["sample_id"] for record in result.records} == {
+        "dataset/king1:1:1",
+        "dataset/king2:2:2",
+    }
+    breakdown = {row.king_version: row for row in result.summary.king_reign_breakdown}
+    assert breakdown[1].binary_duels_scanned == 1
+    assert breakdown[1].binary_duels_with_dual_zero == 1
+    assert breakdown[2].binary_duels_scanned == 1
+    assert breakdown[2].binary_duels_with_dual_zero == 1
