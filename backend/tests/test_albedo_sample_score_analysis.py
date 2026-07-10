@@ -61,6 +61,8 @@ def test_analyze_sample_rows_emits_per_judge_observations():
     assert len(obs) == 6  # 2 samples × 3 judges
     assert sum(1 for o in obs if o.bucket == "decisive") == 3
     assert sum(1 for o in obs if o.bucket == "moderate") == 3
+    assert obs[0].margin == 1.0
+    assert obs[0].margin_abs == 1.0
 
 
 def test_gap_type_margin_share_and_distribution():
@@ -68,17 +70,16 @@ def test_gap_type_margin_share_and_distribution():
     obs = analyze_sample_rows(rows, eval_run_id="duel-a")
     result = build_sample_score_analysis(obs)
 
-    assert result.total_gap_points == 300.0
     assert len(result.gap_types) == 3
     decisive = next(t for t in result.gap_types if t.gap_type == "decisive")
     assert decisive.share_pct == 100.0
-    assert decisive.total_gap_points == 300.0
+    assert decisive.avg_margin_pct == 100.0
     assert len(decisive.gap_distribution) == 5
-    top_bin = max(decisive.gap_distribution, key=lambda b: b.gap_points_sum)
+    top_bin = max(decisive.gap_distribution, key=lambda b: b.share_pct)
     assert top_bin.share_pct == 100.0
 
     assert len(result.judge_margin_shares) == 3
-    assert result.judge_margin_shares[0].share_pct == 33.3
+    assert result.judge_margin_shares[0].share_pct == 33.33
     assert len(result.judge_margin_shares[0].by_gap_type) == 3
     assert result.duels[0].gap_types[2].share_pct == 100.0
 
@@ -93,10 +94,10 @@ def test_build_sample_score_analysis_aggregates_duels_and_judges():
     assert result.total_observations == 6
     assert result.binary_duels_with_samples == 2
     assert len(result.by_judge) == 3
-    decisive_pts = next(t.total_gap_points for t in result.gap_types if t.gap_type == "decisive")
-    close_pts = next(t.total_gap_points for t in result.gap_types if t.gap_type == "close")
-    assert decisive_pts == 300.0
-    assert close_pts == 30.0
+    decisive_share = next(t.share_pct for t in result.gap_types if t.gap_type == "decisive")
+    close_share = next(t.share_pct for t in result.gap_types if t.gap_type == "close")
+    assert decisive_share == 90.91
+    assert close_share == 9.09
     assert len(result.judge_pairs) == 3
     assert result.duels[0].eval_run_id == "duel-a"
 

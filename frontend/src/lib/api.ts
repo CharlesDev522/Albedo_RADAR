@@ -688,7 +688,6 @@ export interface GapDiffBin {
   label: string;
   bin_min: number;
   bin_max: number;
-  gap_points_sum: number;
   share_pct: number;
 }
 
@@ -696,9 +695,8 @@ export interface GapTypeSummary {
   gap_type: SampleGapBucket;
   label: string;
   criteria: string;
-  total_gap_points: number;
   share_pct: number;
-  avg_gap: number;
+  avg_margin_pct: number;
   gap_distribution: GapDiffBin[];
 }
 
@@ -706,9 +704,8 @@ export interface JudgeMarginShare {
   judge_model: string;
   short_name: string;
   observations: number;
-  total_gap_points: number;
   share_pct: number;
-  avg_gap: number;
+  avg_margin_pct: number;
   pick_challenger_pct: number;
   by_gap_type: GapTypeSummary[];
 }
@@ -719,9 +716,8 @@ export interface JudgeSampleGapSummary {
   observations: number;
   avg_challenger_pct: number;
   avg_king_pct: number;
-  avg_gap_pct: number;
+  avg_margin_pct: number;
   pick_challenger_pct: number;
-  total_gap_points: number;
   share_pct: number;
 }
 
@@ -745,7 +741,6 @@ export interface DuelSampleGapSummary {
   sample_count: number;
   judge_count: number;
   observations: number;
-  total_gap_points: number;
   gap_types: GapTypeSummary[];
   judge_margin_shares: JudgeMarginShare[];
   judges: JudgeSampleGapSummary[];
@@ -757,7 +752,6 @@ export interface AlbedoSampleScoreAnalysis {
   binary_duels_with_samples: number;
   total_samples: number;
   total_observations: number;
-  total_gap_points: number;
   judge_models: string[];
   gap_types: GapTypeSummary[];
   judge_margin_shares: JudgeMarginShare[];
@@ -811,9 +805,15 @@ import { fetchWithCache, invalidateApiCache } from "@/lib/apiCache";
 const EMPTY_GAP_TYPES: GapTypeSummary[] = [];
 
 function readSharePct(row: Record<string, unknown>): number {
-  const candidates = [row.share_pct, row.margin_share_pct, row.gap_share_pct, row.share_of_total_margin_pct];
-  for (const value of candidates) {
-    const n = Number(value);
+  const legacyKeys = ["margin_share_pct", "gap_share_pct", "share_of_total_margin_pct"];
+  for (const key of legacyKeys) {
+    if (row[key] !== undefined && row[key] !== null) {
+      const n = Number(row[key]);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  if (row.share_pct !== undefined && row.share_pct !== null) {
+    const n = Number(row.share_pct);
     if (Number.isFinite(n)) return n;
   }
   return 0;
@@ -829,9 +829,8 @@ function normalizeGapTypeSummary(raw: unknown): GapTypeSummary | null {
     gap_type: gapType,
     label: typeof row.label === "string" ? row.label : gapType,
     criteria: typeof row.criteria === "string" ? row.criteria : "",
-    total_gap_points: Number(row.total_gap_points) || 0,
     share_pct: readSharePct(row),
-    avg_gap: Number(row.avg_gap) || 0,
+    avg_margin_pct: Number(row.avg_margin_pct ?? row.avg_gap ?? 0) || 0,
     gap_distribution: bins
       .map((bin) => {
         if (!bin || typeof bin !== "object") return null;
@@ -840,7 +839,6 @@ function normalizeGapTypeSummary(raw: unknown): GapTypeSummary | null {
           label: typeof b.label === "string" ? b.label : "",
           bin_min: Number(b.bin_min) || 0,
           bin_max: Number(b.bin_max) || 0,
-          gap_points_sum: Number(b.gap_points_sum) || 0,
           share_pct: readSharePct(b),
         };
       })
@@ -859,8 +857,12 @@ function normalizeSampleScoreAnalysis(
     (row) => {
       const j = row as JudgeMarginShare & Record<string, unknown>;
       return {
-        ...j,
+        judge_model: String(j.judge_model ?? ""),
+        short_name: String(j.short_name ?? ""),
+        observations: Number(j.observations) || 0,
         share_pct: readSharePct(j),
+        avg_margin_pct: Number(j.avg_margin_pct ?? j.avg_gap ?? 0) || 0,
+        pick_challenger_pct: Number(j.pick_challenger_pct) || 0,
         by_gap_type: Array.isArray(j.by_gap_type)
           ? j.by_gap_type.map(normalizeGapTypeSummary).filter((t): t is GapTypeSummary => t !== null)
           : EMPTY_GAP_TYPES,
@@ -871,24 +873,44 @@ function normalizeSampleScoreAnalysis(
   const duels = (Array.isArray(raw.duels) ? raw.duels : []).map((row) => {
     const duel = row as DuelSampleGapSummary & Record<string, unknown>;
     return {
-      ...duel,
+      eval_run_id: String(duel.eval_run_id ?? ""),
+      finished_at: String(duel.finished_at ?? ""),
+      challenger_label: String(duel.challenger_label ?? ""),
+      king_label: String(duel.king_label ?? ""),
+      winner: String(duel.winner ?? ""),
+      sample_count: Number(duel.sample_count) || 0,
+      judge_count: Number(duel.judge_count) || 0,
+      observations: Number(duel.observations) || 0,
       gap_types: Array.isArray(duel.gap_types)
         ? duel.gap_types.map(normalizeGapTypeSummary).filter((t): t is GapTypeSummary => t !== null)
         : EMPTY_GAP_TYPES,
       judge_margin_shares: Array.isArray(duel.judge_margin_shares)
         ? duel.judge_margin_shares.map((j) => {
-            const row = j as JudgeMarginShare & Record<string, unknown>;
+            const item = j as JudgeMarginShare & Record<string, unknown>;
             return {
-              ...j,
-              share_pct: readSharePct(row),
-              by_gap_type: Array.isArray(j.by_gap_type) ? j.by_gap_type : EMPTY_GAP_TYPES,
+              judge_model: String(item.judge_model ?? ""),
+              short_name: String(item.short_name ?? ""),
+              observations: Number(item.observations) || 0,
+              share_pct: readSharePct(item),
+              avg_margin_pct: Number(item.avg_margin_pct ?? item.avg_gap ?? 0) || 0,
+              pick_challenger_pct: Number(item.pick_challenger_pct) || 0,
+              by_gap_type: Array.isArray(item.by_gap_type) ? item.by_gap_type : EMPTY_GAP_TYPES,
             };
           })
         : [],
       judges: Array.isArray(duel.judges)
         ? duel.judges.map((j) => {
-            const row = j as JudgeSampleGapSummary & Record<string, unknown>;
-            return { ...j, share_pct: readSharePct(row) };
+            const item = j as JudgeSampleGapSummary & Record<string, unknown>;
+            return {
+              judge_model: String(item.judge_model ?? ""),
+              short_name: String(item.short_name ?? ""),
+              observations: Number(item.observations) || 0,
+              avg_challenger_pct: Number(item.avg_challenger_pct) || 0,
+              avg_king_pct: Number(item.avg_king_pct) || 0,
+              avg_margin_pct: Number(item.avg_margin_pct ?? item.avg_gap_pct ?? 0) || 0,
+              pick_challenger_pct: Number(item.pick_challenger_pct) || 0,
+              share_pct: readSharePct(item),
+            };
           })
         : [],
     };
@@ -900,14 +922,22 @@ function normalizeSampleScoreAnalysis(
     binary_duels_with_samples: Number(raw.binary_duels_with_samples) || 0,
     total_samples: Number(raw.total_samples) || 0,
     total_observations: Number(raw.total_observations) || 0,
-    total_gap_points: Number(raw.total_gap_points) || 0,
     judge_models: Array.isArray(raw.judge_models) ? raw.judge_models : [],
     gap_types: gapTypes,
     judge_margin_shares: judgeMarginShares,
     by_judge: Array.isArray(raw.by_judge)
       ? raw.by_judge.map((j) => {
           const row = j as JudgeSampleGapSummary & Record<string, unknown>;
-          return { ...j, share_pct: readSharePct(row) };
+          return {
+            judge_model: String(row.judge_model ?? ""),
+            short_name: String(row.short_name ?? ""),
+            observations: Number(row.observations) || 0,
+            avg_challenger_pct: Number(row.avg_challenger_pct) || 0,
+            avg_king_pct: Number(row.avg_king_pct) || 0,
+            avg_margin_pct: Number(row.avg_margin_pct ?? row.avg_gap_pct ?? 0) || 0,
+            pick_challenger_pct: Number(row.pick_challenger_pct) || 0,
+            share_pct: readSharePct(row),
+          };
         })
       : [],
     judge_pairs: Array.isArray(raw.judge_pairs) ? raw.judge_pairs : [],

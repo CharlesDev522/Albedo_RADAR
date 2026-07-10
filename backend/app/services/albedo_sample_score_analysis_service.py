@@ -80,6 +80,8 @@ class _Observation:
     king_pct: float
     lower_pct: float
     higher_pct: float
+    margin: float
+    margin_abs: float
     gap_pct: float
     bucket: SampleGapBucket
     pick_challenger: bool
@@ -89,7 +91,7 @@ class _Observation:
 class _JudgeAccumulator:
     ch_scores: list[float] = field(default_factory=list)
     k_scores: list[float] = field(default_factory=list)
-    gaps: list[float] = field(default_factory=list)
+    margins: list[float] = field(default_factory=list)
     pick_ch: int = 0
     by_bucket: dict[SampleGapBucket, list[_Observation]] = field(
         default_factory=lambda: {t: [] for t in _GAP_TYPES}
@@ -128,8 +130,14 @@ def classify_sample_gap(challenger_pct: float, king_pct: float) -> SampleGapBuck
     return "moderate"
 
 
-def _total_gap_points(observations: list[_Observation]) -> float:
-    return sum(o.gap_pct for o in observations)
+def _share_pct(part: float, total: float) -> float:
+    if total <= 0:
+        return 0.0
+    return round(part / total * 100, 2)
+
+
+def _total_margin_mass(observations: list[_Observation]) -> float:
+    return sum(o.margin_abs for o in observations)
 
 
 def _gap_in_bin(gap: float, bin_min: float, bin_max: float, *, is_first: bool) -> bool:
@@ -152,14 +160,13 @@ def _build_gap_distribution(
             for o in observations
             if _gap_in_bin(o.gap_pct, bin_min, bin_max, is_first=idx == 0)
         ]
-        bin_gap_sum = sum(o.gap_pct for o in matched)
+        bin_mass = sum(o.margin_abs for o in matched)
         bins.append(
             GapDiffBin(
                 label=label,
                 bin_min=bin_min,
                 bin_max=bin_max,
-                gap_points_sum=round(bin_gap_sum, 2),
-                share_pct=round(bin_gap_sum / total_margin * 100, 1) if total_margin else 0.0,
+                share_pct=_share_pct(bin_mass, total_margin),
             )
         )
     return bins
@@ -177,15 +184,14 @@ def _build_gap_type_summaries(
     summaries: list[GapTypeSummary] = []
     for gap_type in _GAP_TYPES:
         type_obs = by_type[gap_type]
-        type_gap_sum = sum(o.gap_pct for o in type_obs)
+        type_mass = sum(o.margin_abs for o in type_obs)
         summaries.append(
             GapTypeSummary(
                 gap_type=gap_type,
                 label=GAP_TYPE_LABELS[gap_type],
                 criteria=GAP_TYPE_CRITERIA[gap_type],
-                total_gap_points=round(type_gap_sum, 2),
-                share_pct=round(type_gap_sum / total_margin * 100, 1) if total_margin else 0.0,
-                avg_gap=round(mean(o.gap_pct for o in type_obs), 2) if type_obs else 0.0,
+                share_pct=_share_pct(type_mass, total_margin),
+                avg_margin_pct=round(mean(o.margin for o in type_obs) * 100, 2) if type_obs else 0.0,
                 gap_distribution=_build_gap_distribution(type_obs, gap_type, total_margin=total_margin),
             )
         )
@@ -195,13 +201,13 @@ def _build_gap_type_summaries(
 def _build_judge_margin_shares(observations: list[_Observation]) -> list[JudgeMarginShare]:
     if not observations:
         return []
-    total_gap = _total_gap_points(observations)
+    total_mass = _total_margin_mass(observations)
     by_judge: dict[str, list[_Observation]] = defaultdict(list)
     for obs in observations:
         by_judge[obs.judge_model].append(obs)
     shares: list[JudgeMarginShare] = []
     for judge_model, obs_list in sorted(by_judge.items()):
-        gap_sum = sum(o.gap_pct for o in obs_list)
+        judge_mass = sum(o.margin_abs for o in obs_list)
         pick_ch = sum(1 for o in obs_list if o.pick_challenger)
         n = len(obs_list)
         shares.append(
@@ -209,11 +215,10 @@ def _build_judge_margin_shares(observations: list[_Observation]) -> list[JudgeMa
                 judge_model=judge_model,
                 short_name=judge_short_name(judge_model),
                 observations=n,
-                total_gap_points=round(gap_sum, 2),
-                share_pct=round(gap_sum / total_gap * 100, 1) if total_gap else 0.0,
-                avg_gap=round(gap_sum / n, 2) if n else 0.0,
+                share_pct=_share_pct(judge_mass, total_mass),
+                avg_margin_pct=round(mean(o.margin for o in obs_list) * 100, 2) if n else 0.0,
                 pick_challenger_pct=round(pick_ch / n * 100, 1) if n else 0.0,
-                by_gap_type=_build_gap_type_summaries(obs_list, total_margin=total_gap),
+                by_gap_type=_build_gap_type_summaries(obs_list, total_margin=total_mass),
             )
         )
     shares.sort(key=lambda s: (-s.share_pct, s.judge_model))
@@ -260,7 +265,9 @@ def analyze_sample_rows(
                 continue
             ch_pct = rubric_score_pct(ch_entry.get("answers") or {}, question_ids)
             k_pct = rubric_score_pct(k_entry.get("answers") or {}, question_ids)
-            gap = abs(ch_pct - k_pct)
+            margin = (ch_pct - k_pct) / 100.0
+            margin_abs = abs(margin)
+            gap = margin_abs * 100.0
             lower = min(ch_pct, k_pct)
             higher = max(ch_pct, k_pct)
             bucket = classify_sample_gap(ch_pct, k_pct)
@@ -277,6 +284,8 @@ def analyze_sample_rows(
                     king_pct=round(k_pct, 2),
                     lower_pct=round(lower, 2),
                     higher_pct=round(higher, 2),
+                    margin=round(margin, 4),
+                    margin_abs=round(margin_abs, 4),
                     gap_pct=round(gap, 2),
                     bucket=bucket,
                     pick_challenger=ch_pct > k_pct,
@@ -299,20 +308,19 @@ def _finalize_judge_summary(
     judge_model: str,
     acc: _JudgeAccumulator,
     *,
-    total_gap: float,
+    total_mass: float,
 ) -> JudgeSampleGapSummary:
     n = len(acc.ch_scores)
-    gap_sum = sum(acc.gaps)
+    judge_mass = sum(abs(m) for m in acc.margins)
     return JudgeSampleGapSummary(
         judge_model=judge_model,
         short_name=judge_short_name(judge_model),
         observations=n,
         avg_challenger_pct=round(mean(acc.ch_scores), 2) if n else 0.0,
         avg_king_pct=round(mean(acc.k_scores), 2) if n else 0.0,
-        avg_gap_pct=round(mean(acc.gaps), 2) if n else 0.0,
+        avg_margin_pct=round(mean(acc.margins) * 100, 2) if n else 0.0,
         pick_challenger_pct=round(acc.pick_ch / n * 100, 1) if n else 0.0,
-        total_gap_points=round(gap_sum, 2),
-        share_pct=round(gap_sum / total_gap * 100, 1) if total_gap else 0.0,
+        share_pct=_share_pct(judge_mass, total_mass),
     )
 
 
@@ -337,7 +345,7 @@ def build_sample_score_analysis(observations: list[_Observation]) -> AlbedoSampl
         jacc.by_bucket[obs.bucket].append(obs)
         jacc.ch_scores.append(obs.challenger_pct)
         jacc.k_scores.append(obs.king_pct)
-        jacc.gaps.append(obs.gap_pct)
+        jacc.margins.append(obs.margin)
         if obs.pick_challenger:
             jacc.pick_ch += 1
 
@@ -352,7 +360,7 @@ def build_sample_score_analysis(observations: list[_Observation]) -> AlbedoSampl
         dj.by_bucket[obs.bucket].append(obs)
         dj.ch_scores.append(obs.challenger_pct)
         dj.k_scores.append(obs.king_pct)
-        dj.gaps.append(obs.gap_pct)
+        dj.margins.append(obs.margin)
         if obs.pick_challenger:
             dj.pick_ch += 1
 
@@ -401,8 +409,8 @@ def build_sample_score_analysis(observations: list[_Observation]) -> AlbedoSampl
     for obs in observations:
         duel_observations[obs.eval_run_id].append(obs)
 
-    total_gap = _total_gap_points(observations)
-    gap_types = _build_gap_type_summaries(observations, total_margin=total_gap)
+    total_mass = _total_margin_mass(observations)
+    gap_types = _build_gap_type_summaries(observations, total_margin=total_mass)
 
     for eval_run_id in sorted(
         duel_meta.keys(),
@@ -411,9 +419,9 @@ def build_sample_score_analysis(observations: list[_Observation]) -> AlbedoSampl
     ):
         meta = duel_meta[eval_run_id]
         duel_obs = duel_observations[eval_run_id]
-        duel_gap = _total_gap_points(duel_obs)
+        duel_mass = _total_margin_mass(duel_obs)
         judges = [
-            _finalize_judge_summary(judge_model, acc, total_gap=duel_gap)
+            _finalize_judge_summary(judge_model, acc, total_mass=duel_mass)
             for judge_model, acc in sorted(duel_judge_acc[eval_run_id].items())
         ]
         sample_count = len(duel_samples[eval_run_id])
@@ -428,8 +436,7 @@ def build_sample_score_analysis(observations: list[_Observation]) -> AlbedoSampl
                 sample_count=sample_count,
                 judge_count=len(judges),
                 observations=obs_count,
-                total_gap_points=round(duel_gap, 2),
-                gap_types=_build_gap_type_summaries(duel_obs, total_margin=duel_gap),
+                gap_types=_build_gap_type_summaries(duel_obs, total_margin=duel_mass),
                 judge_margin_shares=_build_judge_margin_shares(duel_obs),
                 judges=judges,
             )
@@ -440,12 +447,11 @@ def build_sample_score_analysis(observations: list[_Observation]) -> AlbedoSampl
         binary_duels_with_samples=len(duel_meta),
         total_samples=sum(len(s) for s in duel_samples.values()),
         total_observations=len(observations),
-        total_gap_points=round(total_gap, 2),
         judge_models=judge_models,
         gap_types=gap_types,
         judge_margin_shares=_build_judge_margin_shares(observations),
         by_judge=[
-            _finalize_judge_summary(judge_model, acc, total_gap=total_gap)
+            _finalize_judge_summary(judge_model, acc, total_mass=total_mass)
             for judge_model, acc in sorted(judge_acc.items())
         ],
         judge_pairs=judge_pairs,
