@@ -1280,19 +1280,11 @@ export {
   inferRepoHostFromDigest,
   inferRepoHostFromModelUri,
   isHfModelUri,
+  modelCommitUrl,
   modelLinkFromUri,
   parseModelRepo,
   type RepoHost,
 } from "@/lib/modelHub";
-
-export function modelCommitUrl(
-  repo: string,
-  digest: string,
-  host: "hippius" | "huggingface" = "hippius"
-): string {
-  if (host === "huggingface") return hfModelUrl(repo, digest);
-  return hippiusModelUrl(repo);
-}
 
 export function shortAddr(addr: string, n = 5): string {
   if (!addr || addr.length <= n * 2 + 1) return addr;

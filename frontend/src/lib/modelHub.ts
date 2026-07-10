@@ -76,3 +76,12 @@ export function modelLinkFromUri(modelUri: string | null | undefined): string | 
 export function hostBadgeLabel(host: RepoHost): string {
   return host === "huggingface" ? "HF" : "hippius";
 }
+
+export function modelCommitUrl(
+  repo: string,
+  digest: string,
+  host: RepoHost = "hippius"
+): string {
+  if (host === "huggingface") return hfModelUrl(repo, digest);
+  return hippiusModelUrl(repo);
+}
