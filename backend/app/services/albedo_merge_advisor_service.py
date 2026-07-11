@@ -25,6 +25,7 @@ from app.services.albedo_analysis_service import (
     _judge_votes,
     parse_model_uri,
 )
+from app.services.albedo_sample_score_analysis_service import rubric_score_pct
 from app.services.albedo_scoring_analysis_service import (
     CHALLENGER_SIDE,
     KING_SIDE_RAW,
@@ -47,7 +48,7 @@ _METHOD_PRETTY = {
 
 _MAX_DONORS = 5
 _MIN_DONOR_DUELS = 1
-_JUDGE_SPREAD_RELIABLE = 0.25
+_RECENT_DUELS_LIMIT = 60
 _NARROW_MARGIN = 0.05
 _DOMINANT_DONOR_WEIGHT = 0.70
 
@@ -94,8 +95,42 @@ def _judge_reliability(run: dict[str, Any]) -> float:
     return 0.4
 
 
-def _is_consensus_duel(run: dict[str, Any]) -> bool:
-    return _judge_reliability(run) >= 0.75
+def _recent_eval_runs(eval_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    runs = list(eval_runs)
+    runs.sort(key=lambda r: str(r.get("finished_at") or ""), reverse=True)
+    return runs[:_RECENT_DUELS_LIMIT]
+
+
+def _sample_challenger_win_mass(rows: list[dict[str, Any]]) -> float:
+    """Share of samples where challenger rubric score beats the king (mean across judges)."""
+    if not rows:
+        return 0.0
+    wins = 0
+    total = 0
+    for row in rows:
+        question_ids = [str(q.get("id")) for q in (row.get("questions") or []) if q.get("id")]
+        if not question_ids:
+            continue
+        by_judge: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
+        for entry in row.get("judge_results") or []:
+            judge_model = str(entry.get("judge_model") or "")
+            side = entry.get("side")
+            if judge_model and side in (CHALLENGER_SIDE, KING_SIDE_RAW):
+                by_judge[judge_model][str(side)] = entry
+        margins: list[float] = []
+        for sides in by_judge.values():
+            ch_entry = sides.get(CHALLENGER_SIDE)
+            k_entry = sides.get(KING_SIDE_RAW)
+            if not ch_entry or not k_entry:
+                continue
+            ch_pct = rubric_score_pct(ch_entry.get("answers") or {}, question_ids)
+            k_pct = rubric_score_pct(k_entry.get("answers") or {}, question_ids)
+            margins.append(ch_pct - k_pct)
+        if margins:
+            total += 1
+            if mean(margins) > 0:
+                wins += 1
+    return wins / total if total else 0.0
 
 
 def bradley_terry_strengths(
@@ -229,23 +264,9 @@ async def _sample_mass_by_uri(
             )
             continue
         scanned += 1
-        ch_wins = 0.0
-        total = 0.0
-        for sample in rows:
-            for entry in sample.get("judge_results") or []:
-                side = entry.get("side")
-                if side not in (CHALLENGER_SIDE, KING_SIDE_RAW):
-                    continue
-                ans = entry.get("answer")
-                if ans is None:
-                    continue
-                total += 1.0
-                if side == CHALLENGER_SIDE and bool(ans):
-                    ch_wins += 1.0
-                if side == KING_SIDE_RAW and not bool(ans):
-                    ch_wins += 1.0
-        if total > 0:
-            mass[ch_uri] += ch_wins / total
+        mass_value = _sample_challenger_win_mass(rows)
+        if mass_value > 0 or rows:
+            mass[ch_uri] += mass_value
             counts[ch_uri] += 1
     averaged = {
         uri: mass[uri] / counts[uri] for uri in mass if counts[uri] > 0
@@ -367,8 +388,12 @@ def _select_merge_method(
     rationale = [rationale_line]
     if method == "nuslerp":
         t = min(0.65, max(0.12, dominant))
-        params["t"] = round(t, 3)
-        rationale.append(f"NuSLERP t={params['t']}: higher t shifts toward the top donor task vector.")
+        params["donor_weight"] = round(t, 3)
+        params["king_weight"] = round(1.0 - t, 3)
+        rationale.append(
+            f"NuSLERP weights king={params['king_weight']}, donor={params['donor_weight']}: "
+            "interpolate directly between king and top donor (no separate base_model)."
+        )
     elif method in ("ties", "dare_ties"):
         params["lambda"] = 1.0
         params["normalize"] = True
@@ -482,25 +507,32 @@ def _build_mergekit_yaml(
         }
         return _yaml_dump(doc)
 
-    doc: dict[str, Any] = {
-        "merge_method": method,
-        "base_model": base_ref,
-        "dtype": "bfloat16",
-    }
-    if parameters:
+    doc: dict[str, Any] = {"merge_method": method, "dtype": "bfloat16"}
+
+    if method == "nuslerp":
+        top = donors[0] if donors else None
+        if not top:
+            doc["models"] = [{"model": base_ref}]
+            return _yaml_dump(doc)
+        donor_w = float(parameters.get("donor_weight", 0.35))
+        king_w = float(parameters.get("king_weight", 1.0 - donor_w))
+        doc["models"] = [
+            {"model": base_ref, "parameters": {"weight": round(king_w, 4)}},
+            {"model": top.mergekit_ref, "parameters": {"weight": round(donor_w, 4)}},
+        ]
+    elif method == "karcher":
+        models: list[dict[str, Any]] = [{"model": base_ref}]
+        models.extend({"model": donor.mergekit_ref} for donor in donors)
+        doc["models"] = models
+    else:
+        doc["base_model"] = base_ref
         global_params = {
-            k: v for k, v in parameters.items() if k not in ("default_density",)
+            k: v for k, v in parameters.items() if k not in ("default_density", "donor_weight", "king_weight")
         }
         if global_params:
             doc["parameters"] = global_params
-
-    default_density = parameters.get("default_density")
-    models: list[dict[str, Any]] = [{"model": base_ref}]
-    if method == "nuslerp":
-        top = donors[0] if donors else None
-        if top:
-            models.append({"model": top.mergekit_ref})
-    else:
+        default_density = parameters.get("default_density")
+        doc["models"] = []
         for donor in donors:
             entry: dict[str, Any] = {
                 "model": donor.mergekit_ref,
@@ -509,8 +541,7 @@ def _build_mergekit_yaml(
             if default_density is not None:
                 density = donor.density if donor.density is not None else float(default_density)
                 entry["parameters"]["density"] = round(density, 3)
-            models.append(entry)
-    doc["models"] = models
+            doc["models"].append(entry)
 
     yaml_text = _yaml_dump(doc)
     if layer_hints:
@@ -541,7 +572,7 @@ def build_merge_advisor_recommendation(
         ns, name, _ = parse_model_uri(base_uri)
         base_repo = f"{ns}/{name}" if ns else name
 
-    eval_runs = list(dashboard.get("eval_runs") or [])
+    eval_runs = _recent_eval_runs(list(dashboard.get("eval_runs") or []))
     coronation_by_uri: dict[str, int] = defaultdict(int)
     for run in eval_runs:
         if run.get("coronated"):
@@ -682,8 +713,9 @@ def build_merge_advisor_recommendation(
         sample_mass_duels=sample_mass_duels,
         judge_consensus_duels=consensus_duels,
         note=(
-            "Recommendation uses duel outcomes, Bradley–Terry strengths, reign/coronation bonuses, "
-            "and optional per-sample scoring mass. Validate merged checkpoints in real Albedo duels."
+            "Recommendation uses the latest duel window, Bradley–Terry strengths, reign/coronation "
+            "bonuses, and optional per-sample scoring mass. Donors must share architecture with the "
+            "king for mergekit to succeed. Validate merged checkpoints in real Albedo duels."
         ),
     )
 
@@ -702,7 +734,7 @@ async def get_merge_advisor_recommendation(
     sample_mass: dict[str, float] | None = None
     sample_mass_duels = 0
     if include_sample_mass:
-        eval_runs = list(dashboard.get("eval_runs") or [])
+        eval_runs = _recent_eval_runs(list(dashboard.get("eval_runs") or []))
         reign = (dashboard.get("reign") or {}).get("members") or []
         base_uri = str(reign[0].get("model_uri") or "") if reign else ""
         async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:

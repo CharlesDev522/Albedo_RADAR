@@ -93,6 +93,10 @@ function UsageGuide() {
                 From the <code className="text-zinc-500">research/mergekit</code> submodule:{" "}
                 <code className="text-zinc-500">mergekit-yaml your-config.yaml --out ./merged-model</code>
               </li>
+              <li>
+                NuSLERP configs use per-model <strong className="text-zinc-300">weight</strong> on king + top donor
+                (no duplicate base_model). TIES/DARE configs put the king in <strong className="text-zinc-300">base_model</strong> only.
+              </li>
               <li>Upload the merged checkpoint and submit it as a challenger — only real Albedo duels validate the merge.</li>
             </ol>
           </div>

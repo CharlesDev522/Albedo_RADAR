@@ -92,6 +92,120 @@ def test_build_merge_advisor_nuslerp_for_single_donor():
     assert rec.donors[0].sample_mass == 0.62
 
 
+def test_nuslerp_yaml_uses_weights_not_base_model():
+    dashboard = {
+        "reign": {
+            "members": [
+                {
+                    "king_version": 1,
+                    "model_uri": "org/king@sha256:1",
+                    "hotkey": "hk",
+                    "uid": 1,
+                    "weight_bps": 2000,
+                }
+            ]
+        },
+        "eval_runs": [
+            {
+                "eval_run_id": "r1",
+                "challenger_won": True,
+                "win_margin": 0.2,
+                "finished_at": "2026-06-27T10:00:00+00:00",
+                "model_uri": "org/donor@sha256:2",
+                "uid": 2,
+                "score_breakdown": {
+                    "by_judge": {"z-ai/glm-5.1": 0.8, "qwen/qwen3.5-397b-a17b": 0.75},
+                    "by_judge_king": {"z-ai/glm-5.1": 0.2, "qwen/qwen3.5-397b-a17b": 0.25},
+                },
+                "king": {"model_uri": "org/king@sha256:1", "uid": 1},
+            }
+        ],
+    }
+    rec = build_merge_advisor_recommendation(dashboard)
+    if rec.method.method == "nuslerp":
+        assert "base_model:" not in rec.mergekit_yaml
+        assert "weight:" in rec.mergekit_yaml
+        assert "org/king@sha256:1" in rec.mergekit_yaml
+        assert "org/donor@sha256:2" in rec.mergekit_yaml
+
+
+def test_ties_yaml_lists_donors_only_with_king_as_base():
+    dashboard = {
+        "reign": {
+            "members": [
+                {
+                    "king_version": 1,
+                    "model_uri": "org/king@sha256:1",
+                    "hotkey": "hk",
+                    "uid": 1,
+                    "weight_bps": 2000,
+                }
+            ]
+        },
+        "eval_runs": [],
+    }
+    for idx, donor in enumerate(("donor-a", "donor-b"), start=1):
+        dashboard["eval_runs"].append(
+            {
+                "eval_run_id": f"r{idx}",
+                "challenger_won": True,
+                "win_margin": 0.1,
+                "finished_at": f"2026-06-27T1{idx}:00:00+00:00",
+                "model_uri": f"org/{donor}@sha256:{idx}",
+                "uid": idx + 1,
+                "score_breakdown": {
+                    "by_judge": {"z-ai/glm-5.1": 0.7, "qwen/qwen3.5-397b-a17b": 0.68},
+                    "by_judge_king": {"z-ai/glm-5.1": 0.3, "qwen/qwen3.5-397b-a17b": 0.32},
+                },
+                "king": {"model_uri": "org/king@sha256:1", "uid": 1},
+            }
+        )
+    rec = build_merge_advisor_recommendation(dashboard, max_donors=2)
+    if rec.method.method in ("ties", "dare_ties", "task_arithmetic"):
+        assert "base_model: org/king@sha256:1" in rec.mergekit_yaml
+        assert rec.mergekit_yaml.count("org/king@sha256:1") == 1
+
+
+def test_sample_challenger_win_mass_from_answers_dict():
+    from app.services.albedo_merge_advisor_service import _sample_challenger_win_mass
+
+    rows = [
+        {
+            "sample_id": "s1",
+            "questions": [{"id": "q_01"}, {"id": "q_02"}],
+            "judge_results": [
+                {
+                    "judge_model": "z-ai/glm-5.1",
+                    "side": "challenger",
+                    "answers": {"q_01": "1", "q_02": "1"},
+                },
+                {
+                    "judge_model": "z-ai/glm-5.1",
+                    "side": "previous_king",
+                    "answers": {"q_01": "0", "q_02": "0"},
+                },
+            ],
+        },
+        {
+            "sample_id": "s2",
+            "questions": [{"id": "q_01"}],
+            "judge_results": [
+                {
+                    "judge_model": "z-ai/glm-5.1",
+                    "side": "challenger",
+                    "answers": {"q_01": "0"},
+                },
+                {
+                    "judge_model": "z-ai/glm-5.1",
+                    "side": "previous_king",
+                    "answers": {"q_01": "1"},
+                },
+            ],
+        },
+    ]
+    assert _sample_challenger_win_mass(rows) == 0.5
+
+
 def test_build_merge_advisor_ties_for_multiple_donors():
     dashboard = {
         "reign": {
