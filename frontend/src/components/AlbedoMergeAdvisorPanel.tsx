@@ -23,6 +23,94 @@ function fmtPct(n: number | null | undefined): string {
   return `${(n * 100).toFixed(1)}%`;
 }
 
+function UsageGuide() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded border border-zinc-800 bg-zinc-950/40">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-2 px-2.5 py-2 text-left hover:bg-zinc-900/50"
+      >
+        <span className="text-[10px] font-medium text-zinc-300">How to use the merge advisor</span>
+        <span className="text-[10px] text-zinc-500">{open ? "Hide" : "Show"}</span>
+      </button>
+      {open && (
+        <div className="px-2.5 pb-2.5 space-y-2.5 text-[10px] text-zinc-400 border-t border-zinc-800/80">
+          <div>
+            <p className="text-zinc-300 font-medium mb-0.5">1. Read the recommendation</p>
+            <p>
+              The panel loads automatically from live SN97 duel data. The <strong className="text-zinc-300">base (king)</strong> is
+              always the current reign holder. <strong className="text-zinc-300">Donors</strong> are challengers that performed well
+              against that king (wins, margins, coronations, optional per-question sample mass).
+            </p>
+          </div>
+          <div>
+            <p className="text-zinc-300 font-medium mb-0.5">2. Tune the two filters</p>
+            <ul className="list-disc list-inside space-y-0.5 ml-0.5">
+              <li>
+                <strong className="text-zinc-300">Sample mass</strong> — fetches recent{" "}
+                <code className="text-zinc-500">SCORING_RESULTS</code> JSONL and weights donors by how often they win
+                individual rubric questions (slower, more precise).
+              </li>
+              <li>
+                <strong className="text-zinc-300">Consensus duels only</strong> — ignores split judge panels (e.g. 1–1)
+                when estimating strengths; use when judges disagree a lot.
+              </li>
+            </ul>
+            <p className="mt-1">Click <strong className="text-zinc-300">Refresh</strong> after changing filters.</p>
+          </div>
+          <div>
+            <p className="text-zinc-300 font-medium mb-0.5">3. Understand the table columns</p>
+            <ul className="list-disc list-inside space-y-0.5 ml-0.5">
+              <li><strong className="text-zinc-300">Weight</strong> — normalized merge share for task-vector methods (TIES / DARE / task arithmetic).</li>
+              <li><strong className="text-zinc-300">BT</strong> — Bradley–Terry strength from all pairwise duel outcomes.</li>
+              <li><strong className="text-zinc-300">Margin</strong> — average duel win margin vs the king (positive = challenger ahead).</li>
+              <li><strong className="text-zinc-300">Sample</strong> — per-question win rate from scoring JSONL (only when sample mass is on).</li>
+              <li><strong className="text-zinc-300">Density</strong> — suggested TIES/DARE sparsity for that donor (higher = bolder task-vector injection).</li>
+            </ul>
+          </div>
+          <div>
+            <p className="text-zinc-300 font-medium mb-0.5">4. Pick a merge method</p>
+            <p>
+              The advisor auto-selects based on donor count and duel noise:{" "}
+              <strong className="text-zinc-300">NuSLERP</strong> for one strong donor,{" "}
+              <strong className="text-zinc-300">TIES</strong> for 2–3 clean donors,{" "}
+              <strong className="text-zinc-300">DARE TIES</strong> when judges split or donors are many,{" "}
+              <strong className="text-zinc-300">task arithmetic</strong> on tight margins. Check{" "}
+              <strong className="text-zinc-300">Alternatives</strong> if you want a different trade-off.
+            </p>
+          </div>
+          <div>
+            <p className="text-zinc-300 font-medium mb-0.5">5. Export and run mergekit</p>
+            <ol className="list-decimal list-inside space-y-0.5 ml-0.5">
+              <li>Click <strong className="text-zinc-300">Download YAML</strong> or <strong className="text-zinc-300">Copy</strong> the config.</li>
+              <li>
+                Ensure model paths in the YAML resolve on your machine (Hippius{" "}
+                <code className="text-zinc-500">org/model@sha256:…</code> or Hugging Face repo paths).
+              </li>
+              <li>
+                From the <code className="text-zinc-500">research/mergekit</code> submodule:{" "}
+                <code className="text-zinc-500">mergekit-yaml your-config.yaml --out ./merged-model</code>
+              </li>
+              <li>Upload the merged checkpoint and submit it as a challenger — only real Albedo duels validate the merge.</li>
+            </ol>
+          </div>
+          <div>
+            <p className="text-zinc-300 font-medium mb-0.5">6. API (optional)</p>
+            <p className="font-mono text-[9px] text-zinc-500 break-all">
+              GET /api/v1/albedo/merge-advisor/recommendation?subnet=97&amp;include_sample_mass=true&amp;consensus_only=false
+            </p>
+            <p className="font-mono text-[9px] text-zinc-500 break-all mt-0.5">
+              GET /api/v1/albedo/merge-advisor/config — same params, returns YAML attachment
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AlbedoMergeAdvisorPanel() {
   const { subnet } = useSubnet();
   const [rec, setRec] = useState<AlbedoMergeAdvisorRecommendation | null>(null);
@@ -88,9 +176,9 @@ export default function AlbedoMergeAdvisorPanel() {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="text-[11px] font-semibold text-zinc-200">Smart merge advisor</h3>
-          <p className="text-[9px] text-zinc-600 mt-0.5 max-w-xl">
-            Data-driven mergekit recipe from duel outcomes, reign weights, judge consensus, and
-            optional per-sample SCORING_RESULTS mass (Bradley–Terry + task-vector methods).
+          <p className="text-[9px] text-zinc-600 mt-0.5 max-w-2xl">
+            Builds a mergekit YAML from duel outcomes, reign history, and optional per-sample scoring.
+            Scroll down on this tab for the full how-to guide.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -130,6 +218,8 @@ export default function AlbedoMergeAdvisorPanel() {
           </button>
         </div>
       </div>
+
+      <UsageGuide />
 
       {error && (
         <p className="text-[10px] text-rose-300 border border-rose-500/30 rounded px-2 py-1 bg-rose-500/10">

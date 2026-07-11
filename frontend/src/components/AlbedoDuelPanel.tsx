@@ -514,7 +514,6 @@ export default function AlbedoDuelPanel() {
 
       {section === "kings" && (
         <>
-          <AlbedoMergeAdvisorPanel />
           <AlbedoKingReignDatasetPanel kingHistory={data.king_history ?? []} />
 
           <section className="panel px-3 py-2.5">
@@ -606,6 +605,8 @@ export default function AlbedoDuelPanel() {
               </table>
             </div>
           </section>
+
+          <AlbedoMergeAdvisorPanel />
         </>
       )}
 
