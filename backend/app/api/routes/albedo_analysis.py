@@ -9,6 +9,7 @@ from app.db.session import get_db
 from app.schemas.albedo_analysis import AlbedoAnalysisOverview
 from app.schemas.albedo_eval_queue import AlbedoEvalQueueOverview
 from app.schemas.albedo_live import AlbedoLiveDuel
+from app.schemas.albedo_merge_advisor import AlbedoMergeAdvisorRecommendation
 from app.schemas.albedo_sample_score_analysis import AlbedoSampleScoreAnalysis
 from app.schemas.albedo_scoring_analysis import (
     AlbedoDatasetBuildSummary,
@@ -18,6 +19,7 @@ from app.schemas.albedo_scoring_analysis import (
 from app.services.albedo_analysis_service import get_albedo_analysis_overview
 from app.services.albedo_eval_queue_service import get_eval_queue_overview
 from app.services.albedo_live_duel_service import get_live_duel
+from app.services.albedo_merge_advisor_service import get_merge_advisor_recommendation
 from app.services.albedo_miner_lookup import load_historical_miner_lookup
 from app.services.albedo_sample_score_analysis_service import get_sample_score_analysis
 from app.services.albedo_scoring_analysis_service import (
@@ -347,6 +349,83 @@ async def albedo_king_reign_dataset_export(
             status_code=502,
             detail=f"Failed to export king reign dataset: {exc}",
         ) from exc
+
+
+@router.get("/merge-advisor/recommendation", response_model=AlbedoMergeAdvisorRecommendation)
+async def albedo_merge_advisor_recommendation(
+    subnet: int = Query(default=97, ge=0),
+    fresh: bool = Query(default=False),
+    include_sample_mass: bool = Query(
+        default=True,
+        description="Fetch SCORING_RESULTS JSONL to refine donor weights",
+    ),
+    max_donors: int = Query(default=5, ge=1, le=10),
+    consensus_only: bool = Query(
+        default=False,
+        description="Only count duels where judges strongly agree",
+    ),
+) -> AlbedoMergeAdvisorRecommendation:
+    """Data-driven mergekit recipe from duel, reign, and scoring artifacts."""
+    if subnet != 97:
+        raise HTTPException(
+            status_code=400,
+            detail="Albedo merge advisor is only available for SN97",
+        )
+    settings = get_settings()
+    try:
+        return await get_merge_advisor_recommendation(
+            subnet=subnet,
+            settings=settings,
+            fresh=fresh,
+            include_sample_mass=include_sample_mass,
+            max_donors=max_donors,
+            consensus_only=consensus_only,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to build merge recommendation: {exc}",
+        ) from exc
+
+
+@router.get("/merge-advisor/config")
+async def albedo_merge_advisor_config(
+    subnet: int = Query(default=97, ge=0),
+    fresh: bool = Query(default=False),
+    include_sample_mass: bool = Query(default=True),
+    max_donors: int = Query(default=5, ge=1, le=10),
+    consensus_only: bool = Query(default=False),
+) -> Response:
+    """Download mergekit YAML config for the current recommendation."""
+    if subnet != 97:
+        raise HTTPException(
+            status_code=400,
+            detail="Albedo merge advisor is only available for SN97",
+        )
+    settings = get_settings()
+    try:
+        rec = await get_merge_advisor_recommendation(
+            subnet=subnet,
+            settings=settings,
+            fresh=fresh,
+            include_sample_mass=include_sample_mass,
+            max_donors=max_donors,
+            consensus_only=consensus_only,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to build merge config: {exc}",
+        ) from exc
+    filename = f"albedo-sn{subnet}-merge-{rec.method.method}.yaml"
+    return Response(
+        content=rec.mergekit_yaml.encode("utf-8"),
+        media_type="application/x-yaml",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Export-Filename": filename,
+        },
+    )
 
 
 @router.get("/scoring-dataset/dedup-script")

@@ -781,6 +781,66 @@ export interface AlbedoSampleScoreAnalysis {
   updated_at?: string | null;
 }
 
+export interface AlbedoMergeDonorCandidate {
+  model_uri: string;
+  repo?: string | null;
+  label: string;
+  mergekit_ref: string;
+  duels: number;
+  wins: number;
+  losses: number;
+  win_pct: number;
+  avg_margin?: number | null;
+  bt_strength: number;
+  coronations?: number;
+  reign_slots?: number;
+  sample_mass?: number | null;
+  judge_reliability?: number | null;
+  merge_weight: number;
+  density?: number | null;
+}
+
+export interface AlbedoMergeMethodOption {
+  method: string;
+  score: number;
+  rationale: string;
+}
+
+export interface AlbedoMergeMethodRecommendation {
+  method: string;
+  pretty_name: string;
+  parameters: Record<string, string | number | boolean>;
+  rationale: string[];
+  alternatives: AlbedoMergeMethodOption[];
+}
+
+export interface AlbedoMergeLayerHint {
+  layer_fraction_start: number;
+  layer_fraction_end: number;
+  density: number;
+  note: string;
+}
+
+export interface AlbedoMergeAdvisorRecommendation {
+  subnet: number;
+  generated_at?: string | null;
+  base_model_uri: string;
+  base_repo?: string | null;
+  base_mergekit_ref: string;
+  base_label: string;
+  donors: AlbedoMergeDonorCandidate[];
+  method: AlbedoMergeMethodRecommendation;
+  layer_hints: AlbedoMergeLayerHint[];
+  mergekit_yaml: string;
+  rationale: string[];
+  data_sources: string[];
+  duels_analyzed: number;
+  binary_duels_analyzed: number;
+  sample_mass_duels: number;
+  judge_consensus_duels: number;
+  note?: string | null;
+}
+
 export interface AlbedoAnalysisOverview {
   subnet: number;
   source: string;
@@ -1264,6 +1324,67 @@ export const api = {
     const exportHeader = res.headers.get("X-Export-Filename");
     const match = header?.match(/filename="?([^";\n]+)"?/i);
     const filename = exportHeader ?? match?.[1] ?? "dedup_dual_zero_jsonl.py";
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
+  },
+  getAlbedoMergeAdvisorRecommendation: (
+    subnet = DEFAULT_SUBNET,
+    forceRefresh = false,
+    includeSampleMass = true,
+    consensusOnly = false,
+    maxDonors = 5
+  ) => {
+    const qs = [
+      `subnet=${subnet}`,
+      forceRefresh ? "fresh=true" : "",
+      includeSampleMass ? "" : "include_sample_mass=false",
+      consensusOnly ? "consensus_only=true" : "",
+      `max_donors=${maxDonors}`,
+    ]
+      .filter(Boolean)
+      .join("&");
+    return fetchApi<AlbedoMergeAdvisorRecommendation>(`/albedo/merge-advisor/recommendation?${qs}`, {
+      forceRefresh,
+    });
+  },
+  downloadAlbedoMergeAdvisorConfig: async (
+    subnet = DEFAULT_SUBNET,
+    forceRefresh = false,
+    includeSampleMass = true,
+    consensusOnly = false,
+    maxDonors = 5
+  ) => {
+    const qs = [
+      `subnet=${subnet}`,
+      forceRefresh ? "fresh=true" : "",
+      includeSampleMass ? "" : "include_sample_mass=false",
+      consensusOnly ? "consensus_only=true" : "",
+      `max_donors=${maxDonors}`,
+    ]
+      .filter(Boolean)
+      .join("&");
+    const res = await fetch(`${apiBase()}/albedo/merge-advisor/config?${qs}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      let detail = `Download failed: HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        if (body && typeof body.detail === "string") detail = body.detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail);
+    }
+    const blob = await res.blob();
+    const header = res.headers.get("Content-Disposition");
+    const exportHeader = res.headers.get("X-Export-Filename");
+    const match = header?.match(/filename="?([^";\n]+)"?/i);
+    const filename = exportHeader ?? match?.[1] ?? `albedo-sn${subnet}-merge.yaml`;
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
