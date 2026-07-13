@@ -606,7 +606,7 @@ export default function AlbedoDuelPanel() {
             </div>
           </section>
 
-          <AlbedoMergeAdvisorPanel />
+          <AlbedoMergeAdvisorPanel kingHistory={data.king_history ?? []} />
         </>
       )}
 

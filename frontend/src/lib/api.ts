@@ -781,17 +781,31 @@ export interface AlbedoSampleScoreAnalysis {
   updated_at?: string | null;
 }
 
+export type MergeAdvisorMode = "current_king" | "multi_king";
+
+export interface AlbedoMergeGlobalBtRow {
+  rank: number;
+  model_uri: string;
+  label: string;
+  repo?: string | null;
+  bt_strength: number;
+}
+
 export interface AlbedoMergeDonorCandidate {
   model_uri: string;
   repo?: string | null;
   label: string;
   mergekit_ref: string;
+  model_family?: string | null;
+  sources?: string[];
   duels: number;
   wins: number;
   losses: number;
+  historical_duels?: number;
   win_pct: number;
   avg_margin?: number | null;
   bt_strength: number;
+  global_bt_rank?: number | null;
   coronations?: number;
   reign_slots?: number;
   sample_mass?: number | null;
@@ -821,17 +835,33 @@ export interface AlbedoMergeLayerHint {
   note: string;
 }
 
+export interface AlbedoMergeMethodYaml {
+  method: string;
+  pretty_name: string;
+  score: number;
+  is_primary: boolean;
+  yaml: string;
+}
+
 export interface AlbedoMergeAdvisorRecommendation {
   subnet: number;
   generated_at?: string | null;
+  mode?: MergeAdvisorMode;
+  king_versions_scanned?: number[];
+  include_past_kings?: boolean;
+  min_duels?: number;
   base_model_uri: string;
   base_repo?: string | null;
   base_mergekit_ref: string;
   base_label: string;
+  base_model_family?: string | null;
   donors: AlbedoMergeDonorCandidate[];
   method: AlbedoMergeMethodRecommendation;
   layer_hints: AlbedoMergeLayerHint[];
   mergekit_yaml: string;
+  method_yamls?: AlbedoMergeMethodYaml[];
+  global_bt_leaderboard?: AlbedoMergeGlobalBtRow[];
+  architecture_warnings?: string[];
   rationale: string[];
   data_sources: string[];
   duels_analyzed: number;
@@ -1061,6 +1091,49 @@ async function fetchApi<T>(path: string, opts?: { forceRefresh?: boolean }): Pro
     return fetchApiRaw<T>(path);
   }
   return fetchWithCache(path, () => fetchApiRaw<T>(path), opts);
+}
+
+export interface MergeAdvisorOptions {
+  mode?: MergeAdvisorMode;
+  kingVersions?: number[];
+  includePastKings?: boolean;
+  minDuels?: number;
+  includeSampleMass?: boolean;
+  consensusOnly?: boolean;
+  maxDonors?: number;
+  exportAllMethods?: boolean;
+}
+
+function mergeAdvisorQuery(
+  subnet: number,
+  forceRefresh: boolean,
+  opts: MergeAdvisorOptions = {}
+): string {
+  const {
+    mode = "multi_king",
+    kingVersions = [],
+    includePastKings = true,
+    minDuels = 2,
+    includeSampleMass = true,
+    consensusOnly = false,
+    maxDonors = 5,
+    exportAllMethods = true,
+  } = opts;
+  const versions = [...new Set(kingVersions)].filter((v) => v > 0).sort((a, b) => a - b);
+  return [
+    `subnet=${subnet}`,
+    `mode=${mode}`,
+    versions.length ? `king_versions=${versions.join(",")}` : "",
+    includePastKings ? "" : "include_past_kings=false",
+    `min_duels=${minDuels}`,
+    forceRefresh ? "fresh=true" : "",
+    includeSampleMass ? "" : "include_sample_mass=false",
+    consensusOnly ? "consensus_only=true" : "",
+    `max_donors=${maxDonors}`,
+    exportAllMethods ? "" : "export_all_methods=false",
+  ]
+    .filter(Boolean)
+    .join("&");
 }
 
 export const api = {
@@ -1334,19 +1407,9 @@ export const api = {
   getAlbedoMergeAdvisorRecommendation: (
     subnet = DEFAULT_SUBNET,
     forceRefresh = false,
-    includeSampleMass = true,
-    consensusOnly = false,
-    maxDonors = 5
+    opts: MergeAdvisorOptions = {}
   ) => {
-    const qs = [
-      `subnet=${subnet}`,
-      forceRefresh ? "fresh=true" : "",
-      includeSampleMass ? "" : "include_sample_mass=false",
-      consensusOnly ? "consensus_only=true" : "",
-      `max_donors=${maxDonors}`,
-    ]
-      .filter(Boolean)
-      .join("&");
+    const qs = mergeAdvisorQuery(subnet, forceRefresh, opts);
     return fetchApi<AlbedoMergeAdvisorRecommendation>(`/albedo/merge-advisor/recommendation?${qs}`, {
       forceRefresh,
     });
@@ -1354,16 +1417,12 @@ export const api = {
   downloadAlbedoMergeAdvisorConfig: async (
     subnet = DEFAULT_SUBNET,
     forceRefresh = false,
-    includeSampleMass = true,
-    consensusOnly = false,
-    maxDonors = 5
+    opts: MergeAdvisorOptions & { method?: string } = {}
   ) => {
+    const { method, ...rest } = opts;
     const qs = [
-      `subnet=${subnet}`,
-      forceRefresh ? "fresh=true" : "",
-      includeSampleMass ? "" : "include_sample_mass=false",
-      consensusOnly ? "consensus_only=true" : "",
-      `max_donors=${maxDonors}`,
+      mergeAdvisorQuery(subnet, forceRefresh, rest),
+      method ? `method=${encodeURIComponent(method)}` : "",
     ]
       .filter(Boolean)
       .join("&");

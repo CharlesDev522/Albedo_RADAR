@@ -13,12 +13,16 @@ import httpx
 from app.config import Settings, get_settings
 from app.integrations.albedo_dashboard import fetch_dashboard
 from app.integrations.albedo_scoring_results import fetch_scoring_results_jsonl
+from app.chain_reader.albedo_model_family import infer_albedo_model_family
 from app.schemas.albedo_merge_advisor import (
     AlbedoMergeAdvisorRecommendation,
     AlbedoMergeDonorCandidate,
+    AlbedoMergeGlobalBtRow,
     AlbedoMergeLayerHint,
     AlbedoMergeMethodOption,
     AlbedoMergeMethodRecommendation,
+    AlbedoMergeMethodYaml,
+    MergeAdvisorMode,
 )
 from app.services.albedo_analysis_service import (
     _consensus_pattern,
@@ -30,6 +34,8 @@ from app.services.albedo_scoring_analysis_service import (
     CHALLENGER_SIDE,
     KING_SIDE_RAW,
     _binary_eval_runs,
+    _coronations_from_eval_runs,
+    _king_reign_windows,
     _scoring_results_url,
 )
 
@@ -47,8 +53,9 @@ _METHOD_PRETTY = {
 }
 
 _MAX_DONORS = 5
-_MIN_DONOR_DUELS = 1
+_DEFAULT_MIN_DONOR_DUELS = 2
 _RECENT_DUELS_LIMIT = 60
+_SAMPLE_MASS_DUEL_LIMIT = 20
 _NARROW_MARGIN = 0.05
 _DOMINANT_DONOR_WEIGHT = 0.70
 
@@ -191,45 +198,191 @@ def _collect_duel_outcomes(
     return outcomes, analyzed, consensus_count
 
 
-def _donor_stats_from_duels(
+def _model_family(model_uri: str, repo: str | None = None) -> str | None:
+    if repo:
+        return infer_albedo_model_family(repo)
+    ns, name, _ = parse_model_uri(model_uri)
+    repo_guess = f"{ns}/{name}" if ns else name
+    return infer_albedo_model_family(repo_guess)
+
+
+def _architecture_warnings(
+    base_family: str | None,
+    donors: list[AlbedoMergeDonorCandidate],
+) -> list[str]:
+    warnings: list[str] = []
+    if not base_family:
+        warnings.append("Could not infer base model family — verify all donors share architecture before merging.")
+        return warnings
+    mismatched = [d for d in donors if d.model_family and d.model_family != base_family]
+    unknown = [d for d in donors if not d.model_family]
+    if mismatched:
+        labels = ", ".join(short_label(d.label) for d in mismatched[:4])
+        warnings.append(
+            f"Family mismatch: base is {base_family} but donor(s) differ ({labels}). "
+            "mergekit will likely fail across families."
+        )
+    if unknown:
+        warnings.append(
+            f"{len(unknown)} donor(s) have unknown family — confirm they match {base_family}."
+        )
+    return warnings
+
+
+def short_label(label: str, max_len: int = 24) -> str:
+    return label if len(label) <= max_len else label[: max_len - 1] + "…"
+
+
+def _global_bt_leaderboard(
+    bt: dict[str, float],
+    *,
+    base_uri: str,
+    limit: int = 12,
+) -> list[AlbedoMergeGlobalBtRow]:
+    ranked = sorted(
+        ((uri, strength) for uri, strength in bt.items() if uri and uri != base_uri),
+        key=lambda row: -row[1],
+    )[:limit]
+    rows: list[AlbedoMergeGlobalBtRow] = []
+    for idx, (uri, strength) in enumerate(ranked, start=1):
+        ns, name, _ = parse_model_uri(uri)
+        repo = f"{ns}/{name}" if ns else name
+        rows.append(
+            AlbedoMergeGlobalBtRow(
+                rank=idx,
+                model_uri=uri,
+                repo=repo,
+                label=_model_label(uri, repo),
+                bt_strength=round(strength, 4),
+            )
+        )
+    return rows
+
+
+def _empty_donor_stat() -> dict[str, Any]:
+    return {
+        "duels": 0,
+        "wins": 0,
+        "historical_duels": 0,
+        "margins": [],
+        "reliability": [],
+        "repo": None,
+        "sources": set(),
+        "coronations": 0,
+        "reign_slots": 0,
+    }
+
+
+def _touch_donor_stat(
+    stats: dict[str, dict[str, Any]],
+    uri: str,
+    run: dict[str, Any],
+    *,
+    source: str,
+    historical: bool,
+) -> None:
+    if not uri:
+        return
+    s = stats[uri]
+    s["duels"] += 1
+    if historical:
+        s["historical_duels"] += 1
+    margin = _duel_margin(run)
+    s["margins"].append(margin)
+    s["reliability"].append(_judge_reliability(run))
+    if bool(run.get("challenger_won")):
+        s["wins"] += 1
+    ns, name, _ = parse_model_uri(uri)
+    s["repo"] = f"{ns}/{name}" if ns else name
+    s["sources"].add(source)
+
+
+def _collect_donor_stats(
     eval_runs: list[dict[str, Any]],
     *,
     base_uri: str,
+    mode: MergeAdvisorMode,
+    king_versions: list[int] | None,
+    include_past_kings: bool,
     coronation_by_uri: dict[str, int],
     reign_slots_by_uri: dict[str, int],
+    coronations: list[Any],
 ) -> dict[str, dict[str, Any]]:
-    stats: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {
-            "duels": 0,
-            "wins": 0,
-            "margins": [],
-            "reliability": [],
-            "repo": None,
-        }
-    )
+    stats: dict[str, dict[str, Any]] = defaultdict(_empty_donor_stat)
+
     for run in eval_runs:
         ch_uri = _challenger_uri(run)
         if not ch_uri or ch_uri == base_uri:
             continue
         k_uri = _king_uri(run) or base_uri
-        if k_uri != base_uri:
-            continue
-        s = stats[ch_uri]
-        s["duels"] += 1
-        margin = _duel_margin(run)
-        s["margins"].append(margin)
-        s["reliability"].append(_judge_reliability(run))
-        if bool(run.get("challenger_won")):
-            s["wins"] += 1
-        ns, name, _ = parse_model_uri(ch_uri)
-        s["repo"] = f"{ns}/{name}" if ns else name
+        if mode == "current_king":
+            if k_uri != base_uri:
+                continue
+            _touch_donor_stat(stats, ch_uri, run, source="vs_current_king", historical=False)
+        else:
+            if k_uri == base_uri:
+                _touch_donor_stat(stats, ch_uri, run, source="vs_current_king", historical=False)
+
+    if mode == "multi_king":
+        windows = _king_reign_windows(coronations)
+        versions = king_versions or sorted(windows.keys())
+        for king_version in versions:
+            if king_version not in windows:
+                continue
+            coronation_at, active_until = windows[king_version]
+            for run in eval_runs:
+                king = run.get("king") or {}
+                if king.get("king_version") != king_version:
+                    continue
+                finished = str(run.get("finished_at") or "")
+                if finished < coronation_at:
+                    continue
+                if active_until and finished > active_until:
+                    continue
+                ch_uri = _challenger_uri(run)
+                if not ch_uri or ch_uri == base_uri:
+                    continue
+                _touch_donor_stat(
+                    stats,
+                    ch_uri,
+                    run,
+                    source=f"king_v{king_version}_reign",
+                    historical=(_king_uri(run) or "") != base_uri,
+                )
+
+        if include_past_kings:
+            for cor in coronations:
+                uri = str(getattr(cor, "model_uri", "") or "")
+                if uri and uri != base_uri:
+                    stats[uri]["sources"].add("past_king")
+                    stats[uri]["coronations"] = max(int(stats[uri].get("coronations") or 0), 1)
+
     for uri, count in coronation_by_uri.items():
         if uri and uri != base_uri:
             stats[uri]["coronations"] = count
     for uri, slots in reign_slots_by_uri.items():
         if uri and uri != base_uri:
             stats[uri]["reign_slots"] = slots
+
     return stats
+
+
+def _donor_eligible(
+    stats: dict[str, Any],
+    *,
+    min_duels: int,
+    include_past_kings: bool,
+    mode: MergeAdvisorMode,
+) -> bool:
+    total_duels = int(stats["duels"])
+    if total_duels >= min_duels:
+        return True
+    if mode == "multi_king" and include_past_kings:
+        if int(stats.get("coronations") or 0) > 0 and "past_king" in stats.get("sources", set()):
+            return True
+        if int(stats.get("coronations") or 0) > 0 and total_duels >= 1:
+            return True
+    return False
 
 
 async def _sample_mass_by_uri(
@@ -239,9 +392,9 @@ async def _sample_mass_by_uri(
     settings: Settings,
     client: httpx.AsyncClient,
     fresh: bool,
-    limit: int = 12,
+    limit: int = _SAMPLE_MASS_DUEL_LIMIT,
 ) -> tuple[dict[str, float], int]:
-    """Aggregate per-sample challenger win mass from scoring JSONL."""
+    """Aggregate per-sample challenger win mass from scoring JSONL across duel windows."""
     binary_runs = _binary_eval_runs(eval_runs)
     binary_runs.sort(key=lambda r: str(r.get("finished_at") or ""), reverse=True)
     mass: dict[str, float] = defaultdict(float)
@@ -292,7 +445,12 @@ def _raw_donor_score(
     if sample_mass is not None:
         sample_factor = 0.5 + sample_mass
     reliability = judge_reliability if judge_reliability is not None else 0.75
-    return max(1e-6, bt_strength * (0.5 + win_pct / 100.0) * margin_bonus * reign_bonus * sample_factor * reliability)
+    # BT is primary; win_pct is a mild tie-breaker (avoids double-counting duel outcomes).
+    win_factor = 0.8 + 0.2 * (win_pct / 100.0)
+    return max(
+        1e-6,
+        bt_strength * win_factor * margin_bonus * reign_bonus * sample_factor * reliability,
+    )
 
 
 def _normalize_weights(scores: dict[str, float]) -> dict[str, float]:
@@ -312,6 +470,136 @@ def _margin_noise(eval_runs: list[dict[str, Any]], base_uri: str) -> float:
     if len(margins) < 2:
         return 0.0
     return pstdev(margins)
+
+
+def _method_candidates(
+    *,
+    donor_count: int,
+    dominant: float,
+    narrow: bool,
+    noisy: bool,
+) -> list[tuple[str, float, str]]:
+    candidates: list[tuple[str, float, str]] = []
+    if donor_count == 1 or dominant >= _DOMINANT_DONOR_WEIGHT:
+        candidates.append(
+            (
+                "nuslerp",
+                0.9 if donor_count == 1 else 0.85,
+                "Single strong donor or one dominant weight — interpolate king ↔ donor with NuSLERP.",
+            )
+        )
+    if donor_count >= 2:
+        candidates.append(
+            (
+                "ties",
+                0.8 if not noisy else 0.55,
+                "Multiple donors with judge consensus — TIES sparsifies task vectors and resolves sign interference.",
+            )
+        )
+    if donor_count >= 3 or noisy:
+        candidates.append(
+            (
+                "dare_ties",
+                0.75 if noisy else 0.6,
+                "Noisy judge splits or many donors — DARE + TIES reduces negative synergy.",
+            )
+        )
+    if narrow:
+        candidates.append(
+            (
+                "task_arithmetic",
+                0.7,
+                "Margins are tight — small task-vector blend preserves king behavior while borrowing donor edges.",
+            )
+        )
+    if donor_count >= 4:
+        candidates.append(
+            (
+                "karcher",
+                0.5,
+                "Many peers in weight space — Karcher mean is a geometry-aware average when linear blends fail.",
+            )
+        )
+    candidates.sort(key=lambda c: -c[1])
+    return candidates
+
+
+def _params_for_method(
+    method: str,
+    *,
+    dominant: float,
+    narrow: bool,
+    noisy: bool,
+) -> dict[str, float | bool | str]:
+    params: dict[str, float | bool | str] = {}
+    if method == "nuslerp":
+        t = min(0.65, max(0.12, dominant))
+        params["donor_weight"] = round(t, 3)
+        params["king_weight"] = round(1.0 - t, 3)
+    elif method in ("ties", "dare_ties"):
+        params["lambda"] = 1.0
+        params["normalize"] = True
+        params["default_density"] = round(0.65 if not noisy else 0.45, 2)
+        if method == "dare_ties":
+            params["rescale"] = True
+    elif method == "task_arithmetic":
+        params["lambda"] = 0.35 if narrow else 0.6
+        params["normalize"] = True
+    elif method == "karcher":
+        params["max_iter"] = 10
+        params["tol"] = 1e-5
+    return params
+
+
+def _build_method_yamls(
+    *,
+    candidates: list[tuple[str, float, str]],
+    base_ref: str,
+    donors: list[AlbedoMergeDonorCandidate],
+    layer_hints: list[AlbedoMergeLayerHint],
+    dominant: float,
+    narrow: bool,
+    noisy: bool,
+    export_all_methods: bool,
+) -> list[AlbedoMergeMethodYaml]:
+    if not candidates:
+        yaml_text = _build_mergekit_yaml(
+            method="passthrough",
+            base_ref=base_ref,
+            donors=donors,
+            parameters={},
+            layer_hints=layer_hints,
+        )
+        return [
+            AlbedoMergeMethodYaml(
+                method="passthrough",
+                pretty_name=_METHOD_PRETTY["passthrough"],
+                score=1.0,
+                is_primary=True,
+                yaml=yaml_text,
+            )
+        ]
+
+    rows: list[AlbedoMergeMethodYaml] = []
+    for idx, (method, score, _rationale) in enumerate(candidates[:4 if export_all_methods else 1]):
+        params = _params_for_method(method, dominant=dominant, narrow=narrow, noisy=noisy)
+        yaml_text = _build_mergekit_yaml(
+            method=method,
+            base_ref=base_ref,
+            donors=donors,
+            parameters=params,
+            layer_hints=layer_hints,
+        )
+        rows.append(
+            AlbedoMergeMethodYaml(
+                method=method,
+                pretty_name=_METHOD_PRETTY.get(method, method),
+                score=round(score, 3),
+                is_primary=idx == 0,
+                yaml=yaml_text,
+            )
+        )
+    return rows
 
 
 def _select_merge_method(
@@ -336,82 +624,41 @@ def _select_merge_method(
     narrow = avg_margin is not None and abs(avg_margin) < _NARROW_MARGIN
     noisy = margin_noise > 0.12 or consensus_ratio < 0.5
 
-    candidates: list[tuple[str, float, str]] = []
-    if donor_count == 1 or dominant >= _DOMINANT_DONOR_WEIGHT:
-        candidates.append(
-            (
-                "nuslerp",
-                0.9 if donor_count == 1 else 0.85,
-                "Single strong donor or one dominant weight — interpolate king ↔ donor with NuSLERP task vectors.",
-            )
-        )
-    if donor_count >= 2:
-        candidates.append(
-            (
-                "ties",
-                0.8 if not noisy else 0.55,
-                "Multiple donors with judge consensus — TIES sparsifies task vectors and resolves sign interference.",
-            )
-        )
-    if donor_count >= 3 or noisy:
-        candidates.append(
-            (
-                "dare_ties",
-                0.75 if noisy else 0.6,
-                "Noisy judge splits or many donors — DARE random pruning + TIES consensus reduces negative synergy.",
-            )
-        )
-    if narrow:
-        candidates.append(
-            (
-                "task_arithmetic",
-                0.7,
-                "Margins are tight — small task-vector blend preserves king behavior while borrowing donor edges.",
-            )
-        )
-    if donor_count >= 4:
-        candidates.append(
-            (
-                "karcher",
-                0.5,
-                "Many peers in weight space — Karcher mean is a geometry-aware average when linear blends fail.",
-            )
+    candidates = _method_candidates(
+        donor_count=donor_count,
+        dominant=dominant,
+        narrow=narrow,
+        noisy=noisy,
+    )
+    if not candidates:
+        return AlbedoMergeMethodRecommendation(
+            method="passthrough",
+            pretty_name=_METHOD_PRETTY["passthrough"],
+            parameters={},
+            rationale=["No strong donor models found in the donor pool."],
+            alternatives=alternatives,
         )
 
-    candidates.sort(key=lambda c: -c[1])
     method, _score, rationale_line = candidates[0]
     alternatives = [
         AlbedoMergeMethodOption(method=m, score=round(s, 3), rationale=r) for m, s, r in candidates[1:4]
     ]
 
-    params: dict[str, float | bool | str] = {}
+    params = _params_for_method(method, dominant=dominant, narrow=narrow, noisy=noisy)
     rationale = [rationale_line]
     if method == "nuslerp":
-        t = min(0.65, max(0.12, dominant))
-        params["donor_weight"] = round(t, 3)
-        params["king_weight"] = round(1.0 - t, 3)
         rationale.append(
             f"NuSLERP weights king={params['king_weight']}, donor={params['donor_weight']}: "
             "interpolate directly between king and top donor (no separate base_model)."
         )
     elif method in ("ties", "dare_ties"):
-        params["lambda"] = 1.0
-        params["normalize"] = True
-        density = 0.65 if not noisy else 0.45
-        params["default_density"] = round(density, 2)
         rationale.append(
             f"Per-donor density≈{params['default_density']}: retain top-magnitude task-vector weights."
         )
         if method == "dare_ties":
-            params["rescale"] = True
             rationale.append("DARE rescale enabled to recover pruned mass after random sparsification.")
     elif method == "task_arithmetic":
-        params["lambda"] = 0.35 if narrow else 0.6
-        params["normalize"] = True
         rationale.append(f"Task arithmetic λ={params['lambda']} keeps the blend conservative on narrow margins.")
-    elif method == "karcher":
-        params["max_iter"] = 10
-        params["tol"] = 1e-5
 
     return AlbedoMergeMethodRecommendation(
         method=method,
@@ -559,10 +806,15 @@ def build_merge_advisor_recommendation(
     dashboard: dict[str, Any],
     *,
     subnet: int = 97,
+    mode: MergeAdvisorMode = "current_king",
+    king_versions: list[int] | None = None,
+    include_past_kings: bool = False,
+    min_duels: int = _DEFAULT_MIN_DONOR_DUELS,
     sample_mass_by_uri: dict[str, float] | None = None,
     sample_mass_duels: int = 0,
     max_donors: int = _MAX_DONORS,
     consensus_only: bool = False,
+    export_all_methods: bool = True,
 ) -> AlbedoMergeAdvisorRecommendation:
     reign_members = (dashboard.get("reign") or {}).get("members") or []
     base_uri = ""
@@ -571,8 +823,14 @@ def build_merge_advisor_recommendation(
         base_uri = str(reign_members[0].get("model_uri") or "")
         ns, name, _ = parse_model_uri(base_uri)
         base_repo = f"{ns}/{name}" if ns else name
+    base_family = _model_family(base_uri, base_repo)
 
     eval_runs = _recent_eval_runs(list(dashboard.get("eval_runs") or []))
+    coronations = _coronations_from_eval_runs(eval_runs)
+    scanned_king_versions = (
+        sorted(set(king_versions)) if king_versions else sorted(_king_reign_windows(coronations).keys())
+    )
+
     coronation_by_uri: dict[str, int] = defaultdict(int)
     for run in eval_runs:
         if run.get("coronated"):
@@ -587,18 +845,31 @@ def build_merge_advisor_recommendation(
         eval_runs, base_uri=base_uri, consensus_only=consensus_only
     )
     bt = bradley_terry_strengths(outcomes)
-    donor_raw = _donor_stats_from_duels(
+    bt_leaderboard = _global_bt_leaderboard(bt, base_uri=base_uri)
+    bt_rank_by_uri = {row.model_uri: row.rank for row in bt_leaderboard}
+
+    donor_raw = _collect_donor_stats(
         eval_runs,
         base_uri=base_uri,
+        mode=mode,
+        king_versions=king_versions,
+        include_past_kings=include_past_kings,
         coronation_by_uri=dict(coronation_by_uri),
         reign_slots_by_uri=dict(reign_slots_by_uri),
+        coronations=coronations,
     )
 
     scored: list[tuple[str, float, dict[str, Any]]] = []
     for uri, s in donor_raw.items():
-        if s["duels"] < _MIN_DONOR_DUELS:
+        if not _donor_eligible(
+            s,
+            min_duels=min_duels,
+            include_past_kings=include_past_kings,
+            mode=mode,
+        ):
             continue
-        win_pct = (s["wins"] / s["duels"] * 100.0) if s["duels"] else 0.0
+        duels = int(s["duels"])
+        win_pct = (s["wins"] / duels * 100.0) if duels else 0.0
         avg_margin = mean(s["margins"]) if s["margins"] else None
         judge_rel = mean(s["reliability"]) if s["reliability"] else None
         sample_mass = (sample_mass_by_uri or {}).get(uri)
@@ -612,7 +883,20 @@ def build_merge_advisor_recommendation(
             sample_mass=sample_mass,
             judge_reliability=judge_rel,
         )
-        scored.append((uri, raw, {**s, "win_pct": win_pct, "avg_margin": avg_margin, "judge_rel": judge_rel, "bt": bt_strength, "sample_mass": sample_mass}))
+        scored.append(
+            (
+                uri,
+                raw,
+                {
+                    **s,
+                    "win_pct": win_pct,
+                    "avg_margin": avg_margin,
+                    "judge_rel": judge_rel,
+                    "bt": bt_strength,
+                    "sample_mass": sample_mass,
+                },
+            )
+        )
 
     scored.sort(key=lambda row: -row[1])
     top = scored[:max_donors]
@@ -620,25 +904,30 @@ def build_merge_advisor_recommendation(
     norm_weights = _normalize_weights(weight_scores)
 
     donors: list[AlbedoMergeDonorCandidate] = []
-    for uri, raw, meta in top:
+    for uri, _raw, meta in top:
         duels = int(meta["duels"])
         wins = int(meta["wins"])
         avg_m = meta.get("avg_margin")
+        repo = meta.get("repo")
         density = None
         if avg_m is not None:
             density = round(min(0.8, max(0.25, 0.4 + abs(float(avg_m)))), 3)
         donors.append(
             AlbedoMergeDonorCandidate(
                 model_uri=uri,
-                repo=meta.get("repo"),
-                label=_model_label(uri, meta.get("repo")),
+                repo=repo,
+                label=_model_label(uri, repo),
                 mergekit_ref=mergekit_model_ref(uri),
+                model_family=_model_family(uri, repo),
+                sources=sorted(meta.get("sources") or []),
                 duels=duels,
                 wins=wins,
                 losses=duels - wins,
+                historical_duels=int(meta.get("historical_duels") or 0),
                 win_pct=round(float(meta["win_pct"]), 1),
                 avg_margin=round(float(avg_m), 4) if avg_m is not None else None,
                 bt_strength=round(float(meta["bt"]), 4),
+                global_bt_rank=bt_rank_by_uri.get(uri),
                 coronations=int(meta.get("coronations") or 0),
                 reign_slots=int(meta.get("reign_slots") or 0),
                 sample_mass=round(float(meta["sample_mass"]), 4) if meta.get("sample_mass") is not None else None,
@@ -656,6 +945,9 @@ def build_merge_advisor_recommendation(
     avg_margin = mean(margins_vs_king) if margins_vs_king else None
     margin_noise = _margin_noise(eval_runs, base_uri)
     consensus_ratio = consensus_duels / duels_analyzed if duels_analyzed else 0.0
+    dominant = max(norm_weights.values()) if norm_weights else 0.0
+    narrow = avg_margin is not None and abs(avg_margin) < _NARROW_MARGIN
+    noisy = margin_noise > 0.12 or consensus_ratio < 0.5
 
     method = _select_merge_method(
         donor_count=len(donors),
@@ -665,47 +957,83 @@ def build_merge_advisor_recommendation(
         consensus_ratio=consensus_ratio,
     )
     layer_hints = _layer_density_hints(len(donors), avg_margin)
+    method_candidates = _method_candidates(
+        donor_count=len(donors),
+        dominant=dominant,
+        narrow=narrow,
+        noisy=noisy,
+    )
+    method_yamls = _build_method_yamls(
+        candidates=method_candidates,
+        base_ref=mergekit_model_ref(base_uri),
+        donors=donors,
+        layer_hints=layer_hints,
+        dominant=dominant,
+        narrow=narrow,
+        noisy=noisy,
+        export_all_methods=export_all_methods,
+    )
+    yaml_text = method_yamls[0].yaml if method_yamls else _build_mergekit_yaml(
+        method="passthrough",
+        base_ref=mergekit_model_ref(base_uri),
+        donors=donors,
+        parameters={},
+        layer_hints=layer_hints,
+    )
+
+    arch_warnings = _architecture_warnings(base_family, donors)
 
     data_sources = ["dashboard.json eval_runs", "reign chain (base model)"]
+    if mode == "multi_king":
+        data_sources.append("multi-king donor pool (reign windows + global BT)")
+        if scanned_king_versions:
+            data_sources.append(f"king versions scanned: {', '.join(map(str, scanned_king_versions))}")
+    if include_past_kings:
+        data_sources.append("past coronated kings as donor candidates")
     if consensus_only:
         data_sources.append("judge-consensus duel filter")
     if sample_mass_by_uri:
         data_sources.append(f"SCORING_RESULTS sample mass ({sample_mass_duels} duels)")
 
     rationale = [
-        f"Base model: current king {_model_label(base_uri, base_repo)}.",
-        f"Analyzed {duels_analyzed} duels ({consensus_duels} high-consensus).",
+        f"Base model: current king {_model_label(base_uri, base_repo)} ({base_family or 'unknown family'}).",
+        f"Mode: {mode.replace('_', ' ')}; min duels={min_duels}; analyzed {duels_analyzed} duels ({consensus_duels} high-consensus).",
     ]
     if donors:
         top_donor = donors[0]
+        src = ", ".join(top_donor.sources) if top_donor.sources else "duels"
         rationale.append(
-            f"Top donor {top_donor.label}: {top_donor.win_pct:.1f}% win rate over {top_donor.duels} duels, "
-            f"BT strength {top_donor.bt_strength:.2f}, merge weight {top_donor.merge_weight:.2f}."
+            f"Top donor {top_donor.label}: {top_donor.win_pct:.1f}% win rate over {top_donor.duels} duels "
+            f"({top_donor.historical_duels} historical), sources={src}, BT rank "
+            f"{top_donor.global_bt_rank or '—'}, merge weight {top_donor.merge_weight:.2f}."
         )
     if sample_mass_by_uri:
         rationale.append("Sample-level SCORING_RESULTS mass refines donor weights toward per-question wins.")
+    if arch_warnings:
+        rationale.append(arch_warnings[0])
     rationale.extend(method.rationale)
 
     binary_duels = len(_binary_eval_runs(eval_runs))
-    yaml_text = _build_mergekit_yaml(
-        method=method.method,
-        base_ref=mergekit_model_ref(base_uri),
-        donors=donors,
-        parameters=method.parameters,
-        layer_hints=layer_hints,
-    )
 
     return AlbedoMergeAdvisorRecommendation(
         subnet=subnet,
         generated_at=datetime.now(timezone.utc).isoformat(),
+        mode=mode,
+        king_versions_scanned=scanned_king_versions,
+        include_past_kings=include_past_kings,
+        min_duels=min_duels,
         base_model_uri=base_uri,
         base_repo=base_repo,
         base_mergekit_ref=mergekit_model_ref(base_uri),
         base_label=_model_label(base_uri, base_repo),
+        base_model_family=base_family,
         donors=donors,
         method=method,
         layer_hints=layer_hints,
         mergekit_yaml=yaml_text,
+        method_yamls=method_yamls,
+        global_bt_leaderboard=bt_leaderboard,
+        architecture_warnings=arch_warnings,
         rationale=rationale,
         data_sources=data_sources,
         duels_analyzed=duels_analyzed,
@@ -713,9 +1041,8 @@ def build_merge_advisor_recommendation(
         sample_mass_duels=sample_mass_duels,
         judge_consensus_duels=consensus_duels,
         note=(
-            "Recommendation uses the latest duel window, Bradley–Terry strengths, reign/coronation "
-            "bonuses, and optional per-sample scoring mass. Donors must share architecture with the "
-            "king for mergekit to succeed. Validate merged checkpoints in real Albedo duels."
+            "Recommendations are advisory. Donors must share architecture with the king. "
+            "Validate merged checkpoints in real Albedo duels."
         ),
     )
 
@@ -725,9 +1052,15 @@ async def get_merge_advisor_recommendation(
     subnet: int = 97,
     settings: Settings | None = None,
     fresh: bool = False,
+    mode: MergeAdvisorMode = "multi_king",
+    king_versions: list[int] | None = None,
+    include_past_kings: bool = True,
+    min_duels: int = _DEFAULT_MIN_DONOR_DUELS,
     include_sample_mass: bool = True,
     max_donors: int = _MAX_DONORS,
     consensus_only: bool = False,
+    export_all_methods: bool = True,
+    sample_mass_limit: int = _SAMPLE_MASS_DUEL_LIMIT,
 ) -> AlbedoMergeAdvisorRecommendation:
     settings = settings or get_settings()
     dashboard = await fetch_dashboard(settings=settings)
@@ -744,12 +1077,18 @@ async def get_merge_advisor_recommendation(
                 settings=settings,
                 client=client,
                 fresh=fresh,
+                limit=sample_mass_limit,
             )
     return build_merge_advisor_recommendation(
         dashboard,
         subnet=subnet,
+        mode=mode,
+        king_versions=king_versions,
+        include_past_kings=include_past_kings,
+        min_duels=min_duels,
         sample_mass_by_uri=sample_mass,
         sample_mass_duels=sample_mass_duels,
         max_donors=max_donors,
         consensus_only=consensus_only,
+        export_all_methods=export_all_methods,
     )

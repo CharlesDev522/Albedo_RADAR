@@ -9,7 +9,7 @@ from app.db.session import get_db
 from app.schemas.albedo_analysis import AlbedoAnalysisOverview
 from app.schemas.albedo_eval_queue import AlbedoEvalQueueOverview
 from app.schemas.albedo_live import AlbedoLiveDuel
-from app.schemas.albedo_merge_advisor import AlbedoMergeAdvisorRecommendation
+from app.schemas.albedo_merge_advisor import AlbedoMergeAdvisorRecommendation, MergeAdvisorMode
 from app.schemas.albedo_sample_score_analysis import AlbedoSampleScoreAnalysis
 from app.schemas.albedo_scoring_analysis import (
     AlbedoDatasetBuildSummary,
@@ -355,6 +355,19 @@ async def albedo_king_reign_dataset_export(
 async def albedo_merge_advisor_recommendation(
     subnet: int = Query(default=97, ge=0),
     fresh: bool = Query(default=False),
+    mode: MergeAdvisorMode = Query(
+        default="multi_king",
+        description="current_king = only vs current king; multi_king = reign windows + global BT",
+    ),
+    king_versions: str | None = Query(
+        default=None,
+        description="Comma-separated king versions for multi_king mode, e.g. 12,13",
+    ),
+    include_past_kings: bool = Query(
+        default=True,
+        description="Include coronated kings from history as donor candidates",
+    ),
+    min_duels: int = Query(default=2, ge=1, le=20),
     include_sample_mass: bool = Query(
         default=True,
         description="Fetch SCORING_RESULTS JSONL to refine donor weights",
@@ -364,6 +377,10 @@ async def albedo_merge_advisor_recommendation(
         default=False,
         description="Only count duels where judges strongly agree",
     ),
+    export_all_methods: bool = Query(
+        default=True,
+        description="Include YAML for top alternative merge methods",
+    ),
 ) -> AlbedoMergeAdvisorRecommendation:
     """Data-driven mergekit recipe from duel, reign, and scoring artifacts."""
     if subnet != 97:
@@ -372,15 +389,25 @@ async def albedo_merge_advisor_recommendation(
             detail="Albedo merge advisor is only available for SN97",
         )
     settings = get_settings()
+    versions = _parse_king_versions(king_versions) if king_versions else None
     try:
         return await get_merge_advisor_recommendation(
             subnet=subnet,
             settings=settings,
             fresh=fresh,
+            mode=mode,
+            king_versions=versions,
+            include_past_kings=include_past_kings,
+            min_duels=min_duels,
             include_sample_mass=include_sample_mass,
             max_donors=max_donors,
             consensus_only=consensus_only,
+            export_all_methods=export_all_methods,
         )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=502,
@@ -392,9 +419,18 @@ async def albedo_merge_advisor_recommendation(
 async def albedo_merge_advisor_config(
     subnet: int = Query(default=97, ge=0),
     fresh: bool = Query(default=False),
+    mode: MergeAdvisorMode = Query(default="multi_king"),
+    king_versions: str | None = Query(default=None),
+    include_past_kings: bool = Query(default=True),
+    min_duels: int = Query(default=2, ge=1, le=20),
     include_sample_mass: bool = Query(default=True),
     max_donors: int = Query(default=5, ge=1, le=10),
     consensus_only: bool = Query(default=False),
+    export_all_methods: bool = Query(default=True),
+    method: str | None = Query(
+        default=None,
+        description="Download YAML for a specific method (e.g. ties, nuslerp). Defaults to primary.",
+    ),
 ) -> Response:
     """Download mergekit YAML config for the current recommendation."""
     if subnet != 97:
@@ -403,23 +439,40 @@ async def albedo_merge_advisor_config(
             detail="Albedo merge advisor is only available for SN97",
         )
     settings = get_settings()
+    versions = _parse_king_versions(king_versions) if king_versions else None
     try:
         rec = await get_merge_advisor_recommendation(
             subnet=subnet,
             settings=settings,
             fresh=fresh,
+            mode=mode,
+            king_versions=versions,
+            include_past_kings=include_past_kings,
+            min_duels=min_duels,
             include_sample_mass=include_sample_mass,
             max_donors=max_donors,
             consensus_only=consensus_only,
+            export_all_methods=export_all_methods,
         )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=502,
             detail=f"Failed to build merge config: {exc}",
         ) from exc
-    filename = f"albedo-sn{subnet}-merge-{rec.method.method}.yaml"
+    yaml_text = rec.mergekit_yaml
+    method_name = rec.method.method
+    if method:
+        match = next((row for row in rec.method_yamls if row.method == method), None)
+        if match:
+            yaml_text = match.yaml
+            method_name = match.method
+    filename = f"albedo-sn{subnet}-merge-{method_name}.yaml"
     return Response(
-        content=rec.mergekit_yaml.encode("utf-8"),
+        content=yaml_text.encode("utf-8"),
         media_type="application/x-yaml",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
