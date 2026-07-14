@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from statistics import mean
 from typing import Any
 
@@ -109,27 +109,15 @@ def _short_model_label(namespace: str, model_name: str, *, max_len: int = 22) ->
     return label[: max_len - 1] + "…"
 
 
-def _build_score_timeline_24h(
+def _build_score_timeline(
     eval_runs: list[dict[str, Any]],
     *,
     miner_lookup: MinerLookup | None,
-    reference_at: str | None,
-    hours: float = 24.0,
 ) -> list[AlbedoScoreTimelinePoint]:
-    """Finished duels in the rolling window, oldest-first for charting."""
-    ref = _parse_iso_dt(reference_at) or datetime.now(timezone.utc)
-    if ref.tzinfo is None:
-        ref = ref.replace(tzinfo=timezone.utc)
-    cutoff = ref - timedelta(hours=hours)
-
+    """All finished duels from dashboard eval_runs, oldest-first for charting."""
     points: list[AlbedoScoreTimelinePoint] = []
     for run in eval_runs:
-        finished = _parse_iso_dt(run.get("finished_at"))
-        if not finished:
-            continue
-        if finished.tzinfo is None:
-            finished = finished.replace(tzinfo=timezone.utc)
-        if finished < cutoff or finished > ref:
+        if not run.get("finished_at"):
             continue
 
         summary = _duel_summary(run, miner_lookup)
@@ -1050,11 +1038,7 @@ def build_analysis_overview(
         reverse=True,
     )
     recent_duels = [_duel_summary(r, miner_lookup) for r in recent_runs[:60]]
-    score_timeline_24h = _build_score_timeline_24h(
-        eval_runs,
-        miner_lookup=miner_lookup,
-        reference_at=updated_at,
-    )
+    score_timeline = _build_score_timeline(eval_runs, miner_lookup=miner_lookup)
 
     lookup_note = ""
     if miner_lookup and miner_lookup.by_hotkey:
@@ -1105,7 +1089,7 @@ def build_analysis_overview(
         )[:15],
         margin_histogram=margin_histogram,
         timeline=timeline,
-        score_timeline_24h=score_timeline_24h,
+        score_timeline=score_timeline,
         pipeline=_build_pipeline(state),
         miner_lookup_coverage_pct=miner_lookup.coverage_pct if miner_lookup else None,
         note=(

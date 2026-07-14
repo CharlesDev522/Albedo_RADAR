@@ -919,7 +919,7 @@ export interface AlbedoAnalysisOverview {
   king_defense_by_model: AlbedoWinRateRow[];
   margin_histogram: AlbedoMarginBucket[];
   timeline: AlbedoTimelinePoint[];
-  score_timeline_24h: AlbedoScoreTimelinePoint[];
+  score_timeline: AlbedoScoreTimelinePoint[];
   pipeline: AlbedoPipelineStage[];
   miner_lookup_coverage_pct?: number | null;
   note: string;

@@ -478,8 +478,7 @@ export default function AlbedoDuelPanel() {
           {queueData && <AlbedoEvalQueueOverviewPanel data={queueData} />}
 
           <AlbedoDuelScoreTimeline
-            points={data.score_timeline_24h ?? []}
-            referenceAt={data.updated_at}
+            points={data.score_timeline ?? []}
             requiredWinMargin={data.required_win_margin}
           />
 

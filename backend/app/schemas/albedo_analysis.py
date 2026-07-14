@@ -314,7 +314,7 @@ class AlbedoAnalysisOverview(BaseModel):
     king_defense_by_model: list[AlbedoWinRateRow] = Field(default_factory=list)
     margin_histogram: list[AlbedoMarginBucket] = Field(default_factory=list)
     timeline: list[AlbedoTimelinePoint] = Field(default_factory=list)
-    score_timeline_24h: list[AlbedoScoreTimelinePoint] = Field(default_factory=list)
+    score_timeline: list[AlbedoScoreTimelinePoint] = Field(default_factory=list)
     pipeline: list[AlbedoPipelineStage] = Field(default_factory=list)
     miner_lookup_coverage_pct: float | None = None
     note: str = ""

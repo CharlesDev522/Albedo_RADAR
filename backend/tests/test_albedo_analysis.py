@@ -368,7 +368,7 @@ def test_binary_rubric_scoring_uses_by_judge_king_pairs():
     assert by_short["judge-b"].margin_from_neutral == -0.01
 
 
-def test_score_timeline_24h_filters_by_finish_time():
+def test_score_timeline_includes_all_finished_duels():
     dashboard = {
         "updated_at": "2026-06-27T12:00:00+00:00",
         "chain": {"judge_models": []},
@@ -377,7 +377,7 @@ def test_score_timeline_24h_filters_by_finish_time():
         "queue": [],
         "eval_runs": [
             {
-                "eval_run_id": "in-window",
+                "eval_run_id": "recent",
                 "challenger_won": True,
                 "coronated": False,
                 "score_challenger": 0.62,
@@ -390,7 +390,7 @@ def test_score_timeline_24h_filters_by_finish_time():
                 "king": {"model_uri": "org/k@sha256:0", "uid": 2, "hotkey": "hk2"},
             },
             {
-                "eval_run_id": "too-old",
+                "eval_run_id": "older",
                 "challenger_won": False,
                 "coronated": False,
                 "score_challenger": 0.4,
@@ -403,7 +403,7 @@ def test_score_timeline_24h_filters_by_finish_time():
                 "king": {"model_uri": "org/k@sha256:0", "uid": 2, "hotkey": "hk2"},
             },
             {
-                "eval_run_id": "in-window-2",
+                "eval_run_id": "recent-2",
                 "challenger_won": False,
                 "coronated": True,
                 "score_challenger": 0.45,
@@ -424,7 +424,7 @@ def test_score_timeline_24h_filters_by_finish_time():
         source_url="https://example.com/dashboard.json",
     )
 
-    assert len(overview.score_timeline_24h) == 2
-    assert [p.eval_run_id for p in overview.score_timeline_24h] == ["in-window", "in-window-2"]
-    assert overview.score_timeline_24h[0].score_challenger == 0.62
-    assert overview.score_timeline_24h[1].coronated is True
+    assert len(overview.score_timeline) == 3
+    assert [p.eval_run_id for p in overview.score_timeline] == ["older", "recent", "recent-2"]
+    assert overview.score_timeline[1].score_challenger == 0.62
+    assert overview.score_timeline[2].coronated is True

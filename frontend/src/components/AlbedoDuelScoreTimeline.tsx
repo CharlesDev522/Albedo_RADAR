@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AlbedoScoreTimelinePoint } from "@/lib/api";
 
 const HOURS = 24;
 const PAD = { top: 20, right: 12, bottom: 40, left: 44 };
+const MARKER_R = { normal: 2, active: 2.75, crown: 1.5 };
 
 function fmtScore(n: number): string {
   return `${(n * 100).toFixed(1)}%`;
@@ -33,6 +34,31 @@ function fmtTooltipTime(iso: string): string {
   });
 }
 
+function fmtDayLabel(dateKey: string): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function localDateKey(iso: string): string {
+  const d = new Date(iso);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function dayBounds(dateKey: string): { startMs: number; endMs: number } {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const start = new Date(y, m - 1, d, 0, 0, 0, 0);
+  const end = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+  return { startMs: start.getTime(), endMs: end.getTime() };
+}
+
 type ChartPoint = AlbedoScoreTimelinePoint & {
   t: number;
   x: number;
@@ -44,13 +70,12 @@ type HourTick = { t: number; x: number; label: string; isMidnight: boolean };
 
 function buildChart(
   points: AlbedoScoreTimelinePoint[],
-  referenceAt: string | null | undefined,
+  dateKey: string,
   width: number,
   height: number,
 ) {
-  const refMs = referenceAt ? new Date(referenceAt).getTime() : Date.now();
-  const windowMs = HOURS * 60 * 60 * 1000;
-  const startMs = refMs - windowMs;
+  const { startMs, endMs } = dayBounds(dateKey);
+  const windowMs = endMs - startMs;
   const plotW = width - PAD.left - PAD.right;
   const plotH = height - PAD.top - PAD.bottom;
 
@@ -68,15 +93,12 @@ function buildChart(
         yK: toY(p.score_king),
       };
     })
-    .filter((p) => p.t >= startMs && p.t <= refMs)
+    .filter((p) => p.t >= startMs && p.t < endMs)
     .sort((a, b) => a.t - b.t);
 
   const hourTicks: HourTick[] = [];
-  const firstHour = new Date(startMs);
-  firstHour.setMinutes(0, 0, 0);
-  let cursor = firstHour.getTime();
-  if (cursor < startMs) cursor += 60 * 60 * 1000;
-  while (cursor <= refMs) {
+  let cursor = startMs;
+  while (cursor < endMs) {
     const d = new Date(cursor);
     hourTicks.push({
       t: cursor,
@@ -93,7 +115,7 @@ function buildChart(
     label: `${Math.round(v * 100)}%`,
   }));
 
-  return { chartPoints, hourTicks, yTicks, startMs, refMs, plotW, plotH, toX, toY };
+  return { chartPoints, hourTicks, yTicks, startMs, endMs, plotW, plotH, toX, toY };
 }
 
 function polyline(points: ChartPoint[], key: "yCh" | "yK"): string {
@@ -103,7 +125,6 @@ function polyline(points: ChartPoint[], key: "yCh" | "yK"): string {
 
 export default function AlbedoDuelScoreTimeline({
   points,
-  referenceAt,
   requiredWinMargin,
 }: {
   points: AlbedoScoreTimelinePoint[];
@@ -114,9 +135,32 @@ export default function AlbedoDuelScoreTimeline({
   const width = 720;
   const height = 220;
 
+  const availableDates = useMemo(() => {
+    const dates = new Set<string>();
+    for (const p of points) {
+      if (p.finished_at) dates.add(localDateKey(p.finished_at));
+    }
+    return Array.from(dates).sort();
+  }, [points]);
+
+  const defaultDate = availableDates[availableDates.length - 1] ?? localDateKey(new Date().toISOString());
+  const [selectedDate, setSelectedDate] = useState(defaultDate);
+
+  useEffect(() => {
+    if (availableDates.length === 0) return;
+    if (!availableDates.includes(selectedDate)) {
+      setSelectedDate(availableDates[availableDates.length - 1]);
+    }
+  }, [availableDates, selectedDate]);
+
+  const dayPoints = useMemo(
+    () => points.filter((p) => localDateKey(p.finished_at) === selectedDate),
+    [points, selectedDate],
+  );
+
   const chart = useMemo(
-    () => buildChart(points, referenceAt, width, height),
-    [points, referenceAt],
+    () => buildChart(dayPoints, selectedDate, width, height),
+    [dayPoints, selectedDate],
   );
 
   const stats = useMemo(() => {
@@ -140,16 +184,52 @@ export default function AlbedoDuelScoreTimeline({
       ? chart.toY(requiredWinMargin)
       : null;
 
+  const dateIdx = availableDates.indexOf(selectedDate);
+  const canPrev = dateIdx > 0;
+  const canNext = dateIdx >= 0 && dateIdx < availableDates.length - 1;
+
   return (
     <section className="panel px-3 py-2.5">
       <div className="flex flex-wrap items-end justify-between gap-2 mb-2">
         <div>
-          <h3 className="text-[11px] font-semibold text-zinc-200">24h score timeline</h3>
+          <h3 className="text-[11px] font-semibold text-zinc-200">Daily score timeline</h3>
           <p className="text-[9px] text-zinc-600 mt-0.5">
-            Challenger vs king aggregate scores by duel finish time (rolling {HOURS}h)
+            Challenger vs king scores by duel finish time · {HOURS}h day view
           </p>
         </div>
-        {stats && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            disabled={!canPrev}
+            onClick={() => canPrev && setSelectedDate(availableDates[dateIdx - 1])}
+            className="px-1.5 py-0.5 rounded border border-zinc-700 text-[10px] text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed"
+            aria-label="Previous day with duels"
+          >
+            ‹
+          </button>
+          <input
+            type="date"
+            value={selectedDate}
+            min={availableDates[0]}
+            max={availableDates[availableDates.length - 1]}
+            onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+            className="rounded border border-zinc-700 bg-zinc-900/80 px-2 py-0.5 text-[10px] text-zinc-200 mono focus:outline-none focus:border-emerald-500/40"
+          />
+          <button
+            type="button"
+            disabled={!canNext}
+            onClick={() => canNext && setSelectedDate(availableDates[dateIdx + 1])}
+            className="px-1.5 py-0.5 rounded border border-zinc-700 text-[10px] text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed"
+            aria-label="Next day with duels"
+          >
+            ›
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <p className="text-[9px] text-zinc-500">{fmtDayLabel(selectedDate)}</p>
+        {stats ? (
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] mono">
             <span className="text-zinc-500">
               <span className="text-zinc-300">{stats.count}</span> duels
@@ -161,6 +241,8 @@ export default function AlbedoDuelScoreTimeline({
               <span className="text-amber-400/90">{stats.coronations} crown</span>
             )}
           </div>
+        ) : (
+          <span className="text-[9px] text-zinc-600">No duels this day</span>
         )}
       </div>
 
@@ -180,14 +262,18 @@ export default function AlbedoDuelScoreTimeline({
           </span>
         )}
         <span className="flex items-center gap-1.5 text-zinc-600">
-          <span className="w-2 h-2 rounded-full border border-amber-400/60 bg-amber-500/20" />
+          <span className="w-1.5 h-1.5 rounded-full border border-amber-400/60 bg-amber-500/20" />
           coronation
         </span>
       </div>
 
-      {chart.chartPoints.length === 0 ? (
+      {availableDates.length === 0 ? (
         <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 px-4 py-8 text-center text-[10px] text-zinc-600">
-          No finished duels in the last {HOURS} hours
+          No finished duels available
+        </div>
+      ) : chart.chartPoints.length === 0 ? (
+        <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/40 px-4 py-8 text-center text-[10px] text-zinc-600">
+          No duels on {fmtDayLabel(selectedDate)}
         </div>
       ) : (
         <div className="relative w-full overflow-x-auto">
@@ -195,7 +281,7 @@ export default function AlbedoDuelScoreTimeline({
             viewBox={`0 0 ${width} ${height}`}
             className="w-full min-w-[320px] h-auto select-none"
             role="img"
-            aria-label="24 hour duel score timeline"
+            aria-label={`Duel score timeline for ${selectedDate}`}
           >
             <defs>
               <linearGradient id="timeline-night" x1="0" y1="0" x2="0" y2="1">
@@ -204,7 +290,6 @@ export default function AlbedoDuelScoreTimeline({
               </linearGradient>
             </defs>
 
-            {/* Plot background bands for clock hours (day vs night tint) */}
             {chart.hourTicks.map((tick) => {
               const hour = new Date(tick.t).getHours();
               const isDay = hour >= 6 && hour < 18;
@@ -224,7 +309,6 @@ export default function AlbedoDuelScoreTimeline({
               );
             })}
 
-            {/* Grid */}
             {chart.yTicks.map((tick) => (
               <g key={tick.value}>
                 <line
@@ -248,7 +332,6 @@ export default function AlbedoDuelScoreTimeline({
               </g>
             ))}
 
-            {/* Win margin threshold */}
             {winBarY != null && (
               <line
                 x1={PAD.left}
@@ -261,7 +344,6 @@ export default function AlbedoDuelScoreTimeline({
               />
             )}
 
-            {/* Hour ticks */}
             {chart.hourTicks.map((tick) => (
               <g key={tick.t}>
                 <line
@@ -285,12 +367,11 @@ export default function AlbedoDuelScoreTimeline({
               </g>
             ))}
 
-            {/* Score lines */}
             <path
               d={polyline(chart.chartPoints, "yCh")}
               fill="none"
               stroke="rgb(251 113 133 / 0.85)"
-              strokeWidth="1.75"
+              strokeWidth="1.5"
               strokeLinejoin="round"
               strokeLinecap="round"
             />
@@ -298,15 +379,14 @@ export default function AlbedoDuelScoreTimeline({
               d={polyline(chart.chartPoints, "yK")}
               fill="none"
               stroke="rgb(52 211 153 / 0.85)"
-              strokeWidth="1.75"
+              strokeWidth="1.5"
               strokeLinejoin="round"
               strokeLinecap="round"
             />
 
-            {/* Duel markers + hover targets */}
             {chart.chartPoints.map((p) => {
               const isActive = hovered === p.eval_run_id;
-              const r = isActive ? 5 : p.coronated ? 4 : 3.5;
+              const r = isActive ? MARKER_R.active : MARKER_R.normal;
               return (
                 <g
                   key={p.eval_run_id}
@@ -319,8 +399,8 @@ export default function AlbedoDuelScoreTimeline({
                     y1={p.yCh}
                     x2={p.x}
                     y2={p.yK}
-                    stroke="rgb(113 113 122 / 0.35)"
-                    strokeWidth="1"
+                    stroke="rgb(113 113 122 / 0.3)"
+                    strokeWidth="0.75"
                   />
                   <circle
                     cx={p.x}
@@ -328,7 +408,7 @@ export default function AlbedoDuelScoreTimeline({
                     r={r}
                     fill={p.challenger_won ? "rgb(251 113 133)" : "rgb(39 39 42)"}
                     stroke="rgb(251 113 133)"
-                    strokeWidth={isActive ? 2 : 1.25}
+                    strokeWidth={isActive ? 1.25 : 0.75}
                   />
                   <circle
                     cx={p.x}
@@ -336,22 +416,22 @@ export default function AlbedoDuelScoreTimeline({
                     r={r}
                     fill={p.challenger_won ? "rgb(39 39 42)" : "rgb(52 211 153)"}
                     stroke="rgb(52 211 153)"
-                    strokeWidth={isActive ? 2 : 1.25}
+                    strokeWidth={isActive ? 1.25 : 0.75}
                   />
                   {p.coronated && (
                     <circle
                       cx={p.x}
-                      cy={Math.min(p.yCh, p.yK) - 8}
-                      r="2.5"
+                      cy={Math.min(p.yCh, p.yK) - 5}
+                      r={MARKER_R.crown}
                       fill="rgb(251 191 36 / 0.9)"
                       stroke="rgb(251 191 36)"
                       strokeWidth="0.5"
                     />
                   )}
                   <rect
-                    x={p.x - 8}
+                    x={p.x - 6}
                     y={PAD.top}
-                    width={16}
+                    width={12}
                     height={chart.plotH}
                     fill="transparent"
                   />
@@ -359,7 +439,6 @@ export default function AlbedoDuelScoreTimeline({
               );
             })}
 
-            {/* Plot border */}
             <rect
               x={PAD.left}
               y={PAD.top}
@@ -403,7 +482,7 @@ export default function AlbedoDuelScoreTimeline({
       )}
 
       {chart.chartPoints.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
+        <div className="mt-2 flex flex-wrap gap-0.5">
           {chart.chartPoints.map((p) => (
             <button
               key={p.eval_run_id}
@@ -413,15 +492,39 @@ export default function AlbedoDuelScoreTimeline({
               onMouseLeave={() => setHovered(null)}
               onFocus={() => setHovered(p.eval_run_id)}
               onBlur={() => setHovered(null)}
-              className={`h-1.5 rounded-sm transition-all ${
+              className={`h-1 rounded-sm transition-all ${
                 hovered === p.eval_run_id
-                  ? "w-4 bg-zinc-400"
+                  ? "w-3 bg-zinc-400"
                   : p.challenger_won
-                    ? "w-2 bg-rose-500/70"
-                    : "w-2 bg-emerald-500/70"
+                    ? "w-1.5 bg-rose-500/70"
+                    : "w-1.5 bg-emerald-500/70"
               } ${p.coronated ? "ring-1 ring-amber-400/50" : ""}`}
             />
           ))}
+        </div>
+      )}
+
+      {availableDates.length > 1 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {availableDates.map((d) => {
+            const count = points.filter((p) => localDateKey(p.finished_at) === d).length;
+            const active = d === selectedDate;
+            return (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setSelectedDate(d)}
+                className={`rounded px-1.5 py-0.5 text-[9px] mono border transition-colors ${
+                  active
+                    ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-200"
+                    : "border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300"
+                }`}
+                title={`${fmtDayLabel(d)} · ${count} duels`}
+              >
+                {d.slice(5)} <span className="text-zinc-600">({count})</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </section>
