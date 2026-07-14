@@ -29,8 +29,8 @@ from app.services.albedo_analysis_service import (
     _judge_votes,
     parse_model_uri,
 )
-from app.services.albedo_sample_score_analysis_service import rubric_score_pct
 from app.services.albedo_scoring_analysis_service import (
+    rubric_score_pct,
     CHALLENGER_SIDE,
     KING_SIDE_RAW,
     _binary_eval_runs,

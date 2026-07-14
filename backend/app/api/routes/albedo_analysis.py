@@ -10,7 +10,6 @@ from app.schemas.albedo_analysis import AlbedoAnalysisOverview
 from app.schemas.albedo_eval_queue import AlbedoEvalQueueOverview
 from app.schemas.albedo_live import AlbedoLiveDuel
 from app.schemas.albedo_merge_advisor import AlbedoMergeAdvisorRecommendation, MergeAdvisorMode
-from app.schemas.albedo_sample_score_analysis import AlbedoSampleScoreAnalysis
 from app.schemas.albedo_scoring_analysis import (
     AlbedoDatasetBuildSummary,
     AlbedoScoringAnalysis,
@@ -21,7 +20,6 @@ from app.services.albedo_eval_queue_service import get_eval_queue_overview
 from app.services.albedo_live_duel_service import get_live_duel
 from app.services.albedo_merge_advisor_service import get_merge_advisor_recommendation
 from app.services.albedo_miner_lookup import load_historical_miner_lookup
-from app.services.albedo_sample_score_analysis_service import get_sample_score_analysis
 from app.services.albedo_scoring_analysis_service import (
     get_binary_dataset_export,
     get_binary_dataset_summary,
@@ -245,27 +243,6 @@ async def albedo_scoring_dataset_export(
         raise HTTPException(
             status_code=502,
             detail=f"Failed to export scoring dataset: {exc}",
-        ) from exc
-
-
-@router.get("/sample-score-analysis", response_model=AlbedoSampleScoreAnalysis)
-async def albedo_sample_score_analysis(
-    subnet: int = Query(default=97, ge=0),
-    fresh: bool = Query(default=False),
-) -> AlbedoSampleScoreAnalysis:
-    """Per-sample challenger vs king rubric gap analysis across binary duels."""
-    if subnet != 97:
-        raise HTTPException(
-            status_code=400,
-            detail="Albedo sample score analysis is only available for SN97",
-        )
-    settings = get_settings()
-    try:
-        return await get_sample_score_analysis(settings=settings, fresh=fresh)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to analyze sample scores: {exc}",
         ) from exc
 
 

@@ -118,6 +118,13 @@ def _answer_matches_polarity(value: Any, polarity: ScoringConsensusPolarity) -> 
     return _answer_is_one(value)
 
 
+def rubric_score_pct(answers: dict[str, Any], question_ids: list[str]) -> float:
+    if not question_ids:
+        return 0.0
+    hits = sum(1 for qid in question_ids if _answer_is_one(answers.get(qid)))
+    return hits / len(question_ids) * 100.0
+
+
 def analyze_dual_consensus_questions(
     rows: list[dict[str, Any]],
     *,
