@@ -4,8 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import type { AlbedoScoreTimelinePoint } from "@/lib/api";
 
 const HOURS = 24;
-const PAD = { top: 20, right: 12, bottom: 40, left: 44 };
+const PAD = { top: 20, right: 12, bottom: 40, left: 48 };
 const MARKER_R = { normal: 2, active: 2.75, crown: 1.5 };
+const FOCUSED_Y_MIN = 0.75;
+const FOCUSED_Y_MAX = 1.0;
+
+type YScaleMode = "focused" | "full";
 
 function fmtScore(n: number): string {
   return `${(n * 100).toFixed(1)}%`;
@@ -68,33 +72,91 @@ type ChartPoint = AlbedoScoreTimelinePoint & {
 
 type HourTick = { t: number; x: number; label: string; isMidnight: boolean };
 
+type YTick = { value: number; y: number; label: string };
+
+function computeYDomain(scores: number[], mode: YScaleMode): { min: number; max: number } {
+  if (mode === "full") return { min: 0, max: 1 };
+
+  if (scores.length === 0) return { min: FOCUSED_Y_MIN, max: FOCUSED_Y_MAX };
+
+  const dataMin = Math.min(...scores);
+  const dataMax = Math.max(...scores);
+  const padding = 0.012;
+
+  let min = Math.max(0.5, dataMin - padding);
+  let max = Math.min(1.0, dataMax + padding);
+
+  const minSpan = 0.04;
+  if (max - min < minSpan) {
+    const mid = (max + min) / 2;
+    min = Math.max(0.5, mid - minSpan / 2);
+    max = Math.min(1.0, mid + minSpan / 2);
+  }
+
+  if (dataMin >= 0.72) {
+    min = Math.max(FOCUSED_Y_MIN, min);
+  }
+  max = Math.min(1.0, Math.max(max, min + minSpan));
+
+  return { min, max };
+}
+
+function buildYTicks(min: number, max: number, toY: (score: number) => number): YTick[] {
+  const range = max - min;
+  let step = 0.05;
+  if (range <= 0.06) step = 0.01;
+  else if (range <= 0.12) step = 0.02;
+  else if (range <= 0.25) step = 0.05;
+
+  const first = Math.ceil(min / step - 1e-9) * step;
+  const ticks: YTick[] = [];
+  for (let v = first; v <= max + step * 0.001; v += step) {
+    const pct = v * 100;
+    ticks.push({
+      value: v,
+      y: toY(v),
+      label: Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`,
+    });
+  }
+  return ticks;
+}
+
 function buildChart(
   points: AlbedoScoreTimelinePoint[],
   dateKey: string,
   width: number,
   height: number,
+  yScaleMode: YScaleMode,
 ) {
   const { startMs, endMs } = dayBounds(dateKey);
   const windowMs = endMs - startMs;
   const plotW = width - PAD.left - PAD.right;
   const plotH = height - PAD.top - PAD.bottom;
 
-  const toX = (ms: number) => PAD.left + ((ms - startMs) / windowMs) * plotW;
-  const toY = (score: number) => PAD.top + plotH * (1 - Math.min(1, Math.max(0, score)));
-
-  const chartPoints: ChartPoint[] = points
-    .map((p) => {
+  const dayPoints = points
+    .filter((p) => {
       const t = new Date(p.finished_at).getTime();
-      return {
-        ...p,
-        t,
-        x: toX(t),
-        yCh: toY(p.score_challenger),
-        yK: toY(p.score_king),
-      };
+      return t >= startMs && t < endMs;
     })
-    .filter((p) => p.t >= startMs && p.t < endMs)
-    .sort((a, b) => a.t - b.t);
+    .sort((a, b) => a.finished_at.localeCompare(b.finished_at));
+
+  const allScores = dayPoints.flatMap((p) => [p.score_challenger, p.score_king]);
+  const { min: yMin, max: yMax } = computeYDomain(allScores, yScaleMode);
+  const ySpan = yMax - yMin || 1;
+
+  const toX = (ms: number) => PAD.left + ((ms - startMs) / windowMs) * plotW;
+  const toY = (score: number) => PAD.top + plotH * (1 - (score - yMin) / ySpan);
+
+  const chartPoints: ChartPoint[] = dayPoints.map((p) => {
+    const t = new Date(p.finished_at).getTime();
+    return {
+      ...p,
+      t,
+      x: toX(t),
+      yCh: toY(p.score_challenger),
+      yK: toY(p.score_king),
+    };
+  });
 
   const hourTicks: HourTick[] = [];
   let cursor = startMs;
@@ -109,13 +171,22 @@ function buildChart(
     cursor += 60 * 60 * 1000;
   }
 
-  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((v) => ({
-    value: v,
-    y: toY(v),
-    label: `${Math.round(v * 100)}%`,
-  }));
+  const yTicks = buildYTicks(yMin, yMax, toY);
 
-  return { chartPoints, hourTicks, yTicks, startMs, endMs, plotW, plotH, toX, toY };
+  return {
+    chartPoints,
+    hourTicks,
+    yTicks,
+    yMin,
+    yMax,
+    yScaleMode,
+    startMs,
+    endMs,
+    plotW,
+    plotH,
+    toX,
+    toY,
+  };
 }
 
 function polyline(points: ChartPoint[], key: "yCh" | "yK"): string {
@@ -132,8 +203,9 @@ export default function AlbedoDuelScoreTimeline({
   requiredWinMargin?: number | null;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
+  const [yScaleMode, setYScaleMode] = useState<YScaleMode>("focused");
   const width = 720;
-  const height = 220;
+  const height = 240;
 
   const availableDates = useMemo(() => {
     const dates = new Set<string>();
@@ -159,8 +231,8 @@ export default function AlbedoDuelScoreTimeline({
   );
 
   const chart = useMemo(
-    () => buildChart(dayPoints, selectedDate, width, height),
-    [dayPoints, selectedDate],
+    () => buildChart(dayPoints, selectedDate, width, height, yScaleMode),
+    [dayPoints, selectedDate, yScaleMode],
   );
 
   const stats = useMemo(() => {
@@ -180,7 +252,10 @@ export default function AlbedoDuelScoreTimeline({
 
   const active = chart.chartPoints.find((p) => p.eval_run_id === hovered) ?? null;
   const winBarY =
-    requiredWinMargin != null && Number.isFinite(requiredWinMargin)
+    requiredWinMargin != null &&
+    Number.isFinite(requiredWinMargin) &&
+    requiredWinMargin >= chart.yMin &&
+    requiredWinMargin <= chart.yMax
       ? chart.toY(requiredWinMargin)
       : null;
 
@@ -198,6 +273,22 @@ export default function AlbedoDuelScoreTimeline({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
+          <div className="inline-flex rounded border border-zinc-700 bg-zinc-900/60 p-0.5">
+            {(["focused", "full"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setYScaleMode(mode)}
+                className={`px-2 py-0.5 rounded text-[9px] font-medium transition-colors ${
+                  yScaleMode === mode
+                    ? "bg-emerald-500/15 text-emerald-200 border border-emerald-500/30"
+                    : "text-zinc-500 hover:text-zinc-300 border border-transparent"
+                }`}
+              >
+                {mode === "focused" ? "75–100%" : "0–100%"}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             disabled={!canPrev}
@@ -228,7 +319,14 @@ export default function AlbedoDuelScoreTimeline({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-        <p className="text-[9px] text-zinc-500">{fmtDayLabel(selectedDate)}</p>
+        <p className="text-[9px] text-zinc-500">
+          {fmtDayLabel(selectedDate)}
+          {chart.chartPoints.length > 0 && yScaleMode === "focused" && (
+            <span className="ml-2 text-zinc-600 mono">
+              Y {(chart.yMin * 100).toFixed(1)}%–{(chart.yMax * 100).toFixed(1)}%
+            </span>
+          )}
+        </p>
         {stats ? (
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] mono">
             <span className="text-zinc-500">
@@ -316,15 +414,19 @@ export default function AlbedoDuelScoreTimeline({
                   y1={tick.y}
                   x2={PAD.left + chart.plotW}
                   y2={tick.y}
-                  stroke="rgb(63 63 70 / 0.45)"
-                  strokeDasharray={tick.value === 0.5 ? "4 3" : "2 4"}
+                  stroke={
+                    Math.abs(tick.value - 0.5) < 0.001
+                      ? "rgb(63 63 70 / 0.55)"
+                      : "rgb(63 63 70 / 0.4)"
+                  }
+                  strokeDasharray={Math.abs(tick.value - 0.5) < 0.001 ? "4 3" : "2 4"}
                 />
                 <text
                   x={PAD.left - 6}
                   y={tick.y + 3}
                   textAnchor="end"
-                  className="fill-zinc-600"
-                  fontSize="9"
+                  className="fill-zinc-500"
+                  fontSize="8"
                   fontFamily="ui-monospace, monospace"
                 >
                   {tick.label}
