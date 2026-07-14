@@ -9,6 +9,7 @@ from app.chain_reader.commitment_scanner import Commit
 from app.chain_reader.slot_commitment_scanner import SlotStatus
 from app.notifications.formatters import commit_alert_detail, repo_alert_detail, slot_alert_detail
 from app.notifications.kinds import AlertKind
+from app.services.albedo_analysis_service import _build_judge_vote_rows
 
 KIND_LABELS: dict[AlertKind, str] = {
     "crown_won": "King Coronated",
@@ -30,15 +31,17 @@ KIND_LABELS: dict[AlertKind, str] = {
 DETAIL_ORDER: dict[AlertKind, tuple[str, ...]] = {
     "crown_won": (
         "repo",
-        "namespace",
         "uid",
         "hotkey",
         "king_version",
         "defeated_king_version",
+        "score_challenger",
+        "score_king",
         "win_margin",
-        "model_uri",
+        "judge_scores",
         "finished_at",
         "eval_run_id",
+        "model_uri",
     ),
     "crown_lost": (
         "previous_king_version",
@@ -61,7 +64,6 @@ DETAIL_ORDER: dict[AlertKind, tuple[str, ...]] = {
     "king_defended": (
         "eval_run_id",
         "repo",
-        "namespace",
         "uid",
         "hotkey",
         "king_version",
@@ -69,6 +71,7 @@ DETAIL_ORDER: dict[AlertKind, tuple[str, ...]] = {
         "score_challenger",
         "score_king",
         "win_margin",
+        "judge_scores",
         "finished_at",
     ),
     "commit_new": ("repo", "uid", "hotkey", "digest", "model_uri", "commit_block", "version"),
@@ -314,12 +317,13 @@ def build_crown_won_alert(
     defeated_king_version: Any,
 ) -> AlertContent:
     label = repo or model_uri or "unknown"
+    total = _duel_total_score_suffix(detail)
     return AlertContent(
         kind="crown_won",
         title=f"[crown_won] {label}",
         message=(
             f"SN{netuid} crowned king v{king_version or '?'} "
-            f"(defeated v{defeated_king_version or '?'})"
+            f"(defeated v{defeated_king_version or '?'}){total}"
         ),
         source_key=source_key,
         detail=detail,
@@ -349,7 +353,7 @@ def _duel_participant_detail(run: dict[str, Any], *, repo_from_uri) -> dict[str,
     king = run.get("king") or {}
     repo = repo_from_uri(run.get("model_uri"))
     king_repo = repo_from_uri(king.get("model_uri"))
-    return {
+    detail: dict[str, Any] = {
         "eval_run_id": run.get("eval_run_id"),
         "repo": repo,
         "namespace": run.get("namespace") or (repo.split("/")[0] if repo else None),
@@ -365,6 +369,18 @@ def _duel_participant_detail(run: dict[str, Any], *, repo_from_uri) -> dict[str,
         "challenger_won": run.get("challenger_won"),
         "coronated": run.get("coronated"),
     }
+    votes = _build_judge_vote_rows(run)
+    if votes:
+        detail["judge_scores"] = [
+            {
+                "judge": vote.short_name,
+                "challenger_score": vote.challenger_score,
+                "king_score": vote.king_score,
+                "pick_challenger": vote.pick_challenger,
+            }
+            for vote in votes
+        ]
+    return {k: v for k, v in detail.items() if v is not None}
 
 
 def build_duel_new_alert(
@@ -412,17 +428,32 @@ def build_king_defended_alert(
     label = repo or detail.get("model_uri", "unknown")
     margin = detail.get("win_margin")
     margin_s = f" margin {margin:+.3f}" if margin is not None else ""
+    total = _duel_total_score_suffix(detail)
     return AlertContent(
         kind="king_defended",
         title=f"[king_defended] {label}",
         message=(
             f"SN{netuid} eval finished — king defended"
-            f"{margin_s} (challenger lost eval)"
+            f"{margin_s}{total} (challenger lost eval)"
         ),
         source_key=source_key,
         detail=detail,
         subnet=netuid,
     )
+
+
+def _pct_score(score: float | None) -> str:
+    if score is None:
+        return "—"
+    return f"{float(score) * 100:.1f}%"
+
+
+def _duel_total_score_suffix(detail: dict[str, Any]) -> str:
+    ch = detail.get("score_challenger")
+    kg = detail.get("score_king")
+    if ch is None and kg is None:
+        return ""
+    return f" · total ch {_pct_score(ch)} / k {_pct_score(kg)}"
 
 
 def build_eval_dq_alert(
@@ -510,6 +541,21 @@ def format_detail_lines(kind: AlertKind, detail: dict[str, Any]) -> list[str]:
 
     def append(key: str) -> None:
         if key in seen:
+            return
+        if key == "judge_scores":
+            value = detail.get(key)
+            if not value:
+                return
+            seen.add(key)
+            for row in value:
+                if not isinstance(row, dict):
+                    continue
+                judge = row.get("judge") or "judge"
+                pick = "ch" if row.get("pick_challenger") else "k"
+                lines.append(
+                    f"*{judge}:* ch {_pct_score(row.get('challenger_score'))} "
+                    f"· k {_pct_score(row.get('king_score'))} → {pick}"
+                )
             return
         value = detail.get(key)
         if value is None or value == "":

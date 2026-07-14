@@ -298,21 +298,44 @@ def prose_for(kind: AlertKind, message: str, detail: dict[str, Any]) -> str:
     return "\n\n".join(paragraphs)
 
 
+def _pct_score(score: float | None) -> str:
+    if score is None:
+        return "—"
+    return f"{float(score) * 100:.1f}%"
+
+
 def _score_line(detail: dict[str, Any]) -> str | None:
     ch = detail.get("score_challenger")
     kg = detail.get("score_king")
     margin = detail.get("win_margin")
-    if ch is None and kg is None:
+    judge_scores = detail.get("judge_scores") or []
+    if ch is None and kg is None and not judge_scores:
         return None
-    ch_s = f"{float(ch):.3f}" if ch is not None else "?"
-    kg_s = f"{float(kg):.3f}" if kg is not None else "?"
-    line = f"Challenger score {ch_s}, king score {kg_s}."
-    if margin is not None:
-        m = float(margin)
-        if m > 0:
-            line += f" Challenger ahead by {m:+.3f}."
-        elif m < 0:
-            line += f" King ahead by {abs(m):.3f}."
-        else:
-            line += " Scores tied."
-    return line
+
+    parts: list[str] = []
+    if ch is not None or kg is not None:
+        parts.append(f"*Total:* challenger {_pct_score(ch)} · king {_pct_score(kg)}")
+        if margin is not None:
+            m = float(margin)
+            if m > 0:
+                parts.append(f"Challenger ahead by {_pct_score(m)}.")
+            elif m < 0:
+                parts.append(f"King ahead by {_pct_score(abs(m))}.")
+            else:
+                parts.append("Scores tied.")
+
+    if judge_scores:
+        judge_lines: list[str] = []
+        for row in judge_scores:
+            if not isinstance(row, dict):
+                continue
+            judge = row.get("judge") or "judge"
+            pick = "ch" if row.get("pick_challenger") else "k"
+            judge_lines.append(
+                f"• *{judge}:* ch {_pct_score(row.get('challenger_score'))} "
+                f"vs k {_pct_score(row.get('king_score'))} → {pick}"
+            )
+        if judge_lines:
+            parts.append("*Judges:*\n" + "\n".join(judge_lines))
+
+    return "\n".join(parts)

@@ -327,6 +327,12 @@ async def test_watcher_emits_king_defended():
                 "hotkey": "hk_chal",
                 "uid": 20,
                 "win_margin": -0.1,
+                "score_challenger": 0.45,
+                "score_king": 0.55,
+                "score_breakdown": {
+                    "by_judge": {"z-ai/glm-5.1": 0.42, "qwen/qwen3.5-397b-a17b": 0.48},
+                    "by_judge_king": {"z-ai/glm-5.1": 0.58, "qwen/qwen3.5-397b-a17b": 0.52},
+                },
                 "king": {"king_version": 2, "model_uri": "cyantest/king@v2"},
             }
         ],
@@ -345,6 +351,10 @@ async def test_watcher_emits_king_defended():
     assert sent >= 1
     kinds = [c.args[1].kind for c in dispatcher.notify_content.await_args_list]
     assert "king_defended" in kinds
+    alert = next(c.args[1] for c in dispatcher.notify_content.await_args_list if c.args[1].kind == "king_defended")
+    assert len(alert.detail["judge_scores"]) == 2
+    assert alert.detail["judge_scores"][0]["judge"] == "glm"
+    assert "total ch" in alert.message.lower()
 
 
 @pytest.mark.asyncio
@@ -435,6 +445,13 @@ async def test_watcher_emits_crown_won():
                 "king_version": 2,
                 "defeated_king_version": 1,
                 "finished_at": "2026-06-14T12:00:00Z",
+                "score_challenger": 0.62,
+                "score_king": 0.38,
+                "win_margin": 0.24,
+                "score_breakdown": {
+                    "by_judge": {"z-ai/glm-5.1": 0.65, "qwen/qwen3.5-397b-a17b": 0.59},
+                    "by_judge_king": {"z-ai/glm-5.1": 0.35, "qwen/qwen3.5-397b-a17b": 0.41},
+                },
             }
         ],
     }
@@ -454,6 +471,8 @@ async def test_watcher_emits_crown_won():
     alert = dispatcher.notify_content.await_args.args[1]
     assert alert.kind == "crown_won"
     assert alert.title.startswith("[crown_won]")
+    assert len(alert.detail["judge_scores"]) == 2
+    assert "total ch" in alert.message.lower()
 
 
 @pytest.mark.asyncio
