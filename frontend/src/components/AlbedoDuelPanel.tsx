@@ -10,6 +10,7 @@ import AlbedoDatasetBuilderPanel from "@/components/AlbedoDatasetBuilderPanel";
 import AlbedoKingReignDatasetPanel from "@/components/AlbedoKingReignDatasetPanel";
 import AlbedoMergeAdvisorPanel from "@/components/AlbedoMergeAdvisorPanel";
 import AlbedoSampleScoreAnalysisPanel from "@/components/AlbedoSampleScoreAnalysisPanel";
+import AlbedoDuelScoreTimeline from "@/components/AlbedoDuelScoreTimeline";
 import {
   api,
   modelLinkFromUri,
@@ -475,6 +476,12 @@ export default function AlbedoDuelPanel() {
       {section === "overview" && (
         <>
           {queueData && <AlbedoEvalQueueOverviewPanel data={queueData} />}
+
+          <AlbedoDuelScoreTimeline
+            points={data.score_timeline_24h ?? []}
+            referenceAt={data.updated_at}
+            requiredWinMargin={data.required_win_margin}
+          />
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {[

@@ -133,6 +133,22 @@ class AlbedoTimelinePoint(BaseModel):
     challenger_win_pct: float
 
 
+class AlbedoScoreTimelinePoint(BaseModel):
+    """One finished duel on the rolling score timeline (typically last 24h)."""
+
+    eval_run_id: str
+    finished_at: str
+    score_challenger: float
+    score_king: float
+    win_margin: float
+    challenger_won: bool
+    coronated: bool
+    challenger_uid: int
+    king_uid: int | None = None
+    challenger_label: str = ""
+    king_label: str = ""
+
+
 class AlbedoPipelineStage(BaseModel):
     stage: str
     status: str | None = None
@@ -298,6 +314,7 @@ class AlbedoAnalysisOverview(BaseModel):
     king_defense_by_model: list[AlbedoWinRateRow] = Field(default_factory=list)
     margin_histogram: list[AlbedoMarginBucket] = Field(default_factory=list)
     timeline: list[AlbedoTimelinePoint] = Field(default_factory=list)
+    score_timeline_24h: list[AlbedoScoreTimelinePoint] = Field(default_factory=list)
     pipeline: list[AlbedoPipelineStage] = Field(default_factory=list)
     miner_lookup_coverage_pct: float | None = None
     note: str = ""

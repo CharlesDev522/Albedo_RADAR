@@ -366,3 +366,65 @@ def test_binary_rubric_scoring_uses_by_judge_king_pairs():
     assert by_short["judge-b"].king_score == 0.52
     assert by_short["judge-b"].pick_challenger is False
     assert by_short["judge-b"].margin_from_neutral == -0.01
+
+
+def test_score_timeline_24h_filters_by_finish_time():
+    dashboard = {
+        "updated_at": "2026-06-27T12:00:00+00:00",
+        "chain": {"judge_models": []},
+        "reign": {"members": []},
+        "current_eval": None,
+        "queue": [],
+        "eval_runs": [
+            {
+                "eval_run_id": "in-window",
+                "challenger_won": True,
+                "coronated": False,
+                "score_challenger": 0.62,
+                "score_king": 0.38,
+                "win_margin": 0.24,
+                "finished_at": "2026-06-27T10:30:00+00:00",
+                "model_uri": "org/ch@sha256:1",
+                "hotkey": "hk1",
+                "uid": 1,
+                "king": {"model_uri": "org/k@sha256:0", "uid": 2, "hotkey": "hk2"},
+            },
+            {
+                "eval_run_id": "too-old",
+                "challenger_won": False,
+                "coronated": False,
+                "score_challenger": 0.4,
+                "score_king": 0.6,
+                "win_margin": -0.2,
+                "finished_at": "2026-06-25T10:00:00+00:00",
+                "model_uri": "org/old@sha256:2",
+                "hotkey": "hk3",
+                "uid": 3,
+                "king": {"model_uri": "org/k@sha256:0", "uid": 2, "hotkey": "hk2"},
+            },
+            {
+                "eval_run_id": "in-window-2",
+                "challenger_won": False,
+                "coronated": True,
+                "score_challenger": 0.45,
+                "score_king": 0.55,
+                "win_margin": -0.1,
+                "finished_at": "2026-06-27T11:45:00+00:00",
+                "model_uri": "org/ch2@sha256:3",
+                "hotkey": "hk4",
+                "uid": 4,
+                "king": {"model_uri": "org/k@sha256:0", "uid": 2, "hotkey": "hk2"},
+            },
+        ],
+    }
+
+    overview = build_analysis_overview(
+        dashboard,
+        subnet=97,
+        source_url="https://example.com/dashboard.json",
+    )
+
+    assert len(overview.score_timeline_24h) == 2
+    assert [p.eval_run_id for p in overview.score_timeline_24h] == ["in-window", "in-window-2"]
+    assert overview.score_timeline_24h[0].score_challenger == 0.62
+    assert overview.score_timeline_24h[1].coronated is True

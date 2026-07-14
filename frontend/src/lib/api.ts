@@ -462,6 +462,20 @@ export interface AlbedoTimelinePoint {
   challenger_win_pct: number;
 }
 
+export interface AlbedoScoreTimelinePoint {
+  eval_run_id: string;
+  finished_at: string;
+  score_challenger: number;
+  score_king: number;
+  win_margin: number;
+  challenger_won: boolean;
+  coronated: boolean;
+  challenger_uid: number;
+  king_uid?: number | null;
+  challenger_label: string;
+  king_label: string;
+}
+
 export interface AlbedoPipelineStage {
   stage: string;
   status?: string | null;
@@ -905,6 +919,7 @@ export interface AlbedoAnalysisOverview {
   king_defense_by_model: AlbedoWinRateRow[];
   margin_histogram: AlbedoMarginBucket[];
   timeline: AlbedoTimelinePoint[];
+  score_timeline_24h: AlbedoScoreTimelinePoint[];
   pipeline: AlbedoPipelineStage[];
   miner_lookup_coverage_pct?: number | null;
   note: string;

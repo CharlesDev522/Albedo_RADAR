@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from statistics import mean
 from typing import Any
 
@@ -34,6 +34,7 @@ from app.schemas.albedo_analysis import (
     AlbedoRepoColdkeyLink,
     AlbedoRepoCrownAnalysis,
     AlbedoRewardBasis,
+    AlbedoScoreTimelinePoint,
     AlbedoTimelinePoint,
     AlbedoWinRateRow,
 )
@@ -99,6 +100,60 @@ def _hours_between(start: str | None, end: str | None) -> float | None:
     if not a or not b:
         return None
     return round((b - a).total_seconds() / 3600.0, 1)
+
+
+def _short_model_label(namespace: str, model_name: str, *, max_len: int = 22) -> str:
+    label = f"{namespace}/{model_name}" if namespace else model_name
+    if len(label) <= max_len:
+        return label
+    return label[: max_len - 1] + "…"
+
+
+def _build_score_timeline_24h(
+    eval_runs: list[dict[str, Any]],
+    *,
+    miner_lookup: MinerLookup | None,
+    reference_at: str | None,
+    hours: float = 24.0,
+) -> list[AlbedoScoreTimelinePoint]:
+    """Finished duels in the rolling window, oldest-first for charting."""
+    ref = _parse_iso_dt(reference_at) or datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    cutoff = ref - timedelta(hours=hours)
+
+    points: list[AlbedoScoreTimelinePoint] = []
+    for run in eval_runs:
+        finished = _parse_iso_dt(run.get("finished_at"))
+        if not finished:
+            continue
+        if finished.tzinfo is None:
+            finished = finished.replace(tzinfo=timezone.utc)
+        if finished < cutoff or finished > ref:
+            continue
+
+        summary = _duel_summary(run, miner_lookup)
+        points.append(
+            AlbedoScoreTimelinePoint(
+                eval_run_id=summary.eval_run_id,
+                finished_at=summary.finished_at,
+                score_challenger=summary.score_challenger,
+                score_king=summary.score_king,
+                win_margin=summary.win_margin,
+                challenger_won=summary.challenger_won,
+                coronated=summary.coronated,
+                challenger_uid=summary.uid,
+                king_uid=summary.king_uid,
+                challenger_label=_short_model_label(summary.namespace, summary.model_name),
+                king_label=_short_model_label(
+                    summary.king_namespace or "",
+                    summary.king_model_name or "king",
+                ),
+            )
+        )
+
+    points.sort(key=lambda p: p.finished_at)
+    return points
 
 
 def _resolve_repo(
@@ -995,6 +1050,11 @@ def build_analysis_overview(
         reverse=True,
     )
     recent_duels = [_duel_summary(r, miner_lookup) for r in recent_runs[:60]]
+    score_timeline_24h = _build_score_timeline_24h(
+        eval_runs,
+        miner_lookup=miner_lookup,
+        reference_at=updated_at,
+    )
 
     lookup_note = ""
     if miner_lookup and miner_lookup.by_hotkey:
@@ -1045,6 +1105,7 @@ def build_analysis_overview(
         )[:15],
         margin_histogram=margin_histogram,
         timeline=timeline,
+        score_timeline_24h=score_timeline_24h,
         pipeline=_build_pipeline(state),
         miner_lookup_coverage_pct=miner_lookup.coverage_pct if miner_lookup else None,
         note=(
