@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import LatestHippiusReposPanel from "@/components/LatestHippiusReposPanel";
 import LatestHuggingFaceReposPanel from "@/components/LatestHuggingFaceReposPanel";
+import GithubWatchPanel from "@/components/GithubWatchPanel";
 import {
   api,
   hfModelUrl,
@@ -34,7 +35,7 @@ import {
 import { useSubnet } from "@/lib/useSubnet";
 import { usePageVisibility } from "@/lib/usePageVisibility";
 
-const POLL_MS = 30_000;
+const POLL_MS = 12_000;
 const TRACKED_REPOS_PREVIEW = 10;
 
 type FamilyFilter = "all" | "qwen3.6-35b" | "qwen3-4b";
@@ -249,6 +250,7 @@ export default function RepoActivityPanel() {
 
   return (
     <div className="space-y-3">
+      <GithubWatchPanel active={panelActive} />
       <div className="panel px-3 py-2 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-[12px] font-semibold text-zinc-100">Model repo activity</h2>

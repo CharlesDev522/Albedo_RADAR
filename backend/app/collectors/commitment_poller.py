@@ -77,6 +77,7 @@ class CommitmentPoller:
         self._last_repo_track: dict[int, float] = {}
         self._last_github_sync: float = 0.0
         self._notif_task: asyncio.Task[None] | None = None
+        self._github_task: asyncio.Task[None] | None = None
         self._poll_lock = asyncio.Lock()
         self._seen_hotkeys: dict[int, set[str]] = {}
         self._startup_full_scan_done: set[int] = set()
@@ -349,7 +350,24 @@ class CommitmentPoller:
                 last_reg_fee = now
             await asyncio.sleep(interval)
 
+    async def _github_poll_loop(self) -> None:
+        """Poll GitHub on its own cadence — not blocked by slow chain full scans."""
+        interval = max(self.settings.github_poll_interval_seconds, 10)
+        while self._running:
+            try:
+                await self._github_poll()
+            except Exception:
+                logger.exception("GitHub repo watch loop failed")
+            await asyncio.sleep(interval)
+
     async def teardown(self) -> None:
+        if self._github_task is not None:
+            self._github_task.cancel()
+            try:
+                await self._github_task
+            except asyncio.CancelledError:
+                pass
+            self._github_task = None
         if self._notif_task is not None:
             self._notif_task.cancel()
             try:
@@ -655,16 +673,6 @@ class CommitmentPoller:
                 await self._slot_poll(netuid, snapshot)
                 self._last_slot_scan[netuid] = now
 
-            if (
-                self.github_watcher.enabled
-                and now - self._last_github_sync >= self.settings.github_poll_interval_seconds
-            ):
-                try:
-                    await self._github_poll()
-                except Exception:
-                    logger.exception("GitHub repo watch failed")
-                self._last_github_sync = now
-
             return stats
 
     async def run(self) -> None:
@@ -674,6 +682,11 @@ class CommitmentPoller:
             self._notification_loop(),
             name="albedo-notification-loop",
         )
+        if self.github_watcher.enabled:
+            self._github_task = asyncio.create_task(
+                self._github_poll_loop(),
+                name="github-repo-watch-loop",
+            )
 
         while self._running:
             for netuid in self.settings.dashboard_subnets:

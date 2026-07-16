@@ -25,8 +25,9 @@ import { useSubnet } from "@/lib/useSubnet";
 
 const LIVE_URL = "/api/v1/live/stream";
 export const DASHBOARD_POLL_MS = 3000;
-const CLUSTERS_POLL_MS = 8000;
-const SYNC_POLL_MS = 30_000;
+/** Clusters use the same cadence as the main dashboard (was 8s — felt stale). */
+export const CLUSTERS_POLL_MS = DASHBOARD_POLL_MS;
+const SYNC_POLL_MS = 15_000;
 const SUBNET_EXTRAS_POLL_MS = 12_000;
 
 export interface LiveEvent {
@@ -165,16 +166,18 @@ export function DashboardSyncProvider({
         applyCommits(c.commitments);
         setSlotData(slots);
       } else if (activeView === "clusters") {
-        const [s, c, r] = await Promise.all([
+        const [s, c, r, slots] = await Promise.all([
           api.getStats(fetchSubnet),
           api.getCommitments(fetchSubnet),
           api.getRegistry(fetchSubnet),
+          api.getSlotStatus(fetchSubnet, "all", "uid_asc", false),
         ]);
         if (subnetRef.current !== fetchSubnet || viewRef.current !== activeView) return;
 
         setStats(s);
         applyCommits(c.commitments);
         setRegistry(r);
+        setSlotData(slots);
       } else {
         return;
       }
@@ -284,8 +287,9 @@ export function DashboardSyncProvider({
   }, [pageVisible, view, refresh, refreshCore, refreshSync, refreshSubnetExtras]);
 
   useEffect(() => {
-    if (!pageVisible || view !== "dashboard") {
-      setLiveStatus("idle");
+    const usesLiveStream = view === "dashboard" || view === "clusters";
+    if (!pageVisible || !usesLiveStream) {
+      if (view !== "dashboard" && view !== "clusters") setLiveStatus("idle");
       return;
     }
 
@@ -294,14 +298,16 @@ export function DashboardSyncProvider({
 
     const connect = () => {
       es = new EventSource(`${LIVE_URL}?subnet=${subnet}`);
-      setLiveStatus("connecting");
+      setLiveStatus(view === "dashboard" ? "connecting" : "live");
 
       es.addEventListener("connected", () => setLiveStatus("live"));
       es.addEventListener("commit", (e) => {
         try {
           const data: LiveEvent = JSON.parse(e.data);
           if (data.subnet != null && data.subnet !== subnet) return;
-          setFeed((prev) => [data, ...prev].slice(0, 30));
+          if (view === "dashboard") {
+            setFeed((prev) => [data, ...prev].slice(0, 30));
+          }
           flash(data.uid);
           void refreshCore();
         } catch {

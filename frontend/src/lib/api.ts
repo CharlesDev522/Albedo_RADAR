@@ -165,6 +165,50 @@ export interface SlotStatusData {
   source: string;
 }
 
+export interface GithubWatchTarget {
+  owner: string;
+  repo: string;
+  branch: string;
+  tree_url: string;
+  full_name: string;
+}
+
+export interface GithubRepoWatchState {
+  owner: string;
+  repo: string;
+  branch: string;
+  tree_url: string;
+  seeded_at?: string | null;
+  seeded_sha?: string | null;
+  last_seen_sha?: string | null;
+  last_commit_subject?: string | null;
+  last_commit_url?: string | null;
+  last_checked_at?: string | null;
+}
+
+export interface GithubCommitAlert {
+  owner: string;
+  repo: string;
+  branch: string;
+  commit_sha: string;
+  commit_subject: string;
+  commit_body?: string | null;
+  commit_url: string;
+  title: string;
+  message: string;
+  detail?: Record<string, unknown>;
+  slack_sent: boolean;
+  created_at: string;
+}
+
+export interface GithubWatchOverview {
+  enabled: boolean;
+  poll_interval_seconds: number;
+  configured_targets: GithubWatchTarget[];
+  watch_states: GithubRepoWatchState[];
+  recent_alerts: GithubCommitAlert[];
+}
+
 export interface MinerIncentiveEntry {
   uid: number;
   hotkey: string;
@@ -951,6 +995,8 @@ export const api = {
     fetchApi<SlotStatusData>(
       `/slot-status?subnet=${subnet}&filter=${filter}&sort=${sort}${live ? "&live=true" : ""}`
     ),
+  getGithubWatch: (limit = 25, forceRefresh = false) =>
+    fetchApi<GithubWatchOverview>(`/github/watch?limit=${limit}`, { forceRefresh }),
   getRecent: (subnet = DEFAULT_SUBNET) =>
     fetchApi<{ commits: Commitment[] }>(`/live/recent?subnet=${subnet}`),
   getIncentiveOverview: (subnet = DEFAULT_SUBNET, limit = 30, live = false) =>

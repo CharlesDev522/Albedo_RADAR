@@ -11,9 +11,10 @@ const SWR_TTL_MS: Record<string, number> = {
   "/albedo/analysis": 25_000,
   "/albedo/eval-queue": 8_000,
   "/albedo/live-duel": 8_000,
-  "/repo-activity/overview": 15_000,
-  "/repo-activity/repos": 15_000,
-  "/repo-activity/feed": 15_000,
+  "/repo-activity/overview": 10_000,
+  "/repo-activity/repos": 10_000,
+  "/repo-activity/feed": 10_000,
+  "/github/watch": 8_000,
   "/repo-activity/hippius-latest": 60_000,
   "/market/overview": 45_000,
 };

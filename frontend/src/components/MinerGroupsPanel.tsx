@@ -5,6 +5,7 @@ import {
   modelCommitUrl,
   shortAddr,
   shortRepo,
+  type SlotStatusEntry,
 } from "@/lib/api";
 import { useDashboardSync } from "@/lib/DashboardSyncContext";
 import {
@@ -18,7 +19,7 @@ import {
   type MinerGroup,
 } from "@/lib/minerGroups";
 import { getSubnetProfile } from "@/lib/subnets";
-import { getSubnetTheme } from "@/lib/subnetTheme";
+import { getSubnetTheme, slotTypeLabel } from "@/lib/subnetTheme";
 import { useSubnet } from "@/lib/useSubnet";
 import SearchBar from "@/components/SearchBar";
 import { isSearchActive, matchesGroup } from "@/lib/searchFilter";
@@ -27,7 +28,7 @@ export default function MinerGroupsPanel() {
   const { subnet } = useSubnet();
   const profile = getSubnetProfile(subnet);
   const theme = getSubnetTheme(subnet);
-  const { registry, commits } = useDashboardSync();
+  const { registry, commits, slotData, lastRefresh, liveStatus, flashUids } = useDashboardSync();
   const [view, setView] = useState<GroupView>("coldkey");
   const [multiOnly, setMultiOnly] = useState(true);
   const [search, setSearch] = useState("");
@@ -38,7 +39,16 @@ export default function MinerGroupsPanel() {
     setExpanded(new Set());
   }, [subnet, view]);
 
-  const rows = useMemo(() => buildMinerRows(registry, commits), [registry, commits]);
+  const slotsByUid = useMemo(() => {
+    const map = new Map<number, SlotStatusEntry>();
+    for (const s of slotData?.slots ?? []) map.set(s.uid, s);
+    return map;
+  }, [slotData?.slots]);
+
+  const rows = useMemo(
+    () => buildMinerRows(registry, commits, slotsByUid),
+    [registry, commits, slotsByUid]
+  );
   const summary = useMemo(() => clusterSummary(rows), [rows]);
 
   const allGroups = useMemo(() => {
@@ -68,6 +78,12 @@ export default function MinerGroupsPanel() {
           </h2>
           <p className="text-[10px] text-zinc-500 mt-0.5">
             same coldkey operators · shared HuggingFace model owners
+            {lastRefresh && (
+              <span className="ml-2 text-zinc-600">
+                · updated {lastRefresh.toLocaleTimeString()}
+                {liveStatus === "live" ? " · live" : ""}
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -122,6 +138,8 @@ export default function MinerGroupsPanel() {
               commitLabel={theme.commitLabel}
               modelHost={theme.modelHost}
               uidChipClass={theme.uidChipCommitted}
+              subnet={subnet}
+              flashUids={flashUids}
             />
           ))}
         </div>
@@ -163,6 +181,8 @@ function GroupCard({
   commitLabel,
   modelHost,
   uidChipClass,
+  subnet,
+  flashUids,
 }: {
   group: MinerGroup;
   view: GroupView;
@@ -171,6 +191,8 @@ function GroupCard({
   commitLabel: string;
   modelHost: "hippius" | "huggingface";
   uidChipClass: string;
+  subnet: number;
+  flashUids: Set<number>;
 }) {
   const accent =
     view === "owner" ? ownerPalette(group.label) : ownerPalette(group.label.slice(-8));
@@ -214,7 +236,14 @@ function GroupCard({
 
         <div className="flex flex-wrap gap-1 mt-2">
           {group.miners.map((m) => (
-            <UidChip key={m.uid} uid={m.uid} hasCommit={m.hasCommit} committedClass={uidChipClass} commitLabel={commitLabel} />
+            <UidChip
+              key={m.uid}
+              uid={m.uid}
+              hasCommit={m.hasCommit}
+              committedClass={uidChipClass}
+              commitLabel={commitLabel}
+              flash={flashUids.has(m.uid)}
+            />
           ))}
         </div>
 
@@ -243,6 +272,7 @@ function GroupCard({
               <tr>
                 <th>uid</th>
                 <th>hotkey</th>
+                <th>slot</th>
                 {view === "owner" && <th>coldkey</th>}
                 <th>model</th>
               </tr>
@@ -265,6 +295,13 @@ function GroupCard({
                     </td>
                     <td className="mono text-zinc-500" title={m.hotkey}>
                       {shortAddr(m.hotkey, 4)}
+                    </td>
+                    <td className="text-[9px] text-zinc-400 whitespace-nowrap">
+                      {m.commitmentType
+                        ? slotTypeLabel(subnet, m.commitmentType, m.repo)
+                        : m.hasCommit
+                          ? commitLabel
+                          : "none"}
                     </td>
                     {view === "owner" && (
                       <td className="mono text-zinc-500" title={m.coldkey}>
@@ -302,16 +339,20 @@ function UidChip({
   hasCommit,
   committedClass,
   commitLabel,
+  flash,
 }: {
   uid: number;
   hasCommit: boolean;
   committedClass: string;
   commitLabel: string;
+  flash?: boolean;
 }) {
   return (
     <span
       className={`inline-flex items-center justify-center min-w-[26px] h-[18px] px-1 rounded text-[9px] mono tabular-nums border ${
-        hasCommit
+        flash
+          ? "border-amber-400/70 bg-amber-500/25 text-amber-100 ring-1 ring-amber-400/40"
+          : hasCommit
           ? committedClass
           : "border-zinc-700 bg-zinc-900/80 text-zinc-500"
       }`}

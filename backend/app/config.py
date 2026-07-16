@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     poll_interval_seconds: int = 2
     metagraph_sync_interval_seconds: int = 45
     full_scan_interval_seconds: int = 300
-    slot_scan_interval_seconds: int = 15
+    slot_scan_interval_seconds: int = 8
     mechid: int = 0
 
     # Primary dashboard subnet (SN97 Albedo)
@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     hippius_hub_page_size: int = 100
     hippius_hub_max_pages: int = 15
     huggingface_api_url: str = "https://huggingface.co/api"
-    repo_track_interval_seconds: int = 60
+    repo_track_interval_seconds: int = 45
     repo_track_revision: str = "main"
 
     # GitHub repo tracking
@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     github_repo_watches: list[str] = [
         "https://github.com/tony-dendrite/albedo/tree/dev",
     ]
-    github_poll_interval_seconds: int = 120
+    github_poll_interval_seconds: int = 25
 
     # Notifications (Slack)
     notifications_enabled: bool = True

@@ -1,4 +1,4 @@
-import type { Commitment, Registry, RegistryMiner } from "@/lib/api";
+import type { Commitment, Registry, RegistryMiner, SlotStatusEntry } from "@/lib/api";
 
 export type GroupView = "coldkey" | "owner";
 
@@ -11,6 +11,8 @@ export interface MinerRow {
   repo: string | null;
   digest: string | null;
   commitBlock: number | null;
+  commitmentType: string | null;
+  isPublished: boolean | null;
 }
 
 export interface MinerGroup {
@@ -32,7 +34,8 @@ export function repoOwner(repo: string | null | undefined): string | null {
 
 export function buildMinerRows(
   registry: Registry | null,
-  commits: Commitment[]
+  commits: Commitment[],
+  slotsByUid?: Map<number, SlotStatusEntry>
 ): MinerRow[] {
   const commitByUid = new Map(
     commits.filter((c) => c.uid != null).map((c) => [c.uid as number, c])
@@ -40,6 +43,7 @@ export function buildMinerRows(
   const miners: RegistryMiner[] = registry?.miners ?? [];
   return miners.map((m) => {
     const c = commitByUid.get(m.uid);
+    const slot = slotsByUid?.get(m.uid);
     return {
       uid: m.uid,
       hotkey: m.hotkey,
@@ -49,6 +53,8 @@ export function buildMinerRows(
       repo: m.repo ?? c?.repo ?? null,
       digest: c?.digest ?? m.model_uri?.split("@")[1] ?? null,
       commitBlock: m.commit_block ?? c?.commit_block ?? null,
+      commitmentType: slot?.commitment_type ?? null,
+      isPublished: slot?.is_published ?? null,
     };
   });
 }
