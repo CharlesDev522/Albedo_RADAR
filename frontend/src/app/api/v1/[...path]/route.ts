@@ -1,21 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
+import { localhostFallbackUrl, resolveBackendOrigin } from "@/lib/backendOrigin";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Resolve FastAPI base URL at request time (Docker sets API_URL when the container starts). */
-function backendOrigin(): string {
-  const raw =
-    process.env.API_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    "http://localhost:8000/api/v1";
-  return raw.replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
+const PROXY_TIMEOUT_MS = 120_000;
+
+async function fetchUpstream(target: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
+  try {
+    return await fetch(target, { ...init, signal: controller.signal });
+  } catch (error) {
+    const fallback = localhostFallbackUrl(target);
+    if (fallback) {
+      return await fetch(fallback, { ...init, signal: controller.signal });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function proxyRequest(req: NextRequest, pathSegments: string[]) {
   const path = pathSegments.join("/");
   const url = new URL(req.url);
-  const target = `${backendOrigin()}/api/v1/${path}${url.search}`;
+  const target = `${resolveBackendOrigin()}/api/v1/${path}${url.search}`;
 
   const headers = new Headers();
   const accept = req.headers.get("accept");
@@ -33,7 +43,7 @@ async function proxyRequest(req: NextRequest, pathSegments: string[]) {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const upstream = await fetch(target, {
+      const upstream = await fetchUpstream(target, {
         method: req.method,
         headers,
         body,
@@ -69,7 +79,7 @@ async function proxyRequest(req: NextRequest, pathSegments: string[]) {
   const message = lastError instanceof Error ? lastError.message : String(lastError);
   return NextResponse.json(
     {
-      detail: `Cannot reach API at ${target}: ${message}. Check: docker compose ps api && docker compose logs api --tail 40 && curl -sf http://localhost:8000/health`,
+      detail: `Cannot reach API at ${target}: ${message}. If using Docker: docker compose ps api && curl -sf http://localhost:8000/health && docker compose logs api --tail 40. If using npm run dev on the host, set API_URL=http://localhost:8000/api/v1 (not http://api:8000).`,
     },
     { status: 502 },
   );

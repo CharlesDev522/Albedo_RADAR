@@ -1,16 +1,11 @@
 /** Server-side (SSR): Docker internal URL. Browser: same-origin proxy via Next route handler. */
+import { localhostFallbackUrl, resolveBackendApiV1Base } from "@/lib/backendOrigin";
+
 function apiBase(): string {
   if (typeof window !== "undefined") {
     return "/api/v1";
   }
-  if (process.env.INTERNAL_API_PROXY) {
-    return process.env.INTERNAL_API_PROXY.replace(/\/$/, "");
-  }
-  return (
-    process.env.API_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    "http://localhost:8000/api/v1"
-  ).replace(/\/$/, "");
+  return resolveBackendApiV1Base();
 }
 
 const DEFAULT_SUBNET = 97;
@@ -927,12 +922,12 @@ import { fetchWithCache, invalidateApiCache } from "@/lib/apiCache";
 
 async function fetchApiRaw<T>(path: string): Promise<T> {
   const url = `${apiBase()}${path}`;
-  const maxAttempts = typeof window === "undefined" ? 3 : 1;
+  const maxAttempts = typeof window === "undefined" ? 3 : 2;
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const res = await fetch(url, { cache: "no-store" });
+      const res = await fetchUrlWithFallback(url);
       if (!res.ok) {
         let detail = `HTTP ${res.status}`;
         try {
@@ -953,6 +948,18 @@ async function fetchApiRaw<T>(path: string): Promise<T> {
   }
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+async function fetchUrlWithFallback(url: string): Promise<Response> {
+  try {
+    return await fetch(url, { cache: "no-store" });
+  } catch (error) {
+    const fallback = localhostFallbackUrl(url);
+    if (fallback) {
+      return await fetch(fallback, { cache: "no-store" });
+    }
+    throw error;
+  }
 }
 
 async function fetchApi<T>(path: string, opts?: { forceRefresh?: boolean }): Promise<T> {

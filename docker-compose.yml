@@ -43,6 +43,16 @@ services:
       METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
       FULL_SCAN_INTERVAL_SECONDS: "300"
       CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000"]'
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:8000/health'', timeout=5)"',
+        ]
+      interval: 10s
+      timeout: 8s
+      retries: 6
+      start_period: 40s
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,13 +88,14 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Server-side fetch from inside Docker network
+      # Server-side proxy + SSR (Docker network hostname)
       API_URL: http://api:8000/api/v1
-      # Optional: set if browser also needs direct API access
-      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
-      NEXT_PUBLIC_LIVE_URL: http://localhost:8000/api/v1/live/stream
+      INTERNAL_API_PROXY: http://api:8000/api/v1
+      # Browser uses same-origin /api/v1; SSE via Next proxy
+      NEXT_PUBLIC_LIVE_URL: /api/v1/live/stream
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
