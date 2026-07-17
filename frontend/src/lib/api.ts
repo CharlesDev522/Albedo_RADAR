@@ -760,6 +760,39 @@ export interface AlbedoDualZeroQuestion {
   king_qwen?: string | null;
 }
 
+export interface AlbedoQuestionMarginRow {
+  question_id: string;
+  question_index?: number | null;
+  is_default_q1_20: boolean;
+  text: string;
+  category?: string | null;
+  observations: number;
+  signed_margin_sum: number;
+  abs_margin_sum: number;
+  share_of_abs_margin_pct: number;
+}
+
+export interface AlbedoQuestionMarginBuckets {
+  default_q1_20_abs_sum: number;
+  other_abs_sum: number;
+  default_q1_20_share_pct: number;
+  other_share_pct: number;
+}
+
+export interface AlbedoDuelQuestionMarginAnalysis {
+  eval_run_id: string;
+  export_filename?: string | null;
+  total_samples: number;
+  total_observations: number;
+  questions_per_sample?: number | null;
+  total_abs_margin: number;
+  total_signed_margin: number;
+  avg_margin_pct_per_observation?: number | null;
+  buckets: AlbedoQuestionMarginBuckets;
+  questions: AlbedoQuestionMarginRow[];
+  note: string;
+}
+
 export type MergeAdvisorMode = "current_king" | "multi_king";
 
 export interface AlbedoMergeGlobalBtRow {
@@ -1061,6 +1094,15 @@ export const api = {
   ) =>
     fetchApi<AlbedoScoringAnalysis>(
       `/albedo/scoring-analysis?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}&polarity=${polarity}`,
+      { forceRefresh }
+    ),
+  getAlbedoQuestionMarginAnalysis: (
+    evalRunId: string,
+    subnet = DEFAULT_SUBNET,
+    forceRefresh = false
+  ) =>
+    fetchApi<AlbedoDuelQuestionMarginAnalysis>(
+      `/albedo/scoring-analysis/question-margins?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}`,
       { forceRefresh }
     ),
   downloadAlbedoScoringExport: async (

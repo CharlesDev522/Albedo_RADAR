@@ -6,6 +6,7 @@ import { EntityNameCell } from "@/lib/entityLabels";
 import AlbedoEvalQueueOverviewPanel from "@/components/AlbedoEvalQueueOverview";
 import AlbedoEvalFailsPanel from "@/components/AlbedoEvalFailsPanel";
 import AlbedoScoringGapsPanel from "@/components/AlbedoScoringGapsPanel";
+import AlbedoDuelQuestionMarginPanel from "@/components/AlbedoDuelQuestionMarginPanel";
 import AlbedoDatasetBuilderPanel from "@/components/AlbedoDatasetBuilderPanel";
 import AlbedoKingReignDatasetPanel from "@/components/AlbedoKingReignDatasetPanel";
 import AlbedoMergeAdvisorPanel from "@/components/AlbedoMergeAdvisorPanel";
@@ -339,7 +340,7 @@ function DuelRow({
               scoringExpanded ? "text-amber-300" : "text-sky-400"
             }`}
           >
-            {scoringExpanded ? "hide scoring gaps" : "scoring gaps"}
+            {scoringExpanded ? "hide scoring" : "scoring analysis"}
           </button>
         )}
       </td>
@@ -347,8 +348,11 @@ function DuelRow({
     {scoringExpanded && hasScoring && (
       <tr className="border-b border-zinc-800/50 bg-zinc-900/30">
         <td colSpan={colSpan} className="p-0 max-w-0 w-full">
-          <div className="min-w-0 max-w-full overflow-hidden border-l-2 border-amber-500/25 px-2 py-0.5">
-            <AlbedoScoringGapsPanel evalRunId={duel.eval_run_id} />
+          <div className="min-w-0 max-w-full overflow-hidden border-l-2 border-amber-500/25 px-2 py-0.5 space-y-3">
+            <AlbedoDuelQuestionMarginPanel evalRunId={duel.eval_run_id} />
+            <div className="border-t border-zinc-800/80 pt-2">
+              <AlbedoScoringGapsPanel evalRunId={duel.eval_run_id} />
+            </div>
           </div>
         </td>
       </tr>

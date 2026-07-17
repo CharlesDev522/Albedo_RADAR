@@ -12,6 +12,7 @@ from app.schemas.albedo_live import AlbedoLiveDuel
 from app.schemas.albedo_merge_advisor import AlbedoMergeAdvisorRecommendation, MergeAdvisorMode
 from app.schemas.albedo_scoring_analysis import (
     AlbedoDatasetBuildSummary,
+    AlbedoDuelQuestionMarginAnalysis,
     AlbedoScoringAnalysis,
     ScoringConsensusPolarity,
 )
@@ -20,6 +21,7 @@ from app.services.albedo_eval_queue_service import get_eval_queue_overview
 from app.services.albedo_live_duel_service import get_live_duel
 from app.services.albedo_merge_advisor_service import get_merge_advisor_recommendation
 from app.services.albedo_miner_lookup import load_historical_miner_lookup
+from app.services.albedo_duel_question_margin_service import get_question_margin_for_eval
 from app.services.albedo_scoring_analysis_service import (
     get_binary_dataset_export,
     get_binary_dataset_summary,
@@ -150,6 +152,35 @@ async def albedo_scoring_analysis(
         raise HTTPException(
             status_code=502,
             detail=f"Failed to analyze scoring results: {exc}",
+        ) from exc
+
+
+@router.get("/scoring-analysis/question-margins", response_model=AlbedoDuelQuestionMarginAnalysis)
+async def albedo_scoring_question_margins(
+    eval_run_id: str = Query(..., min_length=8),
+    subnet: int = Query(default=97, ge=0),
+    fresh: bool = Query(default=False),
+) -> AlbedoDuelQuestionMarginAnalysis:
+    """Per-question share of |challenger−king| rubric margin for one duel (all samples × judges)."""
+    if subnet != 97:
+        raise HTTPException(
+            status_code=400,
+            detail="Albedo question margin analysis is only available for SN97",
+        )
+    settings = get_settings()
+    try:
+        return await get_question_margin_for_eval(
+            eval_run_id,
+            subnet=subnet,
+            settings=settings,
+            fresh=fresh,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to analyze question margins: {exc}",
         ) from exc
 
 

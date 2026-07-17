@@ -60,3 +60,39 @@ class AlbedoDatasetBuildSummary(BaseModel):
     duplicates_removed: int = 0
     samples_skipped_min_questions: int = 0
     total_dual_zero_questions: int = 0
+
+
+class AlbedoQuestionMarginRow(BaseModel):
+    question_id: str
+    question_index: int | None = None
+    is_default_q1_20: bool = False
+    text: str = ""
+    category: str | None = None
+    observations: int = 0
+    signed_margin_sum: float = 0.0
+    abs_margin_sum: float = 0.0
+    share_of_abs_margin_pct: float = 0.0
+
+
+class AlbedoQuestionMarginBuckets(BaseModel):
+    default_q1_20_abs_sum: float = 0.0
+    other_abs_sum: float = 0.0
+    default_q1_20_share_pct: float = 0.0
+    other_share_pct: float = 0.0
+
+
+class AlbedoDuelQuestionMarginAnalysis(BaseModel):
+    eval_run_id: str
+    export_filename: str | None = None
+    total_samples: int = 0
+    total_observations: int = 0
+    questions_per_sample: int | None = None
+    total_abs_margin: float = 0.0
+    total_signed_margin: float = 0.0
+    avg_margin_pct_per_observation: float | None = None
+    buckets: AlbedoQuestionMarginBuckets = Field(default_factory=AlbedoQuestionMarginBuckets)
+    questions: list[AlbedoQuestionMarginRow] = Field(default_factory=list)
+    note: str = (
+        "Per question: share of |margin| across all sample×judge observations. "
+        "Each question contributes (challenger−king)×(100/N) to rubric margin for that observation."
+    )
