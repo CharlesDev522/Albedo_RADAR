@@ -22,12 +22,28 @@ function shortSha(sha: string | null | undefined): string {
   return sha.slice(0, 7);
 }
 
+function formatPollResult(stats: Record<string, unknown> | null): string | null {
+  if (!stats) return null;
+  const targets = Number(stats.targets ?? 0);
+  const errors = Number(stats.errors ?? 0);
+  const seeded = Number(stats.seeded ?? 0);
+  const newCommits = Number(stats.new_commits ?? 0);
+  if (targets <= 0) return "No GitHub watch targets configured.";
+  if (errors > 0) {
+    return `Polled ${targets} target(s) with ${errors} error(s). Check API logs / GITHUB_TOKEN rate limits.`;
+  }
+  if (newCommits > 0) return `Found ${newCommits} new commit(s).`;
+  if (seeded > 0) return "Seeded current branch tip (no alert on first poll).";
+  return `Polled ${targets} target(s) — no new commits.`;
+}
+
 export default function GithubWatchPanel({ active }: { active: boolean }) {
   const pageVisible = usePageVisibility();
   const [data, setData] = useState<GithubWatchOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [pollNote, setPollNote] = useState<string | null>(null);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
 
   const loadOverview = useCallback(async (forceRefresh = false) => {
@@ -38,31 +54,38 @@ export default function GithubWatchPanel({ active }: { active: boolean }) {
     return overview;
   }, []);
 
-  const refresh = useCallback(
-    async (opts?: { pollGitHub?: boolean }) => {
-      try {
-        if (opts?.pollGitHub) {
-          setSyncing(true);
-          await api.syncGithubWatch();
-        }
-        await loadOverview(true);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "GitHub watch unavailable");
-      } finally {
-        setLoading(false);
-        setSyncing(false);
-      }
-    },
-    [loadOverview]
-  );
+  const pollNow = useCallback(async () => {
+    setSyncing(true);
+    setPollNote(null);
+    setError(null);
+    try {
+      const stats = await api.syncGithubWatch();
+      setPollNote(formatPollResult(stats));
+      await loadOverview(true);
+    } catch (e) {
+      setPollNote(null);
+      setError(e instanceof Error ? e.message : "GitHub watch unavailable");
+    } finally {
+      setSyncing(false);
+      setLoading(false);
+    }
+  }, [loadOverview]);
 
   useEffect(() => {
     if (!active || !pageVisible) return;
     setLoading(true);
-    void refresh();
-    const id = setInterval(() => void loadOverview(true), POLL_MS);
+    void loadOverview(true)
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : "GitHub watch unavailable");
+      })
+      .finally(() => setLoading(false));
+    const id = setInterval(() => {
+      void loadOverview(true).catch(() => {
+        /* keep last good data on background refresh failure */
+      });
+    }, POLL_MS);
     return () => clearInterval(id);
-  }, [active, pageVisible, refresh, loadOverview]);
+  }, [active, pageVisible, loadOverview]);
 
   if (!loading && !data?.enabled && !error) {
     return null;
@@ -86,8 +109,8 @@ export default function GithubWatchPanel({ active }: { active: boolean }) {
         </div>
         <button
           type="button"
-          onClick={() => void refresh({ pollGitHub: true })}
-          disabled={syncing || loading}
+          onClick={() => void pollNow()}
+          disabled={syncing}
           className="text-[9px] px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 disabled:opacity-50"
         >
           {syncing ? "polling…" : "poll now"}
@@ -99,6 +122,7 @@ export default function GithubWatchPanel({ active }: { active: boolean }) {
       )}
 
       {error && <p className="text-[10px] text-rose-300 mb-2">{error}</p>}
+      {pollNote && !error && <p className="text-[10px] text-sky-300/90 mb-2">{pollNote}</p>}
 
       {!loading && targets.length === 0 && !error && (
         <p className="text-[10px] text-amber-300/90 mb-2">

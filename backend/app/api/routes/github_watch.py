@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,10 +66,18 @@ async def sync_github_watch(
 ) -> dict:
     """On-demand GitHub poll — same logic as the collector background loop."""
     watcher = GithubRepoWatcher(settings)
+    if not watcher.enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="GitHub repo tracking is disabled or no watches are configured",
+        )
     try:
         stats = await watcher.sync_once(db)
-        await db.commit()
+        await db.flush()
         return {"status": "ok", **stats}
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=502, detail=f"GitHub poll failed: {exc}") from exc
     finally:
         await watcher.close()
 

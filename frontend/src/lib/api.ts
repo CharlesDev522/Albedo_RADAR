@@ -1040,11 +1040,24 @@ export const api = {
   syncGithubWatch: async () => {
     const res = await fetch(`${apiBase()}/github/sync`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
       cache: "no-store",
     });
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`GitHub sync failed: HTTP ${res.status}${body ? ` — ${body.slice(0, 120)}` : ""}`);
+      let detail = "";
+      try {
+        const payload = (await res.json()) as { detail?: string | { msg?: string }[] };
+        if (typeof payload.detail === "string") detail = payload.detail;
+        else if (Array.isArray(payload.detail)) {
+          detail = payload.detail.map((d) => d.msg ?? "").filter(Boolean).join("; ");
+        }
+      } catch {
+        detail = await res.text().catch(() => "");
+      }
+      throw new Error(
+        `GitHub sync failed: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`
+      );
     }
     invalidateApiCache("/github");
     return res.json() as Promise<Record<string, unknown>>;

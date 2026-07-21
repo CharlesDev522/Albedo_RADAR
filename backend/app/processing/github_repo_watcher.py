@@ -74,14 +74,15 @@ class GithubRepoWatcher:
         for target in self.targets():
             stats["targets"] += 1
             watch_key = f"{target.owner}/{target.repo}@{target.branch}"
+            state: GithubRepoWatchState | None = None
             try:
+                state = await self._get_state(session, target)
                 commits = await self.client.fetch_commits(target, client=http)
+                state.last_checked_at = datetime.now(timezone.utc)
                 if not commits:
                     continue
 
-                state = await self._get_state(session, target)
                 latest = commits[0]
-                state.last_checked_at = datetime.now(timezone.utc)
                 state.last_seen_sha = latest.sha
                 state.last_commit_subject = latest.subject
                 state.last_commit_url = latest.html_url
@@ -157,6 +158,8 @@ class GithubRepoWatcher:
                 state.seeded_sha = latest.sha
             except Exception:
                 stats["errors"] += 1
+                if state is not None:
+                    state.last_checked_at = datetime.now(timezone.utc)
                 logger.exception("github watch failed %s", watch_key)
 
         await session.flush()

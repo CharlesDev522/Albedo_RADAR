@@ -31,6 +31,9 @@ export function invalidateApiCache(prefix?: string): void {
   for (const key of dataCache.keys()) {
     if (!prefix || key.startsWith(prefix)) dataCache.delete(key);
   }
+  for (const key of inflight.keys()) {
+    if (!prefix || key.startsWith(prefix)) inflight.delete(key);
+  }
 }
 
 export async function fetchWithCache<T>(
@@ -60,8 +63,10 @@ export async function fetchWithCache<T>(
     return cached.data;
   }
 
-  const pending = inflight.get(key);
-  if (pending) return pending as Promise<T>;
+  if (!opts?.forceRefresh) {
+    const pending = inflight.get(key);
+    if (pending) return pending as Promise<T>;
+  }
 
   const request = fetcher()
     .then((data) => {
