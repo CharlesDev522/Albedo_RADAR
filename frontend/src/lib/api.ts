@@ -1037,6 +1037,18 @@ export const api = {
     ),
   getGithubWatch: (limit = 25, forceRefresh = false) =>
     fetchApi<GithubWatchOverview>(`/github/watch?limit=${limit}`, { forceRefresh }),
+  syncGithubWatch: async () => {
+    const res = await fetch(`${apiBase()}/github/sync`, {
+      method: "POST",
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`GitHub sync failed: HTTP ${res.status}${body ? ` — ${body.slice(0, 120)}` : ""}`);
+    }
+    invalidateApiCache("/github");
+    return res.json() as Promise<Record<string, unknown>>;
+  },
   getRecent: (subnet = DEFAULT_SUBNET) =>
     fetchApi<{ commits: Commitment[] }>(`/live/recent?subnet=${subnet}`),
   getIncentiveOverview: (subnet = DEFAULT_SUBNET, limit = 30, live = false) =>

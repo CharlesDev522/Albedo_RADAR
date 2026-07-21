@@ -1,3 +1,12 @@
+# MinerWatch — full stack
+#
+#   cp .env.example .env
+#   # edit .env (GITHUB_REPO_WATCHES, optional GITHUB_TOKEN + SLACK_WEBHOOK_URL)
+#   docker compose up --build -d
+#
+# Dashboard http://localhost:3000 · API http://localhost:8000/health
+# Logs: docker compose logs -f collector api frontend
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -34,6 +43,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
       REDIS_URL: redis://redis:6379/0
@@ -43,6 +54,10 @@ services:
       METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
       FULL_SCAN_INTERVAL_SECONDS: "300"
       CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000"]'
+      GITHUB_REPO_TRACKING_ENABLED: "true"
+      GITHUB_REPO_WATCHES: '["https://github.com/tony-dendrite/albedo/tree/dev"]'
+      GITHUB_POLL_INTERVAL_SECONDS: "25"
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     healthcheck:
       test:
         [
@@ -64,6 +79,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.collector
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
       REDIS_URL: redis://redis:6379/0
@@ -72,6 +89,16 @@ services:
       POLL_INTERVAL_SECONDS: "3"
       METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
       FULL_SCAN_INTERVAL_SECONDS: "300"
+      SLOT_SCAN_INTERVAL_SECONDS: "8"
+      REPO_TRACK_INTERVAL_SECONDS: "45"
+      GITHUB_REPO_TRACKING_ENABLED: "true"
+      GITHUB_REPO_WATCHES: '["https://github.com/tony-dendrite/albedo/tree/dev"]'
+      GITHUB_POLL_INTERVAL_SECONDS: "25"
+      NOTIFICATIONS_ENABLED: "true"
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SLACK_CHANNEL: ${SLACK_CHANNEL:-}
+      SLACK_APP_NAME: "Albedo_Notification"
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy

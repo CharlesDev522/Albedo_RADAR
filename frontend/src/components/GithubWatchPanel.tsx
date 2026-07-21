@@ -26,27 +26,45 @@ export default function GithubWatchPanel({ active }: { active: boolean }) {
   const pageVisible = usePageVisibility();
   const [data, setData] = useState<GithubWatchOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
 
-  const refresh = useCallback(async (forceRefresh = false) => {
-    try {
-      const overview = await api.getGithubWatch(30, forceRefresh);
-      setData(overview);
-      setLastFetch(new Date());
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "GitHub watch unavailable");
-    }
+  const loadOverview = useCallback(async (forceRefresh = false) => {
+    const overview = await api.getGithubWatch(30, forceRefresh);
+    setData(overview);
+    setLastFetch(new Date());
+    setError(null);
+    return overview;
   }, []);
+
+  const refresh = useCallback(
+    async (opts?: { pollGitHub?: boolean }) => {
+      try {
+        if (opts?.pollGitHub) {
+          setSyncing(true);
+          await api.syncGithubWatch();
+        }
+        await loadOverview(true);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "GitHub watch unavailable");
+      } finally {
+        setLoading(false);
+        setSyncing(false);
+      }
+    },
+    [loadOverview]
+  );
 
   useEffect(() => {
     if (!active || !pageVisible) return;
-    void refresh(true);
-    const id = setInterval(() => void refresh(true), POLL_MS);
+    setLoading(true);
+    void refresh();
+    const id = setInterval(() => void loadOverview(true), POLL_MS);
     return () => clearInterval(id);
-  }, [active, pageVisible, refresh]);
+  }, [active, pageVisible, refresh, loadOverview]);
 
-  if (!data?.enabled && !error) {
+  if (!loading && !data?.enabled && !error) {
     return null;
   }
 
@@ -68,14 +86,26 @@ export default function GithubWatchPanel({ active }: { active: boolean }) {
         </div>
         <button
           type="button"
-          onClick={() => void refresh(true)}
-          className="text-[9px] px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200"
+          onClick={() => void refresh({ pollGitHub: true })}
+          disabled={syncing || loading}
+          className="text-[9px] px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 disabled:opacity-50"
         >
-          refresh
+          {syncing ? "polling…" : "poll now"}
         </button>
       </div>
 
+      {loading && !data && (
+        <p className="text-[10px] text-zinc-500 py-2">Loading GitHub watch status…</p>
+      )}
+
       {error && <p className="text-[10px] text-rose-300 mb-2">{error}</p>}
+
+      {!loading && targets.length === 0 && !error && (
+        <p className="text-[10px] text-amber-300/90 mb-2">
+          No watches configured. Set <code className="mono">GITHUB_REPO_WATCHES</code> in{" "}
+          <code className="mono">.env</code> and restart collector + api.
+        </p>
+      )}
 
       {targets.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-2">
@@ -84,9 +114,12 @@ export default function GithubWatchPanel({ active }: { active: boolean }) {
               (s) => s.owner === t.owner && s.repo === t.repo && s.branch === t.branch
             );
             return (
-              <span
+              <a
                 key={t.full_name + t.branch}
-                className="inline-flex flex-col gap-0.5 px-2 py-1 rounded border border-zinc-800 bg-zinc-900/50 text-[9px]"
+                href={t.tree_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex flex-col gap-0.5 px-2 py-1 rounded border border-zinc-800 bg-zinc-900/50 text-[9px] hover:border-zinc-600"
               >
                 <span className="text-zinc-300 font-medium">
                   {t.repo}
@@ -95,41 +128,46 @@ export default function GithubWatchPanel({ active }: { active: boolean }) {
                 <span className="text-zinc-500 mono">
                   tip {shortSha(st?.last_seen_sha)} · checked {fmtTime(st?.last_checked_at)}
                 </span>
-              </span>
+              </a>
             );
           })}
         </div>
       )}
 
-      {alerts.length === 0 ? (
-        <p className="text-[10px] text-zinc-600 py-2">No commits recorded yet.</p>
+      {!loading && alerts.length === 0 ? (
+        <p className="text-[10px] text-zinc-600 py-2">
+          No new commits recorded yet. First poll seeds the current tip (no alert). Use poll now to
+          check GitHub immediately.
+        </p>
       ) : (
-        <ul className="max-h-[220px] overflow-y-auto space-y-1.5">
-          {alerts.map((a) => (
-            <li
-              key={`${a.commit_sha}-${a.created_at}`}
-              className="flex flex-col gap-0.5 px-2 py-1.5 rounded border border-zinc-800/80 bg-zinc-950/40"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <a
-                  href={a.commit_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[10px] text-sky-300 hover:underline truncate"
-                >
-                  {a.repo}@{a.branch} · {a.commit_sha.slice(0, 7)}
-                </a>
-                <span className="text-[8px] text-zinc-600 shrink-0">{fmtTime(a.created_at)}</span>
-              </div>
-              <p className="text-[10px] text-zinc-400 truncate" title={a.commit_subject}>
-                {a.commit_subject}
-              </p>
-              {a.slack_sent && (
-                <span className="text-[8px] text-emerald-500/80">Slack sent</span>
-              )}
-            </li>
-          ))}
-        </ul>
+        alerts.length > 0 && (
+          <ul className="max-h-[220px] overflow-y-auto space-y-1.5">
+            {alerts.map((a) => (
+              <li
+                key={`${a.commit_sha}-${a.created_at}`}
+                className="flex flex-col gap-0.5 px-2 py-1.5 rounded border border-zinc-800/80 bg-zinc-950/40"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <a
+                    href={a.commit_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-sky-300 hover:underline truncate"
+                  >
+                    {a.repo}@{a.branch} · {a.commit_sha.slice(0, 7)}
+                  </a>
+                  <span className="text-[8px] text-zinc-600 shrink-0">{fmtTime(a.created_at)}</span>
+                </div>
+                <p className="text-[10px] text-zinc-400 truncate" title={a.commit_subject}>
+                  {a.commit_subject}
+                </p>
+                {a.slack_sent && (
+                  <span className="text-[8px] text-emerald-500/80">Slack sent</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )
       )}
     </section>
   );
