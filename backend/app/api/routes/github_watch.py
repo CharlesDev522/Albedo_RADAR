@@ -10,6 +10,7 @@ from app.config import Settings, get_settings
 from app.db.models import GithubCommitAlert, GithubRepoWatchState
 from app.db.session import get_db
 from app.integrations.github_client import parse_github_watch_specs
+from app.processing.github_repo_watcher import GithubRepoWatcher
 from app.schemas.github_watch import (
     GithubCommitAlertResponse,
     GithubRepoWatchResponse,
@@ -19,11 +20,11 @@ from app.schemas.github_watch import (
 router = APIRouter(prefix="/github", tags=["github"])
 
 
-@router.get("/watch", response_model=GithubWatchOverviewResponse)
-async def github_watch_overview(
-    db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-    limit: int = Query(default=20, ge=1, le=100),
+async def _github_watch_overview(
+    db: AsyncSession,
+    settings: Settings,
+    *,
+    limit: int,
 ) -> GithubWatchOverviewResponse:
     configured = [
         {
@@ -56,3 +57,27 @@ async def github_watch_overview(
         watch_states=[GithubRepoWatchResponse.model_validate(s) for s in states],
         recent_alerts=[GithubCommitAlertResponse.model_validate(a) for a in alerts],
     )
+
+
+@router.post("/sync")
+async def sync_github_watch(
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """On-demand GitHub poll — same as collector, for UI refresh."""
+    watcher = GithubRepoWatcher(settings)
+    try:
+        stats = await watcher.sync_once(db)
+        await db.commit()
+        return {"status": "ok", **stats}
+    finally:
+        await watcher.close()
+
+
+@router.get("/watch", response_model=GithubWatchOverviewResponse)
+async def github_watch_overview(
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> GithubWatchOverviewResponse:
+    return await _github_watch_overview(db, settings, limit=limit)

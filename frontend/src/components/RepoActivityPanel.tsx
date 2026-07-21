@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import LatestHippiusReposPanel from "@/components/LatestHippiusReposPanel";
 import LatestHuggingFaceReposPanel from "@/components/LatestHuggingFaceReposPanel";
+import GithubWatchPanel from "@/components/GithubWatchPanel";
 import {
   api,
   hfModelUrl,
@@ -249,6 +250,7 @@ export default function RepoActivityPanel() {
 
   return (
     <div className="space-y-3">
+      <GithubWatchPanel active={panelActive} />
       <div className="panel px-3 py-2 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-[12px] font-semibold text-zinc-100">Model repo activity</h2>
