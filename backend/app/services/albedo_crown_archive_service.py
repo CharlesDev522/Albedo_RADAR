@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
@@ -235,6 +235,26 @@ async def backfill_crowns_from_alerts(
                 )
         coronations.append(cor)
     return await upsert_coronations(session, subnet, coronations, source="alert")
+
+
+async def purge_voided_coronations(
+    session: AsyncSession,
+    subnet: int,
+    voided_versions: set[int],
+) -> int:
+    """Remove illegitimate kings that Hippius rolled back from the reign chain."""
+    if not voided_versions:
+        return 0
+    result = await session.execute(
+        delete(AlbedoKingCrownRecord).where(
+            AlbedoKingCrownRecord.subnet == subnet,
+            AlbedoKingCrownRecord.king_version.in_(sorted(voided_versions)),
+        )
+    )
+    removed = int(result.rowcount or 0)
+    if removed:
+        logger.info("purged %d voided king crown records subnet=%d versions=%s", removed, subnet, sorted(voided_versions))
+    return removed
 
 
 async def load_archived_king_history(

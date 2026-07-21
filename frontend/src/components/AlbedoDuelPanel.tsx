@@ -522,6 +522,13 @@ export default function AlbedoDuelPanel() {
 
       {section === "kings" && (
         <>
+          {data.repo_crown_analysis?.voided_king_versions &&
+            data.repo_crown_analysis.voided_king_versions.length > 0 && (
+              <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[10px] text-amber-200">
+                {data.repo_crown_analysis.crown_history_coverage_note ||
+                  `Excluded voided kings: v${data.repo_crown_analysis.voided_king_versions.join(", v")}`}
+              </div>
+            )}
           <AlbedoKingReignDatasetPanel kingHistory={data.king_history ?? []} />
 
           <section className="panel px-3 py-2.5">

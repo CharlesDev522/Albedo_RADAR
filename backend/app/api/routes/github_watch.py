@@ -66,15 +66,17 @@ async def sync_github_watch(
 ) -> dict:
     """On-demand GitHub poll — same logic as the collector background loop."""
     watcher = GithubRepoWatcher(settings)
-    if not watcher.enabled:
-        raise HTTPException(
-            status_code=400,
-            detail="GitHub repo tracking is disabled or no watches are configured",
-        )
     try:
+        if not watcher.enabled:
+            raise HTTPException(
+                status_code=400,
+                detail="GitHub repo tracking is disabled or no watches are configured",
+            )
         stats = await watcher.sync_once(db)
         await db.flush()
         return {"status": "ok", **stats}
+    except HTTPException:
+        raise
     except Exception as exc:
         await db.rollback()
         raise HTTPException(status_code=502, detail=f"GitHub poll failed: {exc}") from exc

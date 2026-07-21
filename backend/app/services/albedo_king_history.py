@@ -82,6 +82,38 @@ def merge_king_histories(
     return sorted(by_version.values(), key=lambda c: c.king_version, reverse=True)
 
 
+def voided_king_versions(dashboard: dict[str, Any]) -> set[int]:
+    """Kings coronated on-chain/dashboard but rolled back from the reign chain."""
+    reign_members = (dashboard.get("reign") or {}).get("members") or []
+    reign_versions = {
+        int(m["king_version"])
+        for m in reign_members
+        if isinstance(m, dict) and m.get("king_version") is not None
+    }
+    if not reign_versions:
+        return set()
+
+    reign_cap = max(reign_versions)
+    coronated: set[int] = set()
+    for run in dashboard.get("eval_runs") or []:
+        if not isinstance(run, dict) or not run.get("coronated"):
+            continue
+        kv = run.get("king_version")
+        if kv is not None:
+            coronated.add(int(kv))
+
+    return {version for version in coronated if version > reign_cap and version not in reign_versions}
+
+
+def filter_voided_coronations(
+    history: list[AlbedoKingCoronation],
+    voided: set[int],
+) -> list[AlbedoKingCoronation]:
+    if not voided:
+        return history
+    return [row for row in history if row.king_version not in voided]
+
+
 def missing_crown_versions(merged: list[AlbedoKingCoronation]) -> list[int]:
     if not merged:
         return []

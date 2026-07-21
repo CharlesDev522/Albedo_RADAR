@@ -428,3 +428,74 @@ def test_score_timeline_includes_all_finished_duels():
     assert [p.eval_run_id for p in overview.score_timeline] == ["older", "recent", "recent-2"]
     assert overview.score_timeline[1].score_challenger == 0.62
     assert overview.score_timeline[2].coronated is True
+
+
+def test_build_analysis_overview_excludes_voided_kings_from_history_and_rewards():
+    dashboard = {
+        "updated_at": "2026-07-21T20:00:00+00:00",
+        "chain": {"judge_models": []},
+        "reign": {
+            "members": [
+                {
+                    "king_version": 84,
+                    "model_uri": "foremost/albedo@sha256:84",
+                    "hotkey": "hk84",
+                    "uid": 84,
+                    "weight_bps": 2500,
+                },
+                {
+                    "king_version": 83,
+                    "model_uri": "everking/albedo@sha256:83",
+                    "hotkey": "hk83",
+                    "uid": 83,
+                    "weight_bps": 2500,
+                },
+            ]
+        },
+        "eval_runs": [
+            {
+                "eval_run_id": "v89",
+                "challenger_won": True,
+                "coronated": True,
+                "king_version": 89,
+                "score_challenger": 0.9,
+                "score_king": 0.8,
+                "win_margin": 0.1,
+                "finished_at": "2026-07-18T21:05:06+00:00",
+                "model_uri": "voided/albedo@sha256:89",
+                "hotkey": "hk89",
+                "uid": 89,
+                "king": {"king_version": 88, "model_uri": "voided/albedo@sha256:88", "uid": 88, "hotkey": "hk88"},
+            },
+            {
+                "eval_run_id": "v84",
+                "challenger_won": True,
+                "coronated": True,
+                "king_version": 84,
+                "score_challenger": 0.9,
+                "score_king": 0.8,
+                "win_margin": 0.1,
+                "finished_at": "2026-07-15T01:03:37+00:00",
+                "model_uri": "foremost/albedo@sha256:84",
+                "hotkey": "hk84",
+                "uid": 84,
+                "king": {"king_version": 83, "model_uri": "everking/albedo@sha256:83", "uid": 83, "hotkey": "hk83"},
+            },
+        ],
+    }
+
+    overview = build_analysis_overview(
+        dashboard,
+        subnet=97,
+        source_url="https://example.com/dashboard.json",
+    )
+
+    assert overview.coronations == 1
+    assert [k.king_version for k in overview.king_history] == [84]
+    assert overview.repo_crown_analysis.voided_king_versions == [89]
+    assert not any(
+        event.king_version == 89 for row in overview.repo_crown_analysis.crowns_by_repo for event in row.crown_events
+    )
+    assert len(overview.king_tenures) == 2
+    assert overview.king_tenures[0].king_version == 84
+    assert overview.king_tenures[0].is_current_king is True

@@ -900,6 +900,13 @@ def build_analysis_overview(
     archived_king_history: list[AlbedoKingCoronation] | None = None,
     archived_crown_count: int = 0,
 ) -> AlbedoAnalysisOverview:
+    from app.services.albedo_king_history import (
+        filter_voided_coronations,
+        merge_king_histories,
+        voided_king_versions,
+    )
+
+    voided = voided_king_versions(dashboard)
     eval_runs: list[dict[str, Any]] = list(dashboard.get("eval_runs") or [])
     reign_members = [
         _reign_member(m, miner_lookup) for m in (dashboard.get("reign") or {}).get("members") or []
@@ -909,7 +916,11 @@ def build_analysis_overview(
 
     challenger_wins = sum(1 for r in eval_runs if r.get("challenger_won"))
     king_wins = len(eval_runs) - challenger_wins
-    coronations = sum(1 for r in eval_runs if r.get("coronated"))
+    coronations = sum(
+        1
+        for r in eval_runs
+        if r.get("coronated") and int(r.get("king_version") or -1) not in voided
+    )
     total = len(eval_runs)
 
     margins = [float(r.get("win_margin") or 0) for r in eval_runs]
@@ -969,14 +980,13 @@ def build_analysis_overview(
             from app.services.albedo_king_history import coronation_from_eval_run
 
             cor = coronation_from_eval_run(run, miner_lookup)
-            if cor:
+            if cor and cor.king_version not in voided:
                 king_history.append(cor)
 
     live_crown_count = len(king_history)
     if archived_king_history:
-        from app.services.albedo_king_history import merge_king_histories
-
         king_history = merge_king_histories(king_history, archived_king_history)
+    king_history = filter_voided_coronations(king_history, voided)
     king_history.sort(key=lambda k: k.king_version, reverse=True)
 
     def _sorted_rows(
@@ -1012,6 +1022,13 @@ def build_analysis_overview(
     repo_crown_analysis.earliest_crown_version = versions[0] if versions else None
     repo_crown_analysis.latest_crown_version = versions[-1] if versions else None
     repo_crown_analysis.archived_crown_count = archived_crown_count
+    repo_crown_analysis.voided_king_versions = sorted(voided)
+    if voided:
+        voided_label = ", ".join(f"v{v}" for v in sorted(voided))
+        repo_crown_analysis.crown_history_coverage_note = (
+            f"Excluded {len(voided)} voided king(s) rolled back by Hippius ({voided_label}). "
+            "Rewards follow the live reign chain only."
+        )
     crowns_by_repo = repo_crown_analysis.crowns_by_repo
     _enrich_crown_cluster_labels(repo_crown_analysis, miner_lookup)
 
@@ -1129,14 +1146,18 @@ async def get_albedo_analysis_overview(
     archived_count = 0
     if db is not None:
         try:
+            from app.services.albedo_king_history import voided_king_versions
             from app.services.albedo_crown_archive_service import (
                 backfill_crowns_from_alerts,
                 import_crown_seed_if_configured,
                 load_archived_king_history,
+                purge_voided_coronations,
                 sync_crowns_from_dashboard,
             )
 
+            voided = voided_king_versions(dashboard)
             await sync_crowns_from_dashboard(db, subnet, dashboard, miner_lookup=miner_lookup)
+            await purge_voided_coronations(db, subnet, voided)
             await backfill_crowns_from_alerts(db, subnet, miner_lookup=miner_lookup)
             await import_crown_seed_if_configured(
                 db, subnet, settings=settings, miner_lookup=miner_lookup
