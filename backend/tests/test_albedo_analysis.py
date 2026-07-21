@@ -499,3 +499,79 @@ def test_build_analysis_overview_excludes_voided_kings_from_history_and_rewards(
     assert len(overview.king_tenures) == 2
     assert overview.king_tenures[0].king_version == 84
     assert overview.king_tenures[0].is_current_king is True
+
+
+def test_reign_kings_keep_slot_tenure_past_rollover_during_voided_window():
+    """v80 in reign should not stop earning when +5 rollover fired before voided kings."""
+    dashboard = {
+        "updated_at": "2026-07-21T20:00:00+00:00",
+        "chain": {"judge_models": []},
+        "reign": {
+            "members": [
+                {"king_version": 84, "model_uri": "a/84@sha", "hotkey": "hk84", "uid": 84, "weight_bps": 2500},
+                {"king_version": 80, "model_uri": "a/80@sha", "hotkey": "hk80", "uid": 80, "weight_bps": 2500},
+            ]
+        },
+        "eval_runs": [
+            {
+                "eval_run_id": "v89",
+                "challenger_won": True,
+                "coronated": True,
+                "king_version": 89,
+                "finished_at": "2026-07-18T21:00:00+00:00",
+                "model_uri": "void/89@sha",
+                "hotkey": "hk89",
+                "uid": 89,
+                "king": {"king_version": 88},
+            },
+            {
+                "eval_run_id": "v85",
+                "challenger_won": True,
+                "coronated": True,
+                "king_version": 85,
+                "finished_at": "2026-07-16T14:00:00+00:00",
+                "model_uri": "void/85@sha",
+                "hotkey": "hk85",
+                "uid": 85,
+                "king": {"king_version": 84},
+            },
+            *[
+                {
+                    "eval_run_id": f"v{v}",
+                    "challenger_won": True,
+                    "coronated": True,
+                    "king_version": v,
+                    "finished_at": f"2026-07-{10+v:02d}T12:00:00+00:00",
+                    "model_uri": f"a/{v}@sha",
+                    "hotkey": f"hk{v}",
+                    "uid": v,
+                    "king": {"king_version": v - 1},
+                }
+                for v in range(76, 85)
+            ],
+            {
+                "eval_run_id": "v80",
+                "challenger_won": True,
+                "coronated": True,
+                "king_version": 80,
+                "finished_at": "2026-07-13T18:00:00+00:00",
+                "model_uri": "a/80@sha",
+                "hotkey": "hk80",
+                "uid": 80,
+                "king": {"king_version": 79},
+            },
+        ],
+    }
+
+    overview = build_analysis_overview(
+        dashboard,
+        subnet=97,
+        source_url="https://example.com/dashboard.json",
+    )
+
+    v80 = next(t for t in overview.king_tenures if t.king_version == 80)
+    assert v80.slot_tenure_hours is not None
+    assert v80.slot_tenure_hours > 48
+    assert v80.voided_bridge_hours is not None
+    assert v80.voided_bridge_hours > 0
+    assert v80.slot_until is None

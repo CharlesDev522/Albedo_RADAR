@@ -114,6 +114,78 @@ def filter_voided_coronations(
     return [row for row in history if row.king_version not in voided]
 
 
+def voided_coronation_times(dashboard: dict[str, Any], voided: set[int]) -> dict[int, str]:
+    """Map voided king versions to coronation timestamps (from eval_runs)."""
+    if not voided:
+        return {}
+    times: dict[int, str] = {}
+    for run in dashboard.get("eval_runs") or []:
+        if not isinstance(run, dict) or not run.get("coronated"):
+            continue
+        kv = run.get("king_version")
+        if kv is None or int(kv) not in voided:
+            continue
+        finished = run.get("finished_at")
+        if finished:
+            times[int(kv)] = str(finished)
+    return times
+
+
+def voided_reign_window(
+    dashboard: dict[str, Any],
+    voided: set[int],
+) -> tuple[str, str] | None:
+    """Inclusive window when illegitimate kings held reign slots."""
+    times = sorted(voided_coronation_times(dashboard, voided).values())
+    if not times:
+        return None
+    end = dashboard.get("updated_at") or times[-1]
+    return times[0], str(end)
+
+
+def legitimate_dethroned_at(
+    king_history: list[AlbedoKingCoronation],
+    *,
+    eval_runs: list[dict[str, Any]],
+    voided: set[int],
+    reign_versions: set[int],
+    current_king_version: int | None,
+) -> dict[int, str]:
+    """Active-king dethronement times, ignoring defeats by voided kings."""
+    dethroned: dict[int, str] = {}
+    for cor in sorted(king_history, key=lambda c: c.king_version):
+        if cor.defeated_king_version is not None:
+            dethroned[cor.defeated_king_version] = cor.finished_at
+
+    for run in eval_runs or []:
+        if not isinstance(run, dict) or not run.get("coronated"):
+            continue
+        kv = run.get("king_version")
+        if kv is None or int(kv) not in voided:
+            continue
+        defeated = (run.get("king") or {}).get("king_version")
+        if defeated is None:
+            continue
+        defeated_v = int(defeated)
+        if defeated_v in reign_versions or defeated_v == current_king_version:
+            dethroned.pop(defeated_v, None)
+
+    return dethroned
+
+
+def slot_exit_schedule(king_history: list[AlbedoKingCoronation]) -> dict[int, str]:
+    """When each king loses reign weight per the 5-slot rollover (legitimate chain only)."""
+    sorted_coronations = sorted(king_history, key=lambda c: c.king_version)
+    version_to_time = {c.king_version: c.finished_at for c in sorted_coronations}
+    slot_exit_at: dict[int, str] = {}
+    versions_sorted = [c.king_version for c in sorted_coronations]
+    for idx, version in enumerate(versions_sorted):
+        exit_idx = idx + 5
+        if exit_idx < len(versions_sorted):
+            slot_exit_at[version] = version_to_time[versions_sorted[exit_idx]]
+    return slot_exit_at
+
+
 def missing_crown_versions(merged: list[AlbedoKingCoronation]) -> list[int]:
     if not merged:
         return []

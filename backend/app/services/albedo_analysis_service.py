@@ -102,6 +102,46 @@ def _hours_between(start: str | None, end: str | None) -> float | None:
     return round((b - a).total_seconds() / 3600.0, 1)
 
 
+def _compute_slot_tenure(
+    *,
+    coronation_at: str | None,
+    king_version: int,
+    reign_versions: set[int],
+    slot_exit_at: dict[int, str],
+    now: str,
+    voided_window: tuple[str, str] | None,
+) -> tuple[str | None, float | None, float | None]:
+    """
+    Slot reward tenure for a king version.
+
+    Kings in the live Hippius reign chain keep earning through now, even if the
+    5-slot rollover would have ended them earlier, and including the voided-king
+    window when illegitimate coronations temporarily displaced them.
+    """
+    if not coronation_at:
+        return None, None, None
+
+    rollover_exit = slot_exit_at.get(king_version)
+    if king_version in reign_versions:
+        slot_until = None
+        slot_hours = _hours_between(coronation_at, now)
+        bridge_hours: float | None = None
+        if rollover_exit:
+            rollover_hours = _hours_between(coronation_at, rollover_exit) or 0.0
+            if slot_hours is not None and slot_hours > rollover_hours:
+                bridge_hours = round(slot_hours - rollover_hours, 1)
+        if voided_window and bridge_hours is not None:
+            window_hours = _hours_between(voided_window[0], voided_window[1]) or 0.0
+            bridge_hours = round(min(bridge_hours, window_hours), 1)
+            if bridge_hours <= 0:
+                bridge_hours = None
+        return slot_until, slot_hours, bridge_hours
+
+    slot_until = rollover_exit
+    slot_end = rollover_exit or now
+    return slot_until, _hours_between(coronation_at, slot_end), None
+
+
 def _short_model_label(namespace: str, model_name: str, *, max_len: int = 22) -> str:
     label = f"{namespace}/{model_name}" if namespace else model_name
     if len(label) <= max_len:
@@ -485,25 +525,25 @@ def _build_king_tenures(
     king_history: list[AlbedoKingCoronation],
     updated_at: str | None,
     lookup: MinerLookup | None,
+    *,
+    voided: set[int] | None = None,
+    voided_window: tuple[str, str] | None = None,
 ) -> list[AlbedoKingTenure]:
+    from app.services.albedo_king_history import legitimate_dethroned_at, slot_exit_schedule
+
+    voided = voided or set()
     coronations_by_version = {c.king_version: c for c in king_history}
-    sorted_coronations = sorted(king_history, key=lambda c: c.king_version)
-    version_to_coronation_time = {c.king_version: c.finished_at for c in sorted_coronations}
-
-    dethroned_at: dict[int, str] = {}
-    for cor in sorted_coronations:
-        if cor.defeated_king_version is not None:
-            dethroned_at[cor.defeated_king_version] = cor.finished_at
-
-    slot_exit_at: dict[int, str] = {}
-    versions_sorted = [c.king_version for c in sorted_coronations]
-    for idx, version in enumerate(versions_sorted):
-        exit_idx = idx + REIGN_CHAIN_SLOTS
-        if exit_idx < len(versions_sorted):
-            exit_version = versions_sorted[exit_idx]
-            slot_exit_at[version] = version_to_coronation_time[exit_version]
+    dethroned_at = legitimate_dethroned_at(
+        king_history,
+        eval_runs=eval_runs,
+        voided=voided,
+        reign_versions={m.king_version for m in reign_members},
+        current_king_version=reign_members[0].king_version if reign_members else None,
+    )
+    slot_exit_at = slot_exit_schedule(king_history)
 
     reign_by_version = {m.king_version: m for m in reign_members}
+    reign_versions = set(reign_by_version)
     hotkey_slots_in_reign: dict[str, int] = defaultdict(int)
     for member in reign_members:
         hotkey_slots_in_reign[member.hotkey] += 1
@@ -540,12 +580,16 @@ def _build_king_tenures(
         active_until = dethroned_at.get(version)
         if version == current_king_version:
             active_until = None
-        slot_until = slot_exit_at.get(version)
-        if version in reign_by_version and not slot_until:
-            slot_until = None
 
+        slot_until, slot_tenure_hours, voided_bridge_hours = _compute_slot_tenure(
+            coronation_at=coronation_at,
+            king_version=version,
+            reign_versions=reign_versions,
+            slot_exit_at=slot_exit_at,
+            now=now,
+            voided_window=voided_window,
+        )
         active_end = active_until or (now if version == current_king_version else dethroned_at.get(version) or now)
-        slot_end = slot_until or (now if version in reign_by_version else slot_exit_at.get(version) or now)
 
         defenses = 0
         attacks = 0
@@ -583,10 +627,8 @@ def _build_king_tenures(
                 active_until=active_until,
                 slot_until=slot_until,
                 active_tenure_hours=_hours_between(coronation_at, active_end if active_until else now),
-                slot_tenure_hours=_hours_between(
-                    coronation_at,
-                    slot_end if slot_until else now if version in reign_by_version else slot_end,
-                ),
+                slot_tenure_hours=slot_tenure_hours,
+                voided_bridge_hours=voided_bridge_hours,
                 defenses=defenses,
                 attacks_faced=attacks,
                 defense_pct=round(defenses / attacks * 100, 1) if attacks else None,
@@ -610,22 +652,26 @@ def _build_repo_crown_analysis(
     updated_at: str | None,
     repo_duel_stats: dict[str, dict[str, Any]] | None = None,
     reward_basis: AlbedoRewardBasis | None = None,
+    *,
+    eval_runs: list[dict[str, Any]] | None = None,
+    voided: set[int] | None = None,
+    voided_window: tuple[str, str] | None = None,
 ) -> tuple[AlbedoRepoCrownAnalysis, list[AlbedoCrownLeaderboardRow]]:
     """Aggregate crown reward time by repo with repo↔coldkey relations."""
-    sorted_coronations = sorted(king_history, key=lambda c: c.king_version)
-    version_to_time = {c.king_version: c.finished_at for c in sorted_coronations}
-    dethroned_at: dict[int, str] = {}
-    for cor in sorted_coronations:
-        if cor.defeated_king_version is not None:
-            dethroned_at[cor.defeated_king_version] = cor.finished_at
-    slot_exit_at: dict[int, str] = {}
-    versions_sorted = [c.king_version for c in sorted_coronations]
-    for idx, version in enumerate(versions_sorted):
-        exit_idx = idx + REIGN_CHAIN_SLOTS
-        if exit_idx < len(versions_sorted):
-            slot_exit_at[version] = version_to_time[versions_sorted[exit_idx]]
+    from app.services.albedo_king_history import legitimate_dethroned_at, slot_exit_schedule
 
+    voided = voided or set()
+    sorted_coronations = sorted(king_history, key=lambda c: c.king_version)
     reign_versions = {m.king_version for m in reign_members}
+    current_king_version = reign_members[0].king_version if reign_members else None
+    dethroned_at = legitimate_dethroned_at(
+        king_history,
+        eval_runs=eval_runs or [],
+        voided=voided,
+        reign_versions=reign_versions,
+        current_king_version=current_king_version,
+    )
+    slot_exit_at = slot_exit_schedule(king_history)
     reign_weight = {m.king_version: m.weight_bps for m in reign_members}
     reign_by_repo = defaultdict(set)
     reign_by_link: set[tuple[str, str]] = set()
@@ -636,7 +682,6 @@ def _build_repo_crown_analysis(
             reign_by_link.add((member.repo, member.coldkey))
 
     now = updated_at or datetime.now(timezone.utc).isoformat()
-    current_king_version = reign_members[0].king_version if reign_members else None
     duel_stats = repo_duel_stats or {}
     basis = reward_basis or AlbedoRewardBasis()
     daily_subnet_alpha = basis.daily_subnet_alpha
@@ -648,18 +693,18 @@ def _build_repo_crown_analysis(
         active_until = dethroned_at.get(cor.king_version)
         if cor.king_version == current_king_version:
             active_until = None
-        slot_until = slot_exit_at.get(cor.king_version)
-        if cor.king_version in reign_versions and not slot_until:
-            slot_until = None
-        active_end = active_until or (now if cor.king_version == current_king_version else dethroned_at.get(cor.king_version) or now)
-        slot_end = slot_until or (now if cor.king_version in reign_versions else slot_exit_at.get(cor.king_version) or now)
-        slot_hours = _hours_between(
-            cor.finished_at,
-            slot_end if slot_until else now if cor.king_version in reign_versions else slot_end,
+        slot_until, slot_hours, _bridge = _compute_slot_tenure(
+            coronation_at=cor.finished_at,
+            king_version=cor.king_version,
+            reign_versions=reign_versions,
+            slot_exit_at=slot_exit_at,
+            now=now,
+            voided_window=voided_window,
         )
+        active_end = active_until or (now if cor.king_version == current_king_version else dethroned_at.get(cor.king_version) or now)
         weight_bps = reign_weight.get(cor.king_version, default_weight)
         est_alpha = estimate_crown_alpha(
-            slot_hours,
+            slot_hours or 0.0,
             weight_bps=weight_bps,
             daily_subnet_alpha=daily_subnet_alpha,
         )
@@ -904,9 +949,11 @@ def build_analysis_overview(
         filter_voided_coronations,
         merge_king_histories,
         voided_king_versions,
+        voided_reign_window,
     )
 
     voided = voided_king_versions(dashboard)
+    voided_window = voided_reign_window(dashboard, voided)
     eval_runs: list[dict[str, Any]] = list(dashboard.get("eval_runs") or [])
     reign_members = [
         _reign_member(m, miner_lookup) for m in (dashboard.get("reign") or {}).get("members") or []
@@ -1014,9 +1061,24 @@ def build_analysis_overview(
         return rows
 
     reign_slot_holders = _build_reign_slot_holders(reign_members, miner_lookup)
-    king_tenures = _build_king_tenures(eval_runs, reign_members, king_history, updated_at, miner_lookup)
+    king_tenures = _build_king_tenures(
+        eval_runs,
+        reign_members,
+        king_history,
+        updated_at,
+        miner_lookup,
+        voided=voided,
+        voided_window=voided_window,
+    )
     repo_crown_analysis, crowns_by_coldkey = _build_repo_crown_analysis(
-        king_history, reign_members, updated_at, repo_duel_stats=repo_stats, reward_basis=reward_basis
+        king_history,
+        reign_members,
+        updated_at,
+        repo_duel_stats=repo_stats,
+        reward_basis=reward_basis,
+        eval_runs=eval_runs,
+        voided=voided,
+        voided_window=voided_window,
     )
     versions = sorted(c.king_version for c in king_history) if king_history else []
     repo_crown_analysis.earliest_crown_version = versions[0] if versions else None
@@ -1025,10 +1087,15 @@ def build_analysis_overview(
     repo_crown_analysis.voided_king_versions = sorted(voided)
     if voided:
         voided_label = ", ".join(f"v{v}" for v in sorted(voided))
-        repo_crown_analysis.crown_history_coverage_note = (
+        bridge_note = (
             f"Excluded {len(voided)} voided king(s) rolled back by Hippius ({voided_label}). "
-            "Rewards follow the live reign chain only."
+            "Current reign kings keep slot credit through the voided window."
         )
+        if voided_window:
+            bridge_hours = _hours_between(voided_window[0], voided_window[1])
+            if bridge_hours:
+                bridge_note += f" Voided window ≈ {bridge_hours:.0f}h."
+        repo_crown_analysis.crown_history_coverage_note = bridge_note
     crowns_by_repo = repo_crown_analysis.crowns_by_repo
     _enrich_crown_cluster_labels(repo_crown_analysis, miner_lookup)
 

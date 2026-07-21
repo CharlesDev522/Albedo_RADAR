@@ -608,6 +608,7 @@ export interface AlbedoKingTenure {
   slot_until?: string | null;
   active_tenure_hours?: number | null;
   slot_tenure_hours?: number | null;
+  voided_bridge_hours?: number | null;
   defenses: number;
   attacks_faced: number;
   defense_pct?: number | null;

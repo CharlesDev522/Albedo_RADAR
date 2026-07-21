@@ -188,6 +188,7 @@ class AlbedoKingTenure(BaseModel):
     slot_until: str | None = None
     active_tenure_hours: float | None = None
     slot_tenure_hours: float | None = None
+    voided_bridge_hours: float | None = None
     defenses: int = 0
     attacks_faced: int = 0
     defense_pct: float | None = None

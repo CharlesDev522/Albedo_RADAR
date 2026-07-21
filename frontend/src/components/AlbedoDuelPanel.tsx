@@ -165,6 +165,13 @@ function KingTenureCard({ tenure }: { tenure: AlbedoKingTenure }) {
       <div className="grid grid-cols-2 gap-2 mt-3 text-[10px]">
         <Stat label="Active reign" value={fmtHours(tenure.active_tenure_hours)} sub="as #1 king" />
         <Stat label="Slot tenure" value={fmtHours(tenure.slot_tenure_hours)} sub="earning weight" />
+        {tenure.voided_bridge_hours != null && tenure.voided_bridge_hours > 0 && (
+          <Stat
+            label="Voided bridge"
+            value={fmtHours(tenure.voided_bridge_hours)}
+            sub="restored during v85–89 rollback"
+          />
+        )}
         <Stat
           label="Defenses"
           value={`${tenure.defenses}/${tenure.attacks_faced}`}
