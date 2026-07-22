@@ -57,8 +57,11 @@ docker compose up -d --force-recreate collector api
 
 ```bash
 curl http://localhost:8000/api/v1/notifications/status
-docker compose logs --tail 500 collector 2>&1 | grep -iE 'NOTIFY_STATUS|notifications LIVE|HUB_PROBE|ALERT '
+curl -X POST http://localhost:8000/api/v1/notifications/test-slack
+docker compose logs --tail 500 collector 2>&1 | grep -iE 'NOTIFY_STATUS|notifications LIVE|HUB_PROBE|ALERT |NOTIFICATIONS netuid'
 ```
+
+`notifications/status` includes `collector_live`, `eval_pipeline` (Hippius validate queue depth), and `alerts_by_kind` / `slack_sent_by_kind` so you can confirm eval alerts are recording and delivering.
 
 Expected sequence:
 
@@ -83,6 +86,7 @@ curl -X POST http://localhost:8000/api/v1/notifications/test-slack
 | King defended | `king_defended` |
 | Crown lost | `crown_lost` |
 | Eval disqualified | `eval_dq` |
+| Eval infra failed (validation) | `eval_dq` (`TERMINAL_INFRA_FAILED`) |
 | **New Hippius or Hugging Face repo** | `repo_new` |
 
 `repo_new` fires only the first time a repo appears on Hippius Hub or Hugging Face (manifest updates do **not** notify).

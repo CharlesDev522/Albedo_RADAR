@@ -42,6 +42,9 @@ from app.notifications.reg_fee_tiers import (
 
 logger = logging.getLogger(__name__)
 
+# Hippius terminal states that should trigger eval_dq Slack alerts.
+EVAL_DQ_NOTIFY_STATES = frozenset({"TERMINAL_INVALID", "TERMINAL_INFRA_FAILED"})
+
 _URI_RE = re.compile(r"^([^@]+)@")
 
 
@@ -212,7 +215,7 @@ class NotificationWatcher:
         for raw in dashboard.get("fails") or []:
             if not isinstance(raw, dict):
                 continue
-            if raw.get("state") != "TERMINAL_INVALID":
+            if raw.get("state") not in EVAL_DQ_NOTIFY_STATES:
                 continue
             self.dispatcher.mark_seen(
                 _eval_dq_source_key(
@@ -531,6 +534,15 @@ class NotificationWatcher:
             logger.warning("eval queue notification: state fetch failed", exc_info=True)
             return 0
 
+        participants = list(_hippius_validate_participants(state))
+        total = sum(len(p[1]) for p in participants)
+        if total and logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "eval queue poll SN%d: %d hippius_validate participants (queued+running)",
+                netuid,
+                total,
+            )
+
         sent = 0
         for bucket_name, participants in _hippius_validate_participants(state):
             for participant in participants:
@@ -561,7 +573,7 @@ class NotificationWatcher:
             return 0
         sent = 0
         for fail in parse_dashboard_fails(dashboard, limit=200):
-            if fail.state != "TERMINAL_INVALID":
+            if fail.state not in EVAL_DQ_NOTIFY_STATES:
                 continue
             source_key = _eval_dq_source_key(
                 submission_id=fail.submission_id,

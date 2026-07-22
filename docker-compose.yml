@@ -54,6 +54,10 @@ services:
       METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
       FULL_SCAN_INTERVAL_SECONDS: "300"
       CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000"]'
+      NOTIFICATIONS_ENABLED: "true"
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SLACK_CHANNEL: ${SLACK_CHANNEL:-}
+      SLACK_APP_NAME: "Albedo_Notification"
       GITHUB_REPO_TRACKING_ENABLED: "true"
       GITHUB_REPO_WATCHES: '["https://github.com/tony-dendrite/albedo/tree/dev"]'
       GITHUB_POLL_INTERVAL_SECONDS: "25"

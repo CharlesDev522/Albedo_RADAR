@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.models import AlertNotification
 from app.db.session import get_db
+from app.notifications.eval_snapshot import fetch_eval_notification_snapshot
 from app.notifications.slack import send_slack_alert
 from app.notifications.status import NOTIFICATION_STARTUP_VERSION, read_notification_status
 from app.schemas.notifications import AlertNotificationList, AlertNotificationResponse
@@ -27,6 +28,25 @@ async def notification_status(db: AsyncSession = Depends(get_db)) -> dict:
     ).scalar() or 0
     collector = await read_notification_status(settings.redis_url)
     live = collector.get("is_live") if collector else None
+    kind_rows = (
+        await db.execute(
+            select(AlertNotification.kind, func.count())
+            .group_by(AlertNotification.kind)
+            .order_by(AlertNotification.kind)
+        )
+    ).all()
+    alerts_by_kind = {kind: count for kind, count in kind_rows}
+    slack_sent_by_kind = {
+        kind: count
+        for kind, count in (
+            await db.execute(
+                select(AlertNotification.kind, func.count())
+                .where(AlertNotification.slack_sent.is_(True))
+                .group_by(AlertNotification.kind)
+            )
+        ).all()
+    }
+    eval_snapshot = await fetch_eval_notification_snapshot(settings=settings)
     return {
         "enabled": settings.notifications_enabled,
         "webhook_configured": bool(webhook),
@@ -42,12 +62,23 @@ async def notification_status(db: AsyncSession = Depends(get_db)) -> dict:
         "collector_status": collector,
         "alerts_in_db": total,
         "alerts_slack_sent": sent,
+        "alerts_by_kind": alerts_by_kind,
+        "slack_sent_by_kind": slack_sent_by_kind,
+        "eval_pipeline": eval_snapshot,
+        "eval_notification_kinds": [
+            "eval_queue_entered",
+            "eval_dq",
+            "duel_new",
+            "crown_won",
+            "king_defended",
+            "crown_lost",
+        ],
         "hint": (
-            "Collector is LIVE — new events should post to Slack"
+            "Collector is LIVE — new eval/validation events after startup should post to Slack"
             if live is True and webhook and settings.notifications_enabled
             else "Collector not LIVE yet, or webhook missing — see collector_status.blockers"
             if collector and not live
-            else "Rebuild/restart collector; then: curl .../notifications/status and docker compose logs collector | grep NOTIFY_STATUS"
+            else "Set SLACK_WEBHOOK_URL in .env and restart collector; POST /notifications/test-slack to verify webhook"
         ),
     }
 
