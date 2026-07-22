@@ -1,7 +1,26 @@
 "use client";
 
+import { useMemo } from "react";
 import { shortHash, shortRepo, type HuggingFaceLatestRepo } from "@/lib/api";
 import { ModelFamilyBadge } from "@/components/ModelFamilyBadge";
+
+function hfRepoTimeMs(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const ms = new Date(iso).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function sortHfReposByDate(repos: HuggingFaceLatestRepo[]): HuggingFaceLatestRepo[] {
+  return [...repos].sort((a, b) => {
+    const am = hfRepoTimeMs(a.indexed_at);
+    const bm = hfRepoTimeMs(b.indexed_at);
+    const aHas = am > 0 ? 0 : 1;
+    const bHas = bm > 0 ? 0 : 1;
+    if (aHas !== bHas) return aHas - bHas;
+    if (bm !== am) return bm - am;
+    return a.repo.localeCompare(b.repo);
+  });
+}
 
 function fmtTime(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -29,6 +48,8 @@ export default function LatestHuggingFaceReposPanel({
   totalHint?: number | null;
   error?: string | null;
 }) {
+  const sortedRepos = useMemo(() => sortHfReposByDate(repos), [repos]);
+
   return (
     <section className="panel px-3 py-2.5 space-y-2">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -37,7 +58,7 @@ export default function LatestHuggingFaceReposPanel({
           <p className="text-[10px] text-zinc-500 mt-0.5">
             Live from{" "}
             <a
-              href="https://huggingface.co/models?search=albedo-qwen3.6-35b"
+              href="https://huggingface.co/models?search=albedo-qwen3.6-35b&sort=createdAt&direction=-1"
               target="_blank"
               rel="noreferrer"
               className="text-orange-400/90 hover:underline"
@@ -47,7 +68,7 @@ export default function LatestHuggingFaceReposPanel({
             {totalHint != null && totalHint > 0 ? ` · ${totalHint}+ matching repos` : ""}
           </p>
         </div>
-        <span className="text-[9px] text-zinc-600">newest 10 by last modified</span>
+        <span className="text-[9px] text-zinc-600">newest 10 by created date</span>
       </div>
 
       {error ? (
@@ -62,7 +83,7 @@ export default function LatestHuggingFaceReposPanel({
         </p>
       ) : (
         <div className="grid gap-1.5 sm:grid-cols-2">
-          {repos.map((repo, i) => (
+          {sortedRepos.map((repo, i) => (
             <a
               key={repo.repo}
               href={repo.hub_url}

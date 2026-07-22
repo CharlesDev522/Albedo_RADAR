@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class HuggingFaceSearchHit:
+    repo: str
+    created_at: datetime | None
+
+
+@dataclass(frozen=True)
 class HuggingFaceFile:
     name: str
     digest: str
@@ -62,21 +68,43 @@ class HuggingFaceRegistryClient:
         limit: int = 100,
         client: httpx.AsyncClient | None = None,
     ) -> list[str]:
-        """Return model ids from Hugging Face Hub search."""
+        """Return model ids from Hugging Face Hub search (newest created first)."""
+        hits = await self.search_models_hits(query, limit=limit, client=client)
+        return [h.repo for h in hits]
+
+    async def search_models_hits(
+        self,
+        query: str,
+        *,
+        limit: int = 100,
+        client: httpx.AsyncClient | None = None,
+    ) -> list[HuggingFaceSearchHit]:
+        """Hub search sorted by createdAt descending."""
         url = f"{self.base_url}/models"
-        params = {"search": query, "limit": str(limit)}
+        params = {
+            "search": query,
+            "limit": str(limit),
+            "sort": "createdAt",
+            "direction": "-1",
+        }
         resp = await self._request("GET", url, client=client, params=params)
         data = resp.json()
         if not isinstance(data, list):
             return []
-        repos: list[str] = []
+        hits: list[HuggingFaceSearchHit] = []
         for item in data:
             if not isinstance(item, dict):
                 continue
             model_id = item.get("modelId") or item.get("id")
-            if isinstance(model_id, str) and "/" in model_id:
-                repos.append(model_id)
-        return repos
+            if not isinstance(model_id, str) or "/" not in model_id:
+                continue
+            hits.append(
+                HuggingFaceSearchHit(
+                    repo=model_id,
+                    created_at=_parse_hf_datetime(item.get("createdAt")),
+                )
+            )
+        return hits
 
     async def fetch_model(
         self,
@@ -149,16 +177,19 @@ class HuggingFaceRegistryClient:
             return await _do(c)
 
 
+def _parse_hf_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def _parse_revision(repo: str, revision: str, data: dict[str, Any]) -> HuggingFaceSnapshot:
     sha = str(data.get("sha") or revision)
     commit_message = None
-    last_modified = data.get("lastModified")
-    created_at: datetime | None = None
-    if last_modified:
-        try:
-            created_at = datetime.fromisoformat(str(last_modified).replace("Z", "+00:00"))
-        except ValueError:
-            created_at = None
+    created_at = _parse_hf_datetime(data.get("lastModified"))
 
     files: list[HuggingFaceFile] = []
     for sibling in data.get("siblings") or []:
