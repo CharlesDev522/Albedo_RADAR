@@ -41,10 +41,9 @@ from app.processing.repo_watch_targets import (
     is_hub_watch_hotkey,
     parse_hub_watch_hotkey,
 )
+from app.integrations.huggingface_search_config import HF_DISCOVERY_QUERIES
 
 logger = logging.getLogger(__name__)
-
-HF_DISCOVERY_QUERIES = ("albedo-qwen3.6-35b", "albedo-qwen3-4b")
 
 
 class RepoTrackBuilder:

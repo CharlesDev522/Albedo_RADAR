@@ -210,7 +210,7 @@ async def discover_watch_targets(
     for repo in extra_repos or []:
         _add(
             repo,
-            hotkey=None,
+            hotkey=hub_watch_hotkey(repo, "huggingface"),
             uid=None,
             coldkey=None,
             chain_digest=None,

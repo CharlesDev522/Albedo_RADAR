@@ -42,3 +42,21 @@ async def test_hippius_latest_returns_empty_on_fetch_error(monkeypatch):
     result = await hippius_latest_repos(limit=10)
     assert result.total_indexed == 0
     assert result.repos == []
+
+
+@pytest.mark.asyncio
+async def test_huggingface_latest_returns_error_on_fetch_error(monkeypatch):
+    monkeypatch.setattr(
+        "app.api.routes.repo_activity.fetch_latest_huggingface_repos",
+        AsyncMock(side_effect=RuntimeError("hub down")),
+    )
+    monkeypatch.setattr(
+        "app.api.routes.repo_activity.merged_repo_tracks",
+        AsyncMock(return_value=[]),
+    )
+    from app.api.routes.repo_activity import huggingface_latest_repos
+
+    result = await huggingface_latest_repos(limit=10, sort="createdAt", tags=None, subnet=97, db=AsyncMock())
+    assert result.total_indexed == 0
+    assert result.repos == []
+    assert result.error == "hub down"

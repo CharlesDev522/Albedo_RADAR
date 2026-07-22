@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Sequence
 
 import httpx
 
 from app.config import Settings, get_settings
+from app.integrations.huggingface_search_config import HF_SORT_CREATED_AT, VALID_HF_SORTS
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,10 @@ logger = logging.getLogger(__name__)
 class HuggingFaceSearchHit:
     repo: str
     created_at: datetime | None
+    last_modified: datetime | None = None
+    downloads: int = 0
+    likes: int = 0
+    tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -66,10 +71,20 @@ class HuggingFaceRegistryClient:
         query: str,
         *,
         limit: int = 100,
+        sort: str = HF_SORT_CREATED_AT,
+        direction: int = -1,
+        tags: Sequence[str] | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> list[str]:
-        """Return model ids from Hugging Face Hub search (newest created first)."""
-        hits = await self.search_models_hits(query, limit=limit, client=client)
+        """Return model ids from Hugging Face Hub search."""
+        hits = await self.search_models_hits(
+            query,
+            limit=limit,
+            sort=sort,
+            direction=direction,
+            tags=tags,
+            client=client,
+        )
         return [h.repo for h in hits]
 
     async def search_models_hits(
@@ -77,20 +92,29 @@ class HuggingFaceRegistryClient:
         query: str,
         *,
         limit: int = 100,
+        sort: str = HF_SORT_CREATED_AT,
+        direction: int = -1,
+        tags: Sequence[str] | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> list[HuggingFaceSearchHit]:
-        """Hub search sorted by createdAt descending."""
+        """Hub search with HF-native sort and optional tag filters (AND)."""
+        sort_key = sort if sort in VALID_HF_SORTS else HF_SORT_CREATED_AT
         url = f"{self.base_url}/models"
-        params = {
-            "search": query,
-            "limit": str(limit),
-            "sort": "createdAt",
-            "direction": "-1",
-        }
+        params: list[tuple[str, str]] = [
+            ("search", query),
+            ("limit", str(limit)),
+            ("sort", sort_key),
+            ("direction", str(direction)),
+        ]
+        for tag in tags or ():
+            tag = tag.strip()
+            if tag:
+                params.append(("filter", tag))
         resp = await self._request("GET", url, client=client, params=params)
         data = resp.json()
         if not isinstance(data, list):
             return []
+        required_tags = [t.strip().lower() for t in (tags or ()) if t.strip()]
         hits: list[HuggingFaceSearchHit] = []
         for item in data:
             if not isinstance(item, dict):
@@ -98,10 +122,17 @@ class HuggingFaceRegistryClient:
             model_id = item.get("modelId") or item.get("id")
             if not isinstance(model_id, str) or "/" not in model_id:
                 continue
+            item_tags = tuple(str(t) for t in (item.get("tags") or []) if t)
+            if required_tags and not _tags_include_all(item_tags, required_tags):
+                continue
             hits.append(
                 HuggingFaceSearchHit(
                     repo=model_id,
                     created_at=_parse_hf_datetime(item.get("createdAt")),
+                    last_modified=_parse_hf_datetime(item.get("lastModified")),
+                    downloads=int(item.get("downloads") or 0),
+                    likes=int(item.get("likes") or 0),
+                    tags=item_tags,
                 )
             )
         return hits
@@ -161,7 +192,7 @@ class HuggingFaceRegistryClient:
         method: str,
         url: str,
         client: httpx.AsyncClient | None = None,
-        params: dict[str, str] | None = None,
+        params: dict[str, str] | list[tuple[str, str]] | None = None,
     ) -> httpx.Response:
         timeout = self.settings.market_http_timeout_seconds
         headers = {"User-Agent": "MinerWatch/1.0"}
@@ -184,6 +215,23 @@ def _parse_hf_datetime(value: Any) -> datetime | None:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _tags_include_all(item_tags: Sequence[str], required: Sequence[str]) -> bool:
+    normalized = {t.lower() for t in item_tags}
+    return all(tag in normalized for tag in required)
+
+
+def hit_sort_value(hit: HuggingFaceSearchHit, sort: str) -> float:
+    if sort == "lastModified":
+        dt = hit.last_modified or hit.created_at
+        return dt.timestamp() if dt else 0.0
+    if sort == "downloads":
+        return float(hit.downloads)
+    if sort == "likes":
+        return float(hit.likes)
+    dt = hit.created_at
+    return dt.timestamp() if dt else 0.0
 
 
 def _parse_revision(repo: str, revision: str, data: dict[str, Any]) -> HuggingFaceSnapshot:

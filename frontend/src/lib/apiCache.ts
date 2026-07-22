@@ -16,6 +16,7 @@ const SWR_TTL_MS: Record<string, number> = {
   "/repo-activity/feed": 10_000,
   "/github/watch": 8_000,
   "/repo-activity/hippius-latest": 60_000,
+  "/repo-activity/huggingface-latest": 60_000,
   "/market/overview": 45_000,
 };
 

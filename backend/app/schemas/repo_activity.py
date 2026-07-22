@@ -113,8 +113,32 @@ class HuggingFaceLatestRepo(BaseModel):
     file_count: int | None = None
     total_size_bytes: int | None = None
     hub_url: str
+    downloads: int = 0
+    likes: int = 0
+    tags: list[str] = Field(default_factory=list)
+    is_tracked: bool = False
+    digest_in_sync: bool | None = None
+    pending_hub_poll: bool = False
+    tracked_uid: int | None = None
+    track_source: str | None = None
+
+
+class HuggingFaceSortOption(BaseModel):
+    key: str
+    label: str
 
 
 class HuggingFaceLatestResponse(BaseModel):
     total_indexed: int
     repos: list[HuggingFaceLatestRepo] = Field(default_factory=list)
+    sort: str = "createdAt"
+    tags: list[str] = Field(default_factory=list)
+    hub_search_url: str | None = None
+    error: str | None = None
+
+
+class HuggingFaceSearchOptionsResponse(BaseModel):
+    sort_options: list[HuggingFaceSortOption] = Field(default_factory=list)
+    tag_options: list[str] = Field(default_factory=list)
+    default_sort: str = "createdAt"
+    default_tags: list[str] = Field(default_factory=list)

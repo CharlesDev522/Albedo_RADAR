@@ -13,14 +13,25 @@ from app.processing.repo_track_builder import RepoTrackBuilder
 from app.schemas.repo_activity import (
     HippiusLatestResponse,
     HuggingFaceLatestResponse,
+    HuggingFaceSearchOptionsResponse,
+    HuggingFaceSortOption,
     RepoActivityEventResponse,
     RepoActivityOverview,
     RepoRevisionResponse,
     RepoTrackEntry,
 )
 from app.services.hippius_latest_service import fetch_latest_hippius_repos
-from app.services.huggingface_latest_service import fetch_latest_huggingface_repos
+from app.services.huggingface_latest_service import (
+    fetch_latest_huggingface_repos,
+    huggingface_search_url,
+)
 from app.services.repo_activity_service import merged_repo_tracks
+from app.integrations.huggingface_search_config import (
+    HF_DEFAULT_TAG_OPTIONS,
+    HF_DISCOVERY_QUERIES,
+    HF_SORT_CREATED_AT,
+    HF_SORT_OPTIONS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -162,17 +173,54 @@ async def repo_revision_history(
     return [RepoRevisionResponse.model_validate(r) for r in rows]
 
 
+@router.get("/huggingface-latest/options", response_model=HuggingFaceSearchOptionsResponse)
+async def huggingface_latest_options() -> HuggingFaceSearchOptionsResponse:
+    """HF Hub sort modes and common Albedo tag filters."""
+    return HuggingFaceSearchOptionsResponse(
+        sort_options=[HuggingFaceSortOption(key=key, label=label) for key, label in HF_SORT_OPTIONS],
+        tag_options=list(HF_DEFAULT_TAG_OPTIONS),
+        default_sort=HF_SORT_CREATED_AT,
+        default_tags=[],
+    )
+
+
 @router.get("/huggingface-latest", response_model=HuggingFaceLatestResponse)
 async def huggingface_latest_repos(
     limit: int = Query(default=10, ge=1, le=50),
+    sort: str = Query(default=HF_SORT_CREATED_AT),
+    tags: str | None = Query(default=None, description="Comma-separated HF filter tags (AND)"),
+    subnet: int = Query(default=97, ge=0),
+    db: AsyncSession = Depends(get_db),
 ) -> HuggingFaceLatestResponse:
     """Live latest Albedo repos from Hugging Face Hub search."""
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    sort_key = sort if sort in {key for key, _ in HF_SORT_OPTIONS} else HF_SORT_CREATED_AT
+    hub_url = huggingface_search_url(query=HF_DISCOVERY_QUERIES[0], sort=sort_key, tags=tag_list)
     try:
-        total, repos = await fetch_latest_huggingface_repos(limit=limit)
-        return HuggingFaceLatestResponse(total_indexed=total, repos=repos)
-    except Exception:
+        tracked = await merged_repo_tracks(db, subnet)
+        total, repos = await fetch_latest_huggingface_repos(
+            limit=limit,
+            sort=sort_key,
+            tags=tag_list,
+            tracked_entries=tracked,
+        )
+        return HuggingFaceLatestResponse(
+            total_indexed=total,
+            repos=repos,
+            sort=sort_key,
+            tags=tag_list,
+            hub_search_url=hub_url,
+        )
+    except Exception as exc:
         logger.warning("huggingface-latest fetch failed", exc_info=True)
-        return HuggingFaceLatestResponse(total_indexed=0, repos=[])
+        return HuggingFaceLatestResponse(
+            total_indexed=0,
+            repos=[],
+            sort=sort_key,
+            tags=tag_list,
+            hub_search_url=hub_url,
+            error=str(exc),
+        )
 
 
 @router.get("/hippius-latest", response_model=HippiusLatestResponse)

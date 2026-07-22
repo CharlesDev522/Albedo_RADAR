@@ -292,12 +292,39 @@ export interface HippiusLatestRepo {
   hub_url: string;
 }
 
+export interface HuggingFaceLatestRepo {
+  repo: string;
+  model_family?: string | null;
+  digest: string;
+  indexed_at?: string | null;
+  file_count?: number | null;
+  total_size_bytes?: number | null;
+  hub_url: string;
+  downloads?: number;
+  likes?: number;
+  tags?: string[];
+  is_tracked?: boolean;
+  digest_in_sync?: boolean | null;
+  pending_hub_poll?: boolean;
+  tracked_uid?: number | null;
+  track_source?: string | null;
+}
+
 export interface HuggingFaceLatestResponse {
   total_indexed: number;
   repos: HuggingFaceLatestRepo[];
+  sort?: string;
+  tags?: string[];
+  hub_search_url?: string | null;
+  error?: string | null;
 }
 
-export type HuggingFaceLatestRepo = HippiusLatestRepo;
+export interface HuggingFaceSearchOptionsResponse {
+  sort_options: { key: string; label: string }[];
+  tag_options: string[];
+  default_sort: string;
+  default_tags: string[];
+}
 
 export interface RepoTrackEntry {
   id: number;
@@ -1096,8 +1123,25 @@ export const api = {
     fetchApi<HippiusLatestResponse>(`/repo-activity/hippius-latest?limit=${limit}`, {
       forceRefresh,
     }),
-  getHuggingFaceLatestRepos: (limit = 10, forceRefresh = false) =>
-    fetchApi<HuggingFaceLatestResponse>(`/repo-activity/huggingface-latest?limit=${limit}`, {
+  getHuggingFaceLatestRepos: (
+    limit = 10,
+    opts?: {
+      sort?: string;
+      tags?: string[];
+      subnet?: number;
+      forceRefresh?: boolean;
+    }
+  ) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (opts?.sort) params.set("sort", opts.sort);
+    if (opts?.tags?.length) params.set("tags", opts.tags.join(","));
+    if (opts?.subnet != null) params.set("subnet", String(opts.subnet));
+    return fetchApi<HuggingFaceLatestResponse>(`/repo-activity/huggingface-latest?${params}`, {
+      forceRefresh: opts?.forceRefresh,
+    });
+  },
+  getHuggingFaceSearchOptions: (forceRefresh = false) =>
+    fetchApi<HuggingFaceSearchOptionsResponse>("/repo-activity/huggingface-latest/options", {
       forceRefresh,
     }),
   syncRepoActivity: async (subnet = DEFAULT_SUBNET) => {

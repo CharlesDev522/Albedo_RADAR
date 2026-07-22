@@ -32,6 +32,7 @@ import {
   matchesRepoActivityEvent,
   matchesRepoTrack,
 } from "@/lib/searchFilter";
+import { type HfSortKey } from "@/lib/hfSearchOptions";
 import { useSubnet } from "@/lib/useSubnet";
 import { usePageVisibility } from "@/lib/usePageVisibility";
 
@@ -141,6 +142,9 @@ export default function RepoActivityPanel() {
   const [hfLatest, setHfLatest] = useState<HuggingFaceLatestRepo[]>([]);
   const [hfIndexTotal, setHfIndexTotal] = useState<number | null>(null);
   const [hfLatestError, setHfLatestError] = useState<string | null>(null);
+  const [hfSort, setHfSort] = useState<HfSortKey>("createdAt");
+  const [hfTags, setHfTags] = useState<string[]>([]);
+  const [hfHubSearchUrl, setHfHubSearchUrl] = useState<string | null>(null);
   const [tracks, setTracks] = useState<RepoTrackEntry[]>([]);
   const [feed, setFeed] = useState<RepoActivityEvent[]>([]);
   const [family, setFamily] = useState<FamilyFilter>("all");
@@ -186,16 +190,23 @@ export default function RepoActivityPanel() {
     }
 
     try {
-      const latest = await api.getHuggingFaceLatestRepos(TRACKED_REPOS_PREVIEW, forceRefresh);
+      const latest = await api.getHuggingFaceLatestRepos(TRACKED_REPOS_PREVIEW, {
+        sort: hfSort,
+        tags: hfTags,
+        subnet,
+        forceRefresh,
+      });
       setHfLatest(latest.repos);
       setHfIndexTotal(latest.total_indexed);
-      setHfLatestError(null);
+      setHfHubSearchUrl(latest.hub_search_url ?? null);
+      setHfLatestError(latest.error ?? null);
     } catch (e) {
       setHfLatest([]);
       setHfIndexTotal(null);
+      setHfHubSearchUrl(null);
       setHfLatestError(e instanceof Error ? e.message : "Hugging Face Hub unavailable");
     }
-  }, [subnet, familyParam]);
+  }, [subnet, familyParam, hfSort, hfTags]);
 
   const runSync = useCallback(async () => {
     setSyncing(true);
@@ -203,9 +214,11 @@ export default function RepoActivityPanel() {
     try {
       const result = await api.syncRepoActivity(subnet);
       await refresh(true);
-      if ((result.miners_checked as number) === 0) {
+      const minersChecked = result.miners_checked as number;
+      const hubDiscoveries = (result.hub_discoveries as number) ?? 0;
+      if (minersChecked === 0 && hubDiscoveries === 0) {
         setSyncError(
-          "sync ran but found 0 qwen repos to poll — check slot scan and HF discovery"
+          "sync ran but found 0 repos to poll — check slot scan, Hippius index, and HF discovery"
         );
       }
     } catch (e) {
@@ -368,6 +381,13 @@ export default function RepoActivityPanel() {
           loading={loading && hfLatest.length === 0 && !hfLatestError}
           totalHint={hfIndexTotal}
           error={hfLatestError}
+          sort={hfSort}
+          selectedTags={hfTags}
+          hubSearchUrl={hfHubSearchUrl}
+          onSortChange={setHfSort}
+          onTagsChange={setHfTags}
+          onSyncDiscoveries={() => void runSync()}
+          syncing={syncing}
         />
       </div>
 
