@@ -20,7 +20,7 @@ KIND_LABELS: dict[AlertKind, str] = {
     "slot_changed": "UID Published Commitment",
     "commit_new": "CommitmentOf Revealed",
     "commit_updated": "CommitmentOf Changed",
-    "repo_new": "New Hippius Repo",
+    "repo_new": "New Hub Repo",
     "repo_updated": "Hippius Manifest Updated",
     "reg_fee_low": "Registration Burn Low",
     "eval_dq": "Eval DQ (Disqualified)",
@@ -86,7 +86,7 @@ DETAIL_ORDER: dict[AlertKind, tuple[str, ...]] = {
     ),
     "slot_new": ("uid", "hotkey", "commitment_type", "commit_block", "detail"),
     "slot_changed": ("uid", "hotkey", "commitment_type", "commit_block", "detail", "previous"),
-    "repo_new": ("repo", "model_family", "hub_digest", "revision", "uid", "hotkey"),
+    "repo_new": ("repo", "model_family", "host", "hub_digest", "revision", "uid", "hotkey"),
     "repo_updated": (
         "repo",
         "hub_digest",
@@ -237,7 +237,10 @@ def build_repo_new_alert(
     revision: str | None = None,
     commit_message: str | None = None,
     meta: dict[str, Any] | None = None,
+    host_label: str | None = None,
 ) -> AlertContent:
+    host = (meta or {}).get("host", "hippius")
+    label = host_label or ("Hugging Face" if host == "huggingface" else "Hippius")
     detail = repo_alert_detail(
         repo=repo,
         event_type=event_type,
@@ -250,15 +253,16 @@ def build_repo_new_alert(
         commit_message=commit_message,
         meta=meta,
     )
+    detail["host"] = host
     return AlertContent(
         kind="repo_new",
-        title=f"[repo_new] {repo}",
+        title=f"[repo_new] {label}: {repo}",
         message=(
-            f"SN{netuid} new hub repo"
+            f"SN{netuid} new {label} repo"
             + (f" | digest {_short_digest(hub_digest)}" if hub_digest else "")
             + (f" | {revision}" if revision else "")
         ),
-        source_key=f"alert:{source_key}",
+        source_key=source_key,
         detail=detail,
         subnet=netuid,
     )

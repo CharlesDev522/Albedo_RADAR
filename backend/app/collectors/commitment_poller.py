@@ -66,6 +66,7 @@ class CommitmentPoller:
         self.slot_status_builder = SlotStatusBuilder()
         self.repo_track_builder = RepoTrackBuilder(
             settings=self.settings,
+            dispatcher=self.notifier,
         )
         self.github_watcher = GithubRepoWatcher(self.settings)
         self._running = False

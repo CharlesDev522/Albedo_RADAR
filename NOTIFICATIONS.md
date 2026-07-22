@@ -83,3 +83,6 @@ curl -X POST http://localhost:8000/api/v1/notifications/test-slack
 | King defended | `king_defended` |
 | Crown lost | `crown_lost` |
 | Eval disqualified | `eval_dq` |
+| **New Hippius or Hugging Face repo** | `repo_new` |
+
+`repo_new` fires only the first time a repo appears on Hippius Hub or Hugging Face (manifest updates do **not** notify).

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 
 import httpx
 from sqlalchemy import select
@@ -41,7 +42,11 @@ from app.processing.repo_watch_targets import (
     is_hub_watch_hotkey,
     parse_hub_watch_hotkey,
 )
+from app.notifications.repo_alerts import notify_new_hub_repo
 from app.services.huggingface_latest_service import discover_huggingface_repos
+
+if TYPE_CHECKING:
+    from app.notifications.dispatcher import NotificationDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +57,12 @@ class RepoTrackBuilder:
     def __init__(
         self,
         settings: Settings | None = None,
+        dispatcher: NotificationDispatcher | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.registry = ModelRegistryClient(self.settings)
         self.hippius_hub = HippiusHubClient(self.settings)
+        self.dispatcher = dispatcher
 
     async def sync_subnet(self, session: AsyncSession, netuid: int) -> dict[str, int]:
         stats = {
@@ -251,6 +258,26 @@ class RepoTrackBuilder:
             if emitted:
                 if event_type == "hub_repo_added":
                     stats["hub_discoveries"] += 1
+                    await notify_new_hub_repo(
+                        session,
+                        self.dispatcher,
+                        netuid=netuid,
+                        repo=target.repo,
+                        host="hippius",
+                        uid=target.uid,
+                        hotkey=target.hotkey if not is_hub_watch_hotkey(target.hotkey) else None,
+                        coldkey=target.coldkey,
+                        model_family=family,
+                        hub_digest=hub_digest,
+                        revision=entry.primary_tag,
+                        meta={
+                            "host": "hippius",
+                            "file_count": entry.file_count,
+                            "total_bytes": entry.total_size_bytes,
+                            "track_source": target.track_source,
+                            "index_source": "hippius_hub_api",
+                        },
+                    )
                 else:
                     stats["hub_updates"] += 1
 
@@ -386,6 +413,27 @@ class RepoTrackBuilder:
             if emitted:
                 if event_type == "hub_repo_added":
                     stats["hub_discoveries"] += 1
+                    await notify_new_hub_repo(
+                        session,
+                        self.dispatcher,
+                        netuid=netuid,
+                        repo=target.repo,
+                        host=snapshot.host,
+                        uid=target.uid,
+                        hotkey=target.hotkey if not is_hub_watch_hotkey(target.hotkey) else None,
+                        coldkey=target.coldkey,
+                        model_family=family,
+                        hub_digest=hub_digest,
+                        revision=snapshot.revision,
+                        commit_message=snapshot.commit_message,
+                        meta={
+                            "host": snapshot.host,
+                            "file_count": snapshot.file_count,
+                            "total_bytes": snapshot.total_bytes,
+                            "track_source": target.track_source,
+                            "index_source": "oci_manifest",
+                        },
+                    )
                 else:
                     stats["hub_updates"] += 1
             await self._record_revision(session, netuid, target.repo, snapshot, changed_files)

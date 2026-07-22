@@ -9,6 +9,10 @@ from app.notifications.reg_fee_tiers import reg_fee_tier_emoji
 from app.notifications.terminology import prose_for, repo_from_detail, title_for
 
 
+def hf_repo_url(repo: str) -> str:
+    return f"https://huggingface.co/{repo.strip()}"
+
+
 def hippius_repo_url(repo: str, revision: str = "main") -> str:
     return f"https://hub.hippius.com/models/{repo.strip()}/{revision}"
 
@@ -34,6 +38,9 @@ def _primary_url(kind: AlertKind, detail: dict[str, Any], subnet: int | None) ->
             return hippius_repo_url(str(new_repo))
     repo = repo_from_detail(detail)
     if repo:
+        host = detail.get("host") or (detail.get("meta") or {}).get("host")
+        if host == "huggingface":
+            return hf_repo_url(repo)
         return hippius_repo_url(repo)
     return taostats_subnet_url(subnet) if subnet is not None else None
 

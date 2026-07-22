@@ -22,6 +22,7 @@ from app.integrations.hippius_hub_client import HippiusHubClient
 from app.integrations.market_client import fetch_subnet_economics
 from app.services.albedo_crown_archive_service import sync_crowns_from_dashboard
 from app.notifications.dispatcher import NotificationDispatcher
+from app.notifications.repo_alerts import hub_repo_new_source_key
 from app.notifications.messages import (
     _duel_participant_detail,
     build_crown_lost_alert,
@@ -282,12 +283,50 @@ class NotificationWatcher:
             family = infer_albedo_model_family(repo)
             if family not in (FAMILY_QWEN36_35B, FAMILY_QWEN3_4B):
                 continue
-            sk = f"alert:hub:hippius:{repo}:{entry.digest}"
+            sk = hub_repo_new_source_key(host="hippius", repo=repo)
             if not self.dispatcher.is_seen(sk):
                 self.dispatcher.mark_seen(sk)
                 marked += 1
         if marked:
             logger.info("notification hub index seed — marked %d repos from Hippius hub", marked)
+        return marked
+
+    async def _seed_known_hf_repos(self, session: AsyncSession | None) -> int:
+        """Mark known Hugging Face repos so only post-startup discoveries notify."""
+        marked = 0
+        repos: set[str] = set()
+        if session is not None:
+            try:
+                from app.db.models import HippiusRepoTrack
+
+                rows = (
+                    await session.execute(
+                        select(HippiusRepoTrack.repo).where(HippiusRepoTrack.repo_host == "huggingface")
+                    )
+                ).scalars().all()
+                repos.update(rows)
+            except Exception:
+                logger.debug("notification HF DB seed skipped", exc_info=True)
+
+        try:
+            from app.services.huggingface_latest_service import discover_huggingface_repos
+
+            timeout = self.settings.market_http_timeout_seconds
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                from app.integrations.huggingface_registry import HuggingFaceRegistryClient
+
+                hf = HuggingFaceRegistryClient(self.settings)
+                repos.update(await discover_huggingface_repos(hf, client))
+        except Exception:
+            logger.debug("notification HF discovery seed skipped", exc_info=True)
+
+        for repo in repos:
+            sk = hub_repo_new_source_key(host="huggingface", repo=repo)
+            if not self.dispatcher.is_seen(sk):
+                self.dispatcher.mark_seen(sk)
+                marked += 1
+        if marked:
+            logger.info("notification HF seed — marked %d repos", marked)
         return marked
 
     async def _seed_db_keys(self, session: AsyncSession) -> int:
@@ -332,6 +371,7 @@ class NotificationWatcher:
             logger.warning("notification dashboard bootstrap failed during finalize", exc_info=True)
 
         marked += await self._seed_hub_index_keys()
+        marked += await self._seed_known_hf_repos(session)
         logger.info("notification startup seed complete — marked %d keys", marked)
         return marked
 
@@ -344,6 +384,7 @@ class NotificationWatcher:
         except Exception:
             logger.warning("notification dashboard bootstrap failed (HTTP-only)", exc_info=True)
         marked += await self._seed_hub_index_keys()
+        marked += await self._seed_known_hf_repos(None)
         logger.info("notification HTTP-only seed complete — marked %d keys", marked)
         return marked
 

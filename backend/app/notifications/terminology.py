@@ -95,7 +95,9 @@ def title_for(kind: AlertKind, subnet: int | None, detail: dict[str, Any]) -> st
         )
 
     if kind == "repo_new":
-        return f"New Hippius repo: {repo}" if repo else f"New Hippius repo on {sn}"
+        host = detail.get("host") or (detail.get("meta") or {}).get("host")
+        hub = "Hugging Face" if host == "huggingface" else "Hippius"
+        return f"New {hub} repo: {repo}" if repo else f"New {hub} repo on {sn}"
 
     if kind == "repo_updated":
         return f"Hippius manifest updated: {repo}" if repo else f"Hippius manifest updated on {sn}"
@@ -266,8 +268,10 @@ def prose_for(kind: AlertKind, message: str, detail: dict[str, Any]) -> str:
         name = repo or "a repository"
         fam = detail.get("model_family")
         fam_s = f" ({fam})" if fam else ""
+        host = detail.get("host") or (detail.get("meta") or {}).get("host")
+        hub = "Hugging Face" if host == "huggingface" else "Hippius"
         paragraphs.append(
-            f"A new model repo appeared on the Hippius hub: {name}{fam_s}. "
+            f"A new model repo appeared on {hub}: {name}{fam_s}. "
             f"This is the off-chain manifest validators pull during eval."
         )
         if digest := digest_short(detail):
