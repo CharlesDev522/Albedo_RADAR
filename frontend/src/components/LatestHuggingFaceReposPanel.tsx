@@ -219,7 +219,9 @@ export default function LatestHuggingFaceReposPanel({
                       <span className="text-[9px] mono text-zinc-600">{repo.file_count} files</span>
                     )}
                   </div>
-                  <p className="text-[9px] mono text-zinc-600 mt-0.5 truncate">{shortHash(repo.digest)}</p>
+                  <p className="text-[9px] mono text-zinc-600 mt-0.5 truncate">
+                  {repo.digest ? shortHash(repo.digest) : "search result · open hub for files"}
+                </p>
                 </div>
               </a>
             );

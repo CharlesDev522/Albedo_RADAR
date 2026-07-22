@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import LatestHippiusReposPanel from "@/components/LatestHippiusReposPanel";
 import LatestHuggingFaceReposPanel from "@/components/LatestHuggingFaceReposPanel";
 import GithubWatchPanel from "@/components/GithubWatchPanel";
@@ -37,6 +37,7 @@ import { useSubnet } from "@/lib/useSubnet";
 import { usePageVisibility } from "@/lib/usePageVisibility";
 
 const POLL_MS = 12_000;
+const HF_POLL_MS = 5 * 60_000;
 const TRACKED_REPOS_PREVIEW = 10;
 
 type FamilyFilter = "all" | "qwen3.6-35b" | "qwen3-4b";
@@ -156,10 +157,11 @@ export default function RepoActivityPanel() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<RepoTrackSortKey>("remote_newest");
   const [showAllTracks, setShowAllTracks] = useState(false);
+  const hfFiltersReady = useRef(false);
 
   const familyParam = family === "all" ? undefined : family;
 
-  const refresh = useCallback(async (forceRefresh = false) => {
+  const refreshCore = useCallback(async (forceRefresh = false) => {
     try {
       const [ov, tr, fd] = await Promise.all([
         api.getRepoActivityOverview(subnet, forceRefresh),
@@ -188,7 +190,9 @@ export default function RepoActivityPanel() {
         e instanceof Error ? e.message : "Hippius Hub index unavailable"
       );
     }
+  }, [subnet, familyParam]);
 
+  const refreshHfLatest = useCallback(async (forceRefresh = false) => {
     try {
       const latest = await api.getHuggingFaceLatestRepos(TRACKED_REPOS_PREVIEW, {
         sort: hfSort,
@@ -206,7 +210,14 @@ export default function RepoActivityPanel() {
       setHfHubSearchUrl(null);
       setHfLatestError(e instanceof Error ? e.message : "Hugging Face Hub unavailable");
     }
-  }, [subnet, familyParam, hfSort, hfTags]);
+  }, [subnet, hfSort, hfTags]);
+
+  const refresh = useCallback(
+    async (forceRefresh = false) => {
+      await Promise.all([refreshCore(forceRefresh), refreshHfLatest(forceRefresh)]);
+    },
+    [refreshCore, refreshHfLatest]
+  );
 
   const runSync = useCallback(async () => {
     setSyncing(true);
@@ -233,10 +244,24 @@ export default function RepoActivityPanel() {
   useEffect(() => {
     if (!panelActive) return;
     setLoading(true);
-    void refresh(false);
-    const id = setInterval(() => void refresh(true), POLL_MS);
-    return () => clearInterval(id);
-  }, [panelActive, refresh]);
+    void refreshCore(false);
+    void refreshHfLatest(false);
+    const coreId = setInterval(() => void refreshCore(true), POLL_MS);
+    const hfId = setInterval(() => void refreshHfLatest(false), HF_POLL_MS);
+    return () => {
+      clearInterval(coreId);
+      clearInterval(hfId);
+    };
+  }, [panelActive, refreshCore, refreshHfLatest]);
+
+  useEffect(() => {
+    if (!panelActive) return;
+    if (!hfFiltersReady.current) {
+      hfFiltersReady.current = true;
+      return;
+    }
+    void refreshHfLatest(true);
+  }, [panelActive, hfSort, hfTags, refreshHfLatest]);
 
   useEffect(() => {
     setSearch("");
@@ -465,6 +490,9 @@ export default function RepoActivityPanel() {
                 {sortKey === "remote_newest"
                   ? " · sorted by remote update time"
                   : ` · ${REPO_TRACK_SORT_OPTIONS.find((o) => o.key === sortKey)?.label ?? sortKey}`}
+                {hfLatest.length > 0
+                  ? ` · HF panel: ${hfLatest.filter((r) => r.is_tracked).length}/${hfLatest.length} synced to tracked`
+                  : ""}
               </p>
             </div>
             {!searchActive && filteredTracks.length > TRACKED_REPOS_PREVIEW && (

@@ -24,3 +24,7 @@ HF_DEFAULT_TAG_OPTIONS: tuple[str, ...] = (
 )
 
 VALID_HF_SORTS: frozenset[str] = frozenset(key for key, _label in HF_SORT_OPTIONS)
+
+# Hub API budget: one search page per family query, no per-model hydration.
+HF_SEARCH_LIMIT_PER_QUERY = 24
+HF_LATEST_CACHE_TTL_SECONDS = 180.0

@@ -1136,6 +1136,7 @@ export const api = {
     if (opts?.sort) params.set("sort", opts.sort);
     if (opts?.tags?.length) params.set("tags", opts.tags.join(","));
     if (opts?.subnet != null) params.set("subnet", String(opts.subnet));
+    if (opts?.forceRefresh) params.set("force_refresh", "true");
     return fetchApi<HuggingFaceLatestResponse>(`/repo-activity/huggingface-latest?${params}`, {
       forceRefresh: opts?.forceRefresh,
     });

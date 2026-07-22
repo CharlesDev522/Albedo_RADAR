@@ -190,6 +190,7 @@ async def huggingface_latest_repos(
     sort: str = Query(default=HF_SORT_CREATED_AT),
     tags: str | None = Query(default=None, description="Comma-separated HF filter tags (AND)"),
     subnet: int = Query(default=97, ge=0),
+    force_refresh: bool = Query(default=False, alias="force_refresh"),
     db: AsyncSession = Depends(get_db),
 ) -> HuggingFaceLatestResponse:
     """Live latest Albedo repos from Hugging Face Hub search."""
@@ -203,6 +204,7 @@ async def huggingface_latest_repos(
             sort=sort_key,
             tags=tag_list,
             tracked_entries=tracked,
+            force_refresh=force_refresh,
         )
         return HuggingFaceLatestResponse(
             total_indexed=total,

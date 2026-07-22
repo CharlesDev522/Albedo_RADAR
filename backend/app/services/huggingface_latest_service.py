@@ -10,9 +10,15 @@ import httpx
 from app.chain_reader.albedo_model_family import FAMILY_QWEN36_35B, FAMILY_QWEN3_4B, infer_albedo_model_family
 from app.config import Settings, get_settings
 from app.integrations.huggingface_registry import HuggingFaceRegistryClient, HuggingFaceSearchHit, hit_sort_value
-from app.integrations.huggingface_search_config import HF_DISCOVERY_QUERIES, HF_SORT_CREATED_AT
+from app.integrations.huggingface_search_config import (
+    HF_DISCOVERY_QUERIES,
+    HF_LATEST_CACHE_TTL_SECONDS,
+    HF_SEARCH_LIMIT_PER_QUERY,
+    HF_SORT_CREATED_AT,
+)
 from app.processing.repo_watch_targets import parse_hub_watch_hotkey
 from app.schemas.repo_activity import HuggingFaceLatestRepo, RepoTrackEntry
+from app.services.hf_latest_cache import cache_get, cache_peek, cache_set
 
 _EPOCH = datetime.min.replace(tzinfo=timezone.utc)
 
@@ -37,9 +43,9 @@ def huggingface_search_url(
     return f"https://huggingface.co/models?{'&'.join(params)}"
 
 
-def _merge_created(*values: datetime | None) -> datetime | None:
-    valid = [v for v in values if v is not None]
-    return max(valid) if valid else None
+def _cache_key(*, limit: int, sort: str, tags: Sequence[str] | None) -> str:
+    tag_key = ",".join(sorted(t.strip().lower() for t in (tags or ()) if t.strip()))
+    return f"hf-latest:{sort}:{tag_key}:{limit}"
 
 
 def _repo_sort_key(repo: HuggingFaceLatestRepo, sort: str) -> tuple[int, float, str]:
@@ -95,29 +101,59 @@ def _apply_track_status(
             "pending_hub_poll": track.pending_hub_poll,
             "tracked_uid": track.uid,
             "track_source": track.track_source,
+            "digest": track.hub_digest or repo.digest,
+            "file_count": track.file_count if track.file_count is not None else repo.file_count,
+            "total_size_bytes": track.total_bytes if track.total_bytes is not None else repo.total_size_bytes,
+            "hub_url": huggingface_browse_url(
+                repo.repo,
+                track.hub_revision if track.hub_revision and track.hub_revision != "main" else None,
+            ),
         }
     )
 
 
-async def fetch_latest_huggingface_repos(
+def _repo_from_hit(
+    repo: str,
+    hit: HuggingFaceSearchHit,
     *,
-    limit: int = 10,
-    sort: str = HF_SORT_CREATED_AT,
-    tags: Sequence[str] | None = None,
-    tracked_entries: Sequence[RepoTrackEntry] | None = None,
-    settings: Settings | None = None,
-    client: httpx.AsyncClient | None = None,
+    sort: str,
+    track: RepoTrackEntry | None,
+) -> HuggingFaceLatestRepo:
+    family = infer_albedo_model_family(repo)
+    entry = HuggingFaceLatestRepo(
+        repo=repo,
+        model_family=family,
+        digest="",
+        indexed_at=_indexed_at_for_sort(hit, sort),
+        file_count=None,
+        total_size_bytes=None,
+        hub_url=huggingface_browse_url(repo),
+        downloads=hit.downloads,
+        likes=hit.likes,
+        tags=list(hit.tags),
+    )
+    return _apply_track_status(entry, track)
+
+
+async def _fetch_latest_huggingface_repos_uncached(
+    *,
+    limit: int,
+    sort: str,
+    tags: Sequence[str] | None,
+    tracked_entries: Sequence[RepoTrackEntry] | None,
+    settings: Settings,
+    client: httpx.AsyncClient | None,
 ) -> tuple[int, list[HuggingFaceLatestRepo]]:
-    settings = settings or get_settings()
     hf = HuggingFaceRegistryClient(settings)
     tag_list = [t.strip() for t in (tags or ()) if t.strip()]
     hit_by_repo: dict[str, HuggingFaceSearchHit] = {}
+    search_limit = max(limit * 2, HF_SEARCH_LIMIT_PER_QUERY)
 
     async def _collect_hits(c: httpx.AsyncClient) -> None:
         for query in HF_DISCOVERY_QUERIES:
             hits = await hf.search_models_hits(
                 query,
-                limit=80,
+                limit=search_limit,
                 sort=sort,
                 direction=-1,
                 tags=tag_list or None,
@@ -134,51 +170,92 @@ async def fetch_latest_huggingface_repos(
         async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as c:
             await _collect_hits(c)
 
-    candidates: list[tuple[str, HuggingFaceSearchHit]] = []
+    track_lookup = _hf_track_lookup(tracked_entries or ())
+    models: list[HuggingFaceLatestRepo] = []
     for repo, hit in hit_by_repo.items():
         family = infer_albedo_model_family(repo)
         if family not in (FAMILY_QWEN36_35B, FAMILY_QWEN3_4B):
             continue
-        candidates.append((repo, hit))
-
-    candidates.sort(
-        key=lambda row: (
-            -hit_sort_value(row[1], sort),
-            row[0],
-        )
-    )
-
-    track_lookup = _hf_track_lookup(tracked_entries or ())
-    models: list[HuggingFaceLatestRepo] = []
-    fetch_cap = min(len(candidates), max(limit * 4, 40))
-
-    async def _hydrate(c: httpx.AsyncClient) -> None:
-        for repo, hit in candidates[:fetch_cap]:
-            family = infer_albedo_model_family(repo)
-            snap = await hf.fetch_model(repo, client=c)
-            if snap is None:
-                continue
-            indexed_at = _indexed_at_for_sort(hit, sort)
-            entry = HuggingFaceLatestRepo(
-                repo=repo,
-                model_family=family,
-                digest=snap.commit_sha,
-                indexed_at=indexed_at,
-                file_count=snap.file_count,
-                total_size_bytes=snap.total_bytes,
-                hub_url=huggingface_browse_url(repo, snap.revision),
-                downloads=hit.downloads,
-                likes=hit.likes,
-                tags=list(hit.tags),
-            )
-            models.append(_apply_track_status(entry, track_lookup.get(repo)))
-
-    if client is not None:
-        await _hydrate(client)
-    else:
-        async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as c:
-            await _hydrate(c)
+        models.append(_repo_from_hit(repo, hit, sort=sort, track=track_lookup.get(repo)))
 
     models.sort(key=lambda repo: _repo_sort_key(repo, sort))
     capped = models[: max(limit, 1)]
-    return len(candidates), capped
+    return len(models), capped
+
+
+async def fetch_latest_huggingface_repos(
+    *,
+    limit: int = 10,
+    sort: str = HF_SORT_CREATED_AT,
+    tags: Sequence[str] | None = None,
+    tracked_entries: Sequence[RepoTrackEntry] | None = None,
+    settings: Settings | None = None,
+    client: httpx.AsyncClient | None = None,
+    force_refresh: bool = False,
+) -> tuple[int, list[HuggingFaceLatestRepo]]:
+    settings = settings or get_settings()
+    key = _cache_key(limit=limit, sort=sort, tags=tags)
+
+    if not force_refresh:
+        cached = cache_get(key, ttl_seconds=HF_LATEST_CACHE_TTL_SECONDS)
+        if cached is not None:
+            total, repos = cached
+            if tracked_entries:
+                track_lookup = _hf_track_lookup(tracked_entries)
+                repos = [
+                    _apply_track_status(repo, track_lookup.get(repo.repo))
+                    for repo in repos
+                ]
+            return total, repos
+
+    try:
+        result = await _fetch_latest_huggingface_repos_uncached(
+            limit=limit,
+            sort=sort,
+            tags=tags,
+            tracked_entries=tracked_entries,
+            settings=settings,
+            client=client,
+        )
+        cache_set(key, (result[0], [repo.model_copy() for repo in result[1]]))
+        return result
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 429:
+            stale = cache_peek(key)
+            if stale is not None:
+                total, repos = stale  # type: ignore[misc]
+                if tracked_entries:
+                    track_lookup = _hf_track_lookup(tracked_entries)
+                    repos = [
+                        _apply_track_status(repo, track_lookup.get(repo.repo))
+                        for repo in repos
+                    ]
+                return total, repos
+        raise
+
+
+async def discover_huggingface_repos(
+    hf: HuggingFaceRegistryClient,
+    client: httpx.AsyncClient,
+    *,
+    limit_per_query: int = HF_SEARCH_LIMIT_PER_QUERY,
+) -> list[str]:
+    """Low-volume HF discovery for registry sync (cached search hits only)."""
+    key = f"hf-discovery:{limit_per_query}"
+    cached = cache_get(key, ttl_seconds=HF_LATEST_CACHE_TTL_SECONDS)
+    if cached is not None:
+        return list(cached)
+
+    repos: list[str] = []
+    for query in HF_DISCOVERY_QUERIES:
+        hits = await hf.search_models_hits(
+            query,
+            limit=limit_per_query,
+            sort=HF_SORT_CREATED_AT,
+            direction=-1,
+            client=client,
+        )
+        repos.extend(hit.repo for hit in hits)
+    deduped = list(dict.fromkeys(repos))
+    cache_set(key, deduped)
+    return deduped

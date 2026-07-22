@@ -56,7 +56,9 @@ async def test_huggingface_latest_returns_error_on_fetch_error(monkeypatch):
     )
     from app.api.routes.repo_activity import huggingface_latest_repos
 
-    result = await huggingface_latest_repos(limit=10, sort="createdAt", tags=None, subnet=97, db=AsyncMock())
+    result = await huggingface_latest_repos(
+        limit=10, sort="createdAt", tags=None, subnet=97, force_refresh=False, db=AsyncMock()
+    )
     assert result.total_indexed == 0
     assert result.repos == []
     assert result.error == "hub down"

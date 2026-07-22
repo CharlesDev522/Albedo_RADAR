@@ -41,7 +41,7 @@ from app.processing.repo_watch_targets import (
     is_hub_watch_hotkey,
     parse_hub_watch_hotkey,
 )
-from app.integrations.huggingface_search_config import HF_DISCOVERY_QUERIES
+from app.services.huggingface_latest_service import discover_huggingface_repos
 
 logger = logging.getLogger(__name__)
 
@@ -171,16 +171,11 @@ class RepoTrackBuilder:
         return sorted(set(repos))
 
     async def _discover_hub_search_repos(self, client: httpx.AsyncClient) -> list[str]:
-        repos: list[str] = []
         try:
-            for query in HF_DISCOVERY_QUERIES:
-                found = await self.registry.huggingface.search_models(
-                    query, limit=100, client=client
-                )
-                repos.extend(found)
+            return await discover_huggingface_repos(self.registry.huggingface, client)
         except Exception:
             logger.exception("hub search discovery failed")
-        return list(dict.fromkeys(repos))
+            return []
 
     async def _apply_hub_index_entry(
         self,

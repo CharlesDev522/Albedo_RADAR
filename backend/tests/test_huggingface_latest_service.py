@@ -16,7 +16,7 @@ def test_huggingface_browse_url():
 def test_fetch_latest_huggingface_repos_filters_albedo(monkeypatch):
     from datetime import datetime, timezone
 
-    from app.integrations.huggingface_registry import HuggingFaceSearchHit, HuggingFaceSnapshot
+    from app.integrations.huggingface_registry import HuggingFaceSearchHit
 
     async def fake_search_hits(self, query, *, limit=100, sort="createdAt", direction=-1, tags=None, client=None):
         return [
@@ -27,38 +27,22 @@ def test_fetch_latest_huggingface_repos_filters_albedo(monkeypatch):
             HuggingFaceSearchHit(repo="miner/random-model", created_at=None),
         ]
 
-    async def fake_fetch_model(self, repo, client=None):
-        if repo == "miner/random-model":
-            return None
-        return HuggingFaceSnapshot(
-            repo=repo,
-            revision="abc123def456",
-            commit_sha="revision:abc123def456",
-            commit_message=None,
-            created_at=datetime(2026, 7, 10, tzinfo=timezone.utc),
-            files=(),
-        )
-
     monkeypatch.setattr(
         "app.services.huggingface_latest_service.HuggingFaceRegistryClient.search_models_hits",
         fake_search_hits,
     )
-    monkeypatch.setattr(
-        "app.services.huggingface_latest_service.HuggingFaceRegistryClient.fetch_model",
-        fake_fetch_model,
-    )
 
-    total, repos = asyncio.run(fetch_latest_huggingface_repos(limit=5))
+    total, repos = asyncio.run(fetch_latest_huggingface_repos(limit=5, force_refresh=True))
     assert total == 1
     assert len(repos) == 1
     assert repos[0].repo == "miner/albedo-qwen3.6-35b-test"
-    assert repos[0].hub_url.endswith("/tree/abc123def456")
+    assert repos[0].hub_url == "https://huggingface.co/miner/albedo-qwen3.6-35b-test"
 
 
 def test_fetch_latest_huggingface_repos_orders_by_created_date(monkeypatch):
     from datetime import datetime, timezone
 
-    from app.integrations.huggingface_registry import HuggingFaceSearchHit, HuggingFaceSnapshot
+    from app.integrations.huggingface_registry import HuggingFaceSearchHit
 
     async def fake_search_hits(self, query, *, limit=100, sort="createdAt", direction=-1, tags=None, client=None):
         return [
@@ -72,26 +56,12 @@ def test_fetch_latest_huggingface_repos_orders_by_created_date(monkeypatch):
             ),
         ]
 
-    async def fake_fetch_model(self, repo, client=None):
-        return HuggingFaceSnapshot(
-            repo=repo,
-            revision="sha",
-            commit_sha="revision:sha",
-            commit_message=None,
-            created_at=None,
-            files=(),
-        )
-
     monkeypatch.setattr(
         "app.services.huggingface_latest_service.HuggingFaceRegistryClient.search_models_hits",
         fake_search_hits,
     )
-    monkeypatch.setattr(
-        "app.services.huggingface_latest_service.HuggingFaceRegistryClient.fetch_model",
-        fake_fetch_model,
-    )
 
-    _, repos = asyncio.run(fetch_latest_huggingface_repos(limit=2, sort="createdAt"))
+    _, repos = asyncio.run(fetch_latest_huggingface_repos(limit=2, sort="createdAt", force_refresh=True))
     assert [r.repo for r in repos] == [
         "b/miner/albedo-qwen3.6-35b-new",
         "a/miner/albedo-qwen3-4b-old",
@@ -101,7 +71,7 @@ def test_fetch_latest_huggingface_repos_orders_by_created_date(monkeypatch):
 def test_fetch_latest_huggingface_repos_applies_tracked_status(monkeypatch):
     from datetime import datetime, timezone
 
-    from app.integrations.huggingface_registry import HuggingFaceSearchHit, HuggingFaceSnapshot
+    from app.integrations.huggingface_registry import HuggingFaceSearchHit
     from app.schemas.repo_activity import RepoTrackEntry
 
     async def fake_search_hits(self, query, *, limit=100, sort="createdAt", direction=-1, tags=None, client=None):
@@ -112,23 +82,9 @@ def test_fetch_latest_huggingface_repos_applies_tracked_status(monkeypatch):
             ),
         ]
 
-    async def fake_fetch_model(self, repo, client=None):
-        return HuggingFaceSnapshot(
-            repo=repo,
-            revision="sha",
-            commit_sha="revision:sha",
-            commit_message=None,
-            created_at=None,
-            files=(),
-        )
-
     monkeypatch.setattr(
         "app.services.huggingface_latest_service.HuggingFaceRegistryClient.search_models_hits",
         fake_search_hits,
-    )
-    monkeypatch.setattr(
-        "app.services.huggingface_latest_service.HuggingFaceRegistryClient.fetch_model",
-        fake_fetch_model,
     )
 
     tracked = [
@@ -158,6 +114,37 @@ def test_fetch_latest_huggingface_repos_applies_tracked_status(monkeypatch):
         )
     ]
 
-    _, repos = asyncio.run(fetch_latest_huggingface_repos(limit=1, tracked_entries=tracked))
+    _, repos = asyncio.run(
+        fetch_latest_huggingface_repos(limit=1, tracked_entries=tracked, force_refresh=True)
+    )
     assert repos[0].is_tracked is True
     assert repos[0].digest_in_sync is True
+    assert repos[0].digest == "revision:sha"
+
+
+def test_fetch_latest_huggingface_repos_uses_cache(monkeypatch):
+    from datetime import datetime, timezone
+
+    from app.integrations.huggingface_registry import HuggingFaceSearchHit
+    from app.services import hf_latest_cache
+
+    calls = {"n": 0}
+
+    async def fake_search_hits(self, query, *, limit=100, sort="createdAt", direction=-1, tags=None, client=None):
+        calls["n"] += 1
+        return [
+            HuggingFaceSearchHit(
+                repo="miner/albedo-qwen3.6-35b-test",
+                created_at=datetime(2026, 7, 10, tzinfo=timezone.utc),
+            ),
+        ]
+
+    monkeypatch.setattr(
+        "app.services.huggingface_latest_service.HuggingFaceRegistryClient.search_models_hits",
+        fake_search_hits,
+    )
+    hf_latest_cache._store.clear()
+
+    asyncio.run(fetch_latest_huggingface_repos(limit=5, force_refresh=True))
+    asyncio.run(fetch_latest_huggingface_repos(limit=5, force_refresh=False))
+    assert calls["n"] == 2
