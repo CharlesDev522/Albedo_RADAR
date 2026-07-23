@@ -458,6 +458,14 @@ def _build_pipeline(state: dict[str, Any] | None) -> list[AlbedoPipelineStage]:
     return result
 
 
+def _account_label(namespace: str | None, repo: str | None, model_name: str) -> str:
+    if namespace:
+        return namespace
+    if repo and "/" in repo:
+        return repo.split("/", 1)[0]
+    return repo or model_name
+
+
 def _build_reign_slot_holders(
     reign_members: list[AlbedoReignMember],
     lookup: MinerLookup | None,
@@ -482,7 +490,7 @@ def _build_reign_slot_holders(
         g["versions"].append(member.king_version)
         g["uid"] = member.uid
         g["hotkey"] = member.hotkey
-        g["label"] = member.repo or f"{member.namespace}/{member.model_name}"
+        g["label"] = _account_label(member.namespace, member.repo, member.model_name)
         g["repo"] = member.repo
         g["coldkey"] = member.coldkey
     rows = [

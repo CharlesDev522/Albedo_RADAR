@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { EntityNameCell } from "@/lib/entityLabels";
+import { EntityNameCell, minerAccountLabel, minerModelSlug } from "@/lib/entityLabels";
 import AlbedoEvalQueueOverviewPanel from "@/components/AlbedoEvalQueueOverview";
 import AlbedoEvalFailsPanel from "@/components/AlbedoEvalFailsPanel";
 import AlbedoScoringDatasetPanel from "@/components/AlbedoScoringDatasetPanel";
@@ -127,6 +127,12 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
 
 function KingTenureCard({ tenure }: { tenure: AlbedoKingTenure }) {
   const active = tenure.is_current_king;
+  const account = minerAccountLabel({
+    namespace: tenure.namespace,
+    repo: tenure.repo,
+    modelName: tenure.model_name,
+  });
+  const modelSlug = minerModelSlug({ modelName: tenure.model_name, repo: tenure.repo });
   const footer = [
     tenure.reign_slots > 1 ? `${tenure.reign_slots} slots` : null,
     tenure.coronation_margin != null ? `crown ${fmtMargin(tenure.coronation_margin)}` : null,
@@ -150,9 +156,14 @@ function KingTenureCard({ tenure }: { tenure: AlbedoKingTenure }) {
             #{tenure.reign_rank ?? "—"} · v{tenure.king_version}
             {active && <span className="text-zinc-300"> · current</span>}
           </p>
-          <h4 className="text-[11px] font-medium text-zinc-100 mt-1 truncate" title={tenure.model_name}>
-            {shortRepo(tenure.model_name, 28)}
+          <h4 className="text-[11px] font-medium text-zinc-100 mt-1 truncate" title={account}>
+            {account}
           </h4>
+          {modelSlug && (
+            <p className="text-[9px] text-zinc-600 mt-0.5 truncate" title={tenure.repo ?? tenure.model_name}>
+              {modelSlug}
+            </p>
+          )}
           <p className="text-[9px] text-zinc-600 mt-0.5 mono truncate">
             uid {tenure.uid} · {shortAddr(tenure.hotkey, 4)}
           </p>
@@ -432,7 +443,8 @@ export default function AlbedoDuelPanel() {
             <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 min-w-[200px]">
               <p className="text-[9px] uppercase tracking-wide text-amber-400/90">Current king</p>
               <p className="text-[11px] font-semibold text-amber-50 mt-0.5">
-                v{king.king_version} · {shortRepo(king.model_name, 30)}
+                v{king.king_version} ·{" "}
+                {minerAccountLabel({ namespace: king.namespace, modelName: king.model_name })}
               </p>
               <p className="text-[9px] text-zinc-500 mt-1">
                 uid {king.uid} · {fmtPct(king.weight_bps / 100)} weight
@@ -505,7 +517,9 @@ export default function AlbedoDuelPanel() {
               {multiSlotHolders.length > 0 && (
                 <p className="text-[9px] text-zinc-500">
                   Multi-slot:{" "}
-                  {multiSlotHolders.map((h) => `${shortRepo(h.label, 16)} (${h.slots_held})`).join(", ")}
+                  {multiSlotHolders
+                    .map((h) => `${minerAccountLabel({ repo: h.repo ?? h.label })} (${h.slots_held})`)
+                    .join(", ")}
                 </p>
               )}
             </div>
@@ -521,7 +535,7 @@ export default function AlbedoDuelPanel() {
             <table className="w-full text-[10px]">
               <thead>
                 <tr className="text-zinc-500 border-b border-zinc-800">
-                  <th className="text-left py-1 pr-2">Miner / model</th>
+                  <th className="text-left py-1 pr-2">Account</th>
                   <th className="text-right py-1 px-1">Slots</th>
                   <th className="text-right py-1 px-1">Weight</th>
                   <th className="text-left py-1 pl-2">Versions in chain</th>
@@ -531,7 +545,7 @@ export default function AlbedoDuelPanel() {
                 {(data.reign_slot_holders ?? []).map((h) => (
                   <tr key={h.key} className="border-b border-zinc-800/50">
                     <td className="py-1 pr-2 text-zinc-300">
-                      {shortRepo(h.label, 32)}
+                      {minerAccountLabel({ repo: h.repo ?? h.label })}
                       <span className="text-zinc-600 ml-1">uid {h.uid}</span>
                     </td>
                     <td className={`text-right py-1 px-1 mono ${h.slots_held > 1 ? "text-sky-300" : "text-zinc-400"}`}>

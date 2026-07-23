@@ -1,5 +1,32 @@
 import { shortAddr, shortRepo, modelLinkFromUri } from "@/lib/api";
 import { hostBadgeLabel, inferRepoHostFromModelUri } from "@/lib/modelHub";
+import { repoOwner } from "@/lib/minerGroups";
+
+/** HF account / namespace (e.g. foremost, jusua) — not the model repo slug. */
+export function minerAccountLabel(opts: {
+  namespace?: string | null;
+  repo?: string | null;
+  modelName?: string | null;
+}): string {
+  if (opts.namespace?.trim()) return opts.namespace.trim();
+  const owner = repoOwner(opts.repo);
+  if (owner) return owner;
+  if (opts.modelName) return shortRepo(opts.modelName, 28);
+  return "—";
+}
+
+/** Secondary model slug for tooltips / subtitles. */
+export function minerModelSlug(opts: {
+  modelName?: string | null;
+  repo?: string | null;
+}): string | null {
+  if (opts.modelName?.trim()) return shortRepo(opts.modelName, 36);
+  if (opts.repo?.trim()) {
+    const slash = opts.repo.indexOf("/");
+    return slash >= 0 ? shortRepo(opts.repo.slice(slash + 1), 36) : shortRepo(opts.repo, 36);
+  }
+  return null;
+}
 
 /** Primary repo name with coldkey hint — matches clusters / backend label format. */
 export function EntityNameCell({

@@ -607,6 +607,8 @@ export interface AlbedoEvalQueueOverview {
 export interface AlbedoReignSlotHolder {
   key: string;
   label: string;
+  repo?: string | null;
+  coldkey?: string | null;
   hotkey: string;
   uid: number;
   slots_held: number;
