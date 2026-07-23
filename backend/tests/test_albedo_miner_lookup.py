@@ -71,7 +71,7 @@ def test_current_commitment_overrides_stale_history():
     assert ident.commit_block == 8_520_000
 
 
-def test_crown_analysis_retains_coldkey_without_active_commitment():
+def test_king_history_retains_coldkey_without_active_commitment():
     lookup = build_historical_miner_lookup(
         commitments=[],
         history=[
@@ -119,11 +119,6 @@ def test_crown_analysis_retains_coldkey_without_active_commitment():
         miner_lookup=lookup,
     )
 
-    analysis = overview.repo_crown_analysis
-    assert analysis.total_repos_crowned == 1
-    assert analysis.total_unique_coldkeys == 1
-    assert analysis.crowns_by_coldkey[0].key == "ck_owner1"
-    assert analysis.crowns_by_coldkey[0].coronations == 1
     assert overview.king_history[0].coldkey == "ck_owner1"
 
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import RepoCrownAnalysisPanel from "@/components/RepoCrownAnalysisPanel";
 import { EntityNameCell } from "@/lib/entityLabels";
 import AlbedoEvalQueueOverviewPanel from "@/components/AlbedoEvalQueueOverview";
 import AlbedoEvalFailsPanel from "@/components/AlbedoEvalFailsPanel";
@@ -517,8 +516,6 @@ export default function AlbedoDuelPanel() {
               </div>
             ))}
           </div>
-
-          <RepoCrownAnalysisPanel analysis={data.repo_crown_analysis} compact />
         </>
       )}
 
@@ -529,11 +526,10 @@ export default function AlbedoDuelPanel() {
 
       {section === "kings" && (
         <>
-          {data.repo_crown_analysis?.voided_king_versions &&
-            data.repo_crown_analysis.voided_king_versions.length > 0 && (
+          {data.voided_king_versions && data.voided_king_versions.length > 0 && (
               <div className="panel px-3 py-2 border-amber-500/20 bg-amber-500/5 text-[10px] text-amber-200">
-                {data.repo_crown_analysis.crown_history_coverage_note ||
-                  `Excluded voided kings: v${data.repo_crown_analysis.voided_king_versions.join(", v")}`}
+                {data.crown_history_coverage_note ||
+                  `Excluded voided kings: v${data.voided_king_versions.join(", v")}`}
               </div>
             )}
           <AlbedoKingReignDatasetPanel kingHistory={data.king_history ?? []} />
@@ -589,8 +585,6 @@ export default function AlbedoDuelPanel() {
               </tbody>
             </table>
           </section>
-
-          <RepoCrownAnalysisPanel analysis={data.repo_crown_analysis} />
 
           <section className="panel px-3 py-2">
             <h3 className="text-[11px] font-semibold text-zinc-200 mb-2">Coronation history (repo / coldkey)</h3>
