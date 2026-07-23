@@ -11,6 +11,7 @@ from app.schemas.albedo_eval_queue import AlbedoEvalQueueOverview
 from app.schemas.albedo_live import AlbedoLiveDuel
 from app.schemas.albedo_merge_advisor import AlbedoMergeAdvisorRecommendation, MergeAdvisorMode
 from app.schemas.albedo_scoring_export import AlbedoScoringExportOverview
+from app.schemas.albedo_scoring_analysis import AlbedoScoringDuelAnalysis
 from app.services.albedo_analysis_service import get_albedo_analysis_overview
 from app.services.albedo_eval_queue_service import get_eval_queue_overview
 from app.services.albedo_live_duel_service import get_live_duel
@@ -18,6 +19,7 @@ from app.services.albedo_merge_advisor_service import get_merge_advisor_recommen
 from app.services.albedo_miner_lookup import load_historical_miner_lookup
 from app.services.albedo_scoring_export_service import (
     export_scoring_results_for_eval,
+    get_scoring_analysis_for_eval,
     get_scoring_export_overview,
 )
 
@@ -138,6 +140,31 @@ async def albedo_scoring_results_overview(
         raise HTTPException(
             status_code=502,
             detail=f"Failed to list scoring-results exports: {exc}",
+        ) from exc
+
+
+@router.get("/scoring-results/analysis", response_model=AlbedoScoringDuelAnalysis)
+async def albedo_scoring_results_analysis(
+    eval_run_id: str = Query(..., min_length=8),
+    subnet: int = Query(default=97, ge=0),
+    fresh: bool = Query(default=False),
+) -> AlbedoScoringDuelAnalysis:
+    """Category and requires breakdown for one duel's scoring-results.jsonl."""
+    if subnet != 97:
+        raise HTTPException(status_code=400, detail="Albedo scoring analysis is only available for SN97")
+    settings = get_settings()
+    try:
+        return await get_scoring_analysis_for_eval(
+            eval_run_id,
+            settings=settings,
+            fresh=fresh,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to analyze scoring-results: {exc}",
         ) from exc
 
 

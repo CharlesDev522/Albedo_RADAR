@@ -11,11 +11,14 @@ from app.config import Settings, get_settings
 from app.integrations.albedo_dashboard import fetch_dashboard
 from app.integrations.albedo_scoring_results import (
     count_scoring_results_lines,
+    fetch_scoring_results_jsonl,
     fetch_scoring_results_text,
     scoring_results_url,
 )
+from app.schemas.albedo_scoring_analysis import AlbedoScoringDuelAnalysis
 from app.schemas.albedo_scoring_export import AlbedoScoringExportDuel, AlbedoScoringExportOverview
 from app.services.albedo_analysis_service import parse_model_uri
+from app.services.albedo_scoring_analysis_service import analyze_scoring_results_category_requires
 
 logger = logging.getLogger(__name__)
 
@@ -151,4 +154,33 @@ async def export_scoring_results_for_eval(
     return ScoringExportPayload(
         content=text.encode("utf-8"),
         filename=_export_filename(eval_run_id),
+    )
+
+
+async def get_scoring_analysis_for_eval(
+    eval_run_id: str,
+    settings: Settings | None = None,
+    *,
+    fresh: bool = False,
+) -> AlbedoScoringDuelAnalysis:
+    settings = settings or get_settings()
+    dashboard = await fetch_dashboard(settings=settings, fresh=fresh)
+    eval_runs = list(dashboard.get("eval_runs") or [])
+    run = _find_eval_run(eval_runs, eval_run_id)
+    if run is None:
+        raise LookupError(f"Eval run not found: {eval_run_id}")
+
+    url = scoring_results_url(run)
+    if not url:
+        raise LookupError(f"No scoring-results artifact for eval run {eval_run_id}")
+
+    rows = await fetch_scoring_results_jsonl(url, settings=settings, fresh=fresh)
+    return analyze_scoring_results_category_requires(
+        rows,
+        eval_run_id=eval_run_id,
+        finished_at=str(run.get("finished_at") or "") or None,
+        challenger_label=_challenger_label(run),
+        king_label=_king_label(run),
+        challenger_won=bool(run.get("challenger_won")),
+        coronated=bool(run.get("coronated")),
     )

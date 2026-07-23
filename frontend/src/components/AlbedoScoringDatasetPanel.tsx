@@ -4,10 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import {
   api,
   shortRepo,
+  type AlbedoScoringDuelAnalysis,
   type AlbedoScoringExportDuel,
   type AlbedoScoringExportOverview,
 } from "@/lib/api";
 import { useSubnet } from "@/lib/useSubnet";
+import AlbedoScoringDuelAnalysisPanel from "@/components/AlbedoScoringDuelAnalysisPanel";
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
@@ -38,6 +40,9 @@ export default function AlbedoScoringDatasetPanel() {
   const [overview, setOverview] = useState<AlbedoScoringExportOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [analysisById, setAnalysisById] = useState<Record<string, AlbedoScoringDuelAnalysis>>({});
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
@@ -73,14 +78,36 @@ export default function AlbedoScoringDatasetPanel() {
     }
   };
 
+  const handleAnalyze = async (evalRunId: string) => {
+    if (expandedId === evalRunId) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(evalRunId);
+    if (analysisById[evalRunId]) return;
+
+    setAnalyzingId(evalRunId);
+    try {
+      const analysis = await api.getAlbedoScoringDuelAnalysis(evalRunId, subnet, false);
+      setAnalysisById((prev) => ({ ...prev, [evalRunId]: analysis }));
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Analysis failed");
+      setExpandedId(null);
+    } finally {
+      setAnalyzingId(null);
+    }
+  };
+
   return (
     <section className="rounded-lg border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5 min-w-0">
       <div className="flex flex-wrap items-start justify-between gap-3 min-w-0">
         <div className="min-w-0 flex-1">
           <h3 className="text-[11px] font-semibold text-cyan-100">Scoring-results dataset</h3>
           <p className="text-[10px] text-zinc-500 mt-0.5 max-w-3xl">
-            Download the raw <code className="text-zinc-400">scoring-results.jsonl</code> artifact for
-            each finished duel. No filtering or transformation — one file per duel.
+            Download raw <code className="text-zinc-400">scoring-results.jsonl</code> per duel, or
+            expand <strong className="text-zinc-400">Analyze</strong> for category / requires
+            breakdown (action=1.5, read=1.0, neutral=0.5 weights).
           </p>
         </div>
         <button
@@ -110,8 +137,8 @@ export default function AlbedoScoringDatasetPanel() {
               No duels with a scoring-results artifact in the recent feed.
             </p>
           ) : (
-            <div className="overflow-x-auto mt-3">
-              <table className="w-full text-[10px] min-w-[720px]">
+            <div className="overflow-x-auto mt-3 space-y-2">
+              <table className="w-full text-[10px] min-w-[780px]">
                 <thead>
                   <tr className="text-zinc-500 border-b border-zinc-800">
                     <th className="text-left py-1 pr-2 font-medium">When</th>
@@ -120,6 +147,7 @@ export default function AlbedoScoringDatasetPanel() {
                     <th className="text-left py-1 pr-2 font-medium">Mode</th>
                     <th className="text-right py-1 px-1 font-medium">Samples</th>
                     <th className="text-left py-1 pr-2 font-medium">Result</th>
+                    <th className="text-right py-1 px-1 font-medium">Analyze</th>
                     <th className="text-right py-1 pl-2 font-medium">Download</th>
                   </tr>
                 </thead>
@@ -140,6 +168,24 @@ export default function AlbedoScoringDatasetPanel() {
                         {duel.scored_sample_count ?? "—"}
                       </td>
                       <td className="py-1 pr-2 text-zinc-400">{resultLabel(duel)}</td>
+                      <td className="py-1 px-1 text-right">
+                        <button
+                          type="button"
+                          onClick={() => void handleAnalyze(duel.eval_run_id)}
+                          disabled={analyzingId === duel.eval_run_id}
+                          className={`rounded border px-2 py-0.5 text-[9px] disabled:opacity-50 ${
+                            expandedId === duel.eval_run_id
+                              ? "border-cyan-500/40 bg-cyan-500/15 text-cyan-200"
+                              : "border-zinc-700 text-zinc-400 hover:bg-zinc-800/80"
+                          }`}
+                        >
+                          {analyzingId === duel.eval_run_id
+                            ? "…"
+                            : expandedId === duel.eval_run_id
+                              ? "Hide"
+                              : "Analyze"}
+                        </button>
+                      </td>
                       <td className="py-1 pl-2 text-right">
                         <button
                           type="button"
@@ -147,13 +193,25 @@ export default function AlbedoScoringDatasetPanel() {
                           disabled={downloadingId === duel.eval_run_id}
                           className="rounded border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
                         >
-                          {downloadingId === duel.eval_run_id ? "…" : duel.export_filename}
+                          {downloadingId === duel.eval_run_id ? "…" : "JSONL"}
                         </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+
+              {overview.duels.map((duel) =>
+                expandedId === duel.eval_run_id ? (
+                  <div key={`analysis-${duel.eval_run_id}`}>
+                    {analyzingId === duel.eval_run_id && !analysisById[duel.eval_run_id] ? (
+                      <p className="text-[10px] text-zinc-500 px-1">Loading category / requires analysis…</p>
+                    ) : analysisById[duel.eval_run_id] ? (
+                      <AlbedoScoringDuelAnalysisPanel analysis={analysisById[duel.eval_run_id]} />
+                    ) : null}
+                  </div>
+                ) : null
+              )}
             </div>
           )}
         </>

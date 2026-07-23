@@ -726,6 +726,33 @@ export interface AlbedoScoringExportOverview {
   duels: AlbedoScoringExportDuel[];
 }
 
+export interface AlbedoScoringBucketRow {
+  key: string;
+  weight_multiplier?: number | null;
+  question_slots: number;
+  challenger_yes_rate: number;
+  king_yes_rate: number;
+  weighted_challenger_score: number;
+  weighted_king_score: number;
+  weighted_margin: number;
+  share_of_abs_weighted_margin_pct: number;
+}
+
+export interface AlbedoScoringDuelAnalysis {
+  eval_run_id: string;
+  finished_at?: string | null;
+  challenger_label: string;
+  king_label?: string | null;
+  challenger_won: boolean;
+  coronated: boolean;
+  total_samples: number;
+  judge_observations: number;
+  question_slots: number;
+  categories: AlbedoScoringBucketRow[];
+  requires: AlbedoScoringBucketRow[];
+  note: string;
+}
+
 export interface AlbedoMergeAdvisorRecommendation {
   subnet: number;
   generated_at?: string | null;
@@ -1040,6 +1067,20 @@ export const api = {
     if (opts.limit != null) params.set("limit", String(opts.limit));
     if (opts.includeLineCounts) params.set("include_line_counts", "true");
     return fetchApi<AlbedoScoringExportOverview>(`/albedo/scoring-results?${params}`, {
+      forceRefresh,
+    });
+  },
+  getAlbedoScoringDuelAnalysis: (
+    evalRunId: string,
+    subnet = DEFAULT_SUBNET,
+    forceRefresh = false
+  ) => {
+    const params = new URLSearchParams({
+      subnet: String(subnet),
+      eval_run_id: evalRunId,
+    });
+    if (forceRefresh) params.set("fresh", "true");
+    return fetchApi<AlbedoScoringDuelAnalysis>(`/albedo/scoring-results/analysis?${params}`, {
       forceRefresh,
     });
   },
