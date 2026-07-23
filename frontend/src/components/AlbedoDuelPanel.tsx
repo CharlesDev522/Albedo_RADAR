@@ -1,13 +1,9 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { EntityNameCell } from "@/lib/entityLabels";
 import AlbedoEvalQueueOverviewPanel from "@/components/AlbedoEvalQueueOverview";
 import AlbedoEvalFailsPanel from "@/components/AlbedoEvalFailsPanel";
-import AlbedoScoringGapsPanel from "@/components/AlbedoScoringGapsPanel";
-import AlbedoDuelQuestionMarginPanel from "@/components/AlbedoDuelQuestionMarginPanel";
-import AlbedoDatasetBuilderPanel from "@/components/AlbedoDatasetBuilderPanel";
-import AlbedoKingReignDatasetPanel from "@/components/AlbedoKingReignDatasetPanel";
 import AlbedoMergeAdvisorPanel from "@/components/AlbedoMergeAdvisorPanel";
 import AlbedoDuelScoreTimeline from "@/components/AlbedoDuelScoreTimeline";
 import {
@@ -84,10 +80,6 @@ function scoringModeClass(mode: string | null | undefined): string {
   if (mode === "glm_categories") return "text-violet-300 border-violet-500/30 bg-violet-500/10";
   if (mode === "mixed") return "text-amber-300 border-amber-500/30 bg-amber-500/10";
   return "text-zinc-400 border-zinc-600 bg-zinc-800/50";
-}
-
-function scoringResultsAvailable(duel: AlbedoDuelSummary): boolean {
-  return Boolean(duel.artifacts?.SCORING_RESULTS ?? duel.artifacts?.scoring_results);
 }
 
 function SectionTabs({
@@ -245,24 +237,16 @@ const JUDGE_COLUMNS = [...DEFAULT_JUDGE_COLUMNS];
 function DuelRow({
   duel,
   judgeOrder,
-  colSpan,
-  scoringExpanded,
-  onToggleScoring,
 }: {
   duel: AlbedoDuelSummary;
   judgeOrder: string[];
-  colSpan: number;
-  scoringExpanded: boolean;
-  onToggleScoring: () => void;
 }) {
   const won = duel.challenger_won;
   const votes = judgeVoteMap(duel);
   const req = duel.required_win_margin;
   const marginBelowBar =
     req != null && duel.win_margin > 0 && duel.win_margin < req && !won;
-  const hasScoring = scoringResultsAvailable(duel);
   return (
-    <Fragment>
     <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
       <td className="py-1.5 pr-2 text-zinc-500 whitespace-nowrap">
         <div>{fmtTime(duel.finished_at)}</div>
@@ -338,32 +322,8 @@ function DuelRow({
             {duel.judge_errors ? ` · ${duel.judge_errors} judge err` : ""}
           </span>
         )}
-        {hasScoring && (
-          <button
-            type="button"
-            onClick={onToggleScoring}
-            className={`block text-[8px] mt-0.5 hover:underline ${
-              scoringExpanded ? "text-amber-300" : "text-sky-400"
-            }`}
-          >
-            {scoringExpanded ? "hide scoring" : "scoring analysis"}
-          </button>
-        )}
       </td>
     </tr>
-    {scoringExpanded && hasScoring && (
-      <tr className="border-b border-zinc-800/50 bg-zinc-900/30">
-        <td colSpan={colSpan} className="p-0 max-w-0 w-full">
-          <div className="min-w-0 max-w-full overflow-hidden border-l-2 border-amber-500/25 px-2 py-0.5 space-y-3">
-            <AlbedoDuelQuestionMarginPanel evalRunId={duel.eval_run_id} />
-            <div className="border-t border-zinc-800/80 pt-2">
-              <AlbedoScoringGapsPanel evalRunId={duel.eval_run_id} />
-            </div>
-          </div>
-        </td>
-      </tr>
-    )}
-    </Fragment>
   );
 }
 
@@ -376,7 +336,6 @@ export default function AlbedoDuelPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("duels");
-  const [scoringDuelId, setScoringDuelId] = useState<string | null>(null);
 
   const queuePollActive = panelActive && (section === "overview" || section === "dq");
 
@@ -532,8 +491,6 @@ export default function AlbedoDuelPanel() {
                   `Excluded voided kings: v${data.voided_king_versions.join(", v")}`}
               </div>
             )}
-          <AlbedoKingReignDatasetPanel kingHistory={data.king_history ?? []} />
-
           <section className="panel px-3 py-2.5">
             <div className="flex flex-wrap items-end justify-between gap-2 mb-3">
               <div>
@@ -628,12 +585,11 @@ export default function AlbedoDuelPanel() {
 
       {section === "duels" && (
         <section className="panel px-3 py-2">
-          <AlbedoDatasetBuilderPanel />
           <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge duel scores</h3>
           <p className="text-[9px] text-zinc-600 mb-2">
             Finished duels only ({(data.recent_duels ?? []).length} shown, {data.total_duels} total).
             In-progress evals appear in the live duel banner above. Each judge cell: red = picks
-            challenger, green = picks king. Click scoring gaps for dual-zero / dual-one rubric questions.
+            challenger, green = picks king.
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-[10px] min-w-[920px]">
@@ -666,16 +622,7 @@ export default function AlbedoDuelPanel() {
                   </tr>
                 ) : (
                 (data.recent_duels ?? []).map((duel) => (
-                  <DuelRow
-                    key={duel.eval_run_id}
-                    duel={duel}
-                    judgeOrder={judgeOrder}
-                    colSpan={duelColSpan}
-                    scoringExpanded={scoringDuelId === duel.eval_run_id}
-                    onToggleScoring={() =>
-                      setScoringDuelId((prev) => (prev === duel.eval_run_id ? null : duel.eval_run_id))
-                    }
-                  />
+                  <DuelRow key={duel.eval_run_id} duel={duel} judgeOrder={judgeOrder} />
                 ))
                 )}
               </tbody>

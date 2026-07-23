@@ -34,7 +34,6 @@ class AlbedoMergeDonorCandidate(BaseModel):
     global_bt_rank: int | None = None
     coronations: int = 0
     reign_slots: int = 0
-    sample_mass: float | None = None
     judge_reliability: float | None = None
     merge_weight: float
     density: float | None = None
@@ -94,6 +93,5 @@ class AlbedoMergeAdvisorRecommendation(BaseModel):
     data_sources: list[str] = Field(default_factory=list)
     duels_analyzed: int = 0
     binary_duels_analyzed: int = 0
-    sample_mass_duels: int = 0
     judge_consensus_duels: int = 0
     note: str | None = None

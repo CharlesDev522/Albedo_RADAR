@@ -8,11 +8,8 @@ from datetime import datetime, timezone
 from statistics import mean, pstdev
 from typing import Any
 
-import httpx
-
 from app.config import Settings, get_settings
 from app.integrations.albedo_dashboard import fetch_dashboard
-from app.integrations.albedo_scoring_results import fetch_scoring_results_jsonl
 from app.chain_reader.albedo_model_family import infer_albedo_model_family
 from app.schemas.albedo_merge_advisor import (
     AlbedoMergeAdvisorRecommendation,
@@ -28,15 +25,6 @@ from app.services.albedo_analysis_service import (
     _consensus_pattern,
     _judge_votes,
     parse_model_uri,
-)
-from app.services.albedo_scoring_analysis_service import (
-    rubric_score_pct,
-    CHALLENGER_SIDE,
-    KING_SIDE_RAW,
-    _binary_eval_runs,
-    _coronations_from_eval_runs,
-    _king_reign_windows,
-    _scoring_results_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,7 +43,6 @@ _METHOD_PRETTY = {
 _MAX_DONORS = 5
 _DEFAULT_MIN_DONOR_DUELS = 2
 _RECENT_DUELS_LIMIT = 60
-_SAMPLE_MASS_DUEL_LIMIT = 20
 _NARROW_MARGIN = 0.05
 _DOMINANT_DONOR_WEIGHT = 0.70
 
@@ -108,36 +95,40 @@ def _recent_eval_runs(eval_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return runs[:_RECENT_DUELS_LIMIT]
 
 
-def _sample_challenger_win_mass(rows: list[dict[str, Any]]) -> float:
-    """Share of samples where challenger rubric score beats the king (mean across judges)."""
-    if not rows:
-        return 0.0
-    wins = 0
-    total = 0
-    for row in rows:
-        question_ids = [str(q.get("id")) for q in (row.get("questions") or []) if q.get("id")]
-        if not question_ids:
-            continue
-        by_judge: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
-        for entry in row.get("judge_results") or []:
-            judge_model = str(entry.get("judge_model") or "")
-            side = entry.get("side")
-            if judge_model and side in (CHALLENGER_SIDE, KING_SIDE_RAW):
-                by_judge[judge_model][str(side)] = entry
-        margins: list[float] = []
-        for sides in by_judge.values():
-            ch_entry = sides.get(CHALLENGER_SIDE)
-            k_entry = sides.get(KING_SIDE_RAW)
-            if not ch_entry or not k_entry:
-                continue
-            ch_pct = rubric_score_pct(ch_entry.get("answers") or {}, question_ids)
-            k_pct = rubric_score_pct(k_entry.get("answers") or {}, question_ids)
-            margins.append(ch_pct - k_pct)
-        if margins:
-            total += 1
-            if mean(margins) > 0:
-                wins += 1
-    return wins / total if total else 0.0
+def _scoring_results_url(eval_run: dict[str, Any]) -> str | None:
+    artifacts = eval_run.get("artifacts") or {}
+    url = artifacts.get("SCORING_RESULTS") or artifacts.get("scoring_results")
+    return str(url) if url else None
+
+
+def _binary_eval_runs(eval_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        run
+        for run in eval_runs
+        if run.get("scoring_mode") == "binary" and _scoring_results_url(run)
+    ]
+
+
+def _coronations_from_eval_runs(eval_runs: list[dict[str, Any]]) -> list[Any]:
+    from app.services.albedo_king_history import coronation_from_eval_run
+
+    coronations = []
+    for run in eval_runs:
+        cor = coronation_from_eval_run(run, None)
+        if cor:
+            coronations.append(cor)
+    return sorted(coronations, key=lambda c: c.king_version)
+
+
+def _king_reign_windows(
+    coronations: list[Any],
+) -> dict[int, tuple[str, str | None]]:
+    sorted_asc = sorted(coronations, key=lambda c: c.king_version)
+    windows: dict[int, tuple[str, str | None]] = {}
+    for idx, cor in enumerate(sorted_asc):
+        active_until = sorted_asc[idx + 1].finished_at if idx + 1 < len(sorted_asc) else None
+        windows[cor.king_version] = (cor.finished_at, active_until)
+    return windows
 
 
 def bradley_terry_strengths(
@@ -385,48 +376,6 @@ def _donor_eligible(
     return False
 
 
-async def _sample_mass_by_uri(
-    eval_runs: list[dict[str, Any]],
-    *,
-    base_uri: str,
-    settings: Settings,
-    client: httpx.AsyncClient,
-    fresh: bool,
-    limit: int = _SAMPLE_MASS_DUEL_LIMIT,
-) -> tuple[dict[str, float], int]:
-    """Aggregate per-sample challenger win mass from scoring JSONL across duel windows."""
-    binary_runs = _binary_eval_runs(eval_runs)
-    binary_runs.sort(key=lambda r: str(r.get("finished_at") or ""), reverse=True)
-    mass: dict[str, float] = defaultdict(float)
-    counts: dict[str, int] = defaultdict(int)
-    scanned = 0
-    for run in binary_runs[:limit]:
-        ch_uri = _challenger_uri(run)
-        if not ch_uri or ch_uri == base_uri:
-            continue
-        url = _scoring_results_url(run)
-        if not url:
-            continue
-        try:
-            rows = await fetch_scoring_results_jsonl(
-                url, settings=settings, client=client, fresh=fresh
-            )
-        except Exception:
-            logger.warning(
-                "merge advisor sample mass skip eval_run_id=%s", run.get("eval_run_id"), exc_info=True
-            )
-            continue
-        scanned += 1
-        mass_value = _sample_challenger_win_mass(rows)
-        if mass_value > 0 or rows:
-            mass[ch_uri] += mass_value
-            counts[ch_uri] += 1
-    averaged = {
-        uri: mass[uri] / counts[uri] for uri in mass if counts[uri] > 0
-    }
-    return averaged, scanned
-
-
 def _raw_donor_score(
     *,
     bt_strength: float,
@@ -434,22 +383,18 @@ def _raw_donor_score(
     avg_margin: float | None,
     coronations: int,
     reign_slots: int,
-    sample_mass: float | None,
     judge_reliability: float | None,
 ) -> float:
     margin_bonus = 1.0
     if avg_margin is not None:
         margin_bonus += max(0.0, avg_margin) * 2.0
     reign_bonus = 1.0 + 0.15 * coronations + 0.05 * reign_slots
-    sample_factor = 1.0
-    if sample_mass is not None:
-        sample_factor = 0.5 + sample_mass
     reliability = judge_reliability if judge_reliability is not None else 0.75
     # BT is primary; win_pct is a mild tie-breaker (avoids double-counting duel outcomes).
     win_factor = 0.8 + 0.2 * (win_pct / 100.0)
     return max(
         1e-6,
-        bt_strength * win_factor * margin_bonus * reign_bonus * sample_factor * reliability,
+        bt_strength * win_factor * margin_bonus * reign_bonus * reliability,
     )
 
 
@@ -810,8 +755,6 @@ def build_merge_advisor_recommendation(
     king_versions: list[int] | None = None,
     include_past_kings: bool = False,
     min_duels: int = _DEFAULT_MIN_DONOR_DUELS,
-    sample_mass_by_uri: dict[str, float] | None = None,
-    sample_mass_duels: int = 0,
     max_donors: int = _MAX_DONORS,
     consensus_only: bool = False,
     export_all_methods: bool = True,
@@ -872,7 +815,6 @@ def build_merge_advisor_recommendation(
         win_pct = (s["wins"] / duels * 100.0) if duels else 0.0
         avg_margin = mean(s["margins"]) if s["margins"] else None
         judge_rel = mean(s["reliability"]) if s["reliability"] else None
-        sample_mass = (sample_mass_by_uri or {}).get(uri)
         bt_strength = bt.get(uri, 1.0)
         raw = _raw_donor_score(
             bt_strength=bt_strength,
@@ -880,7 +822,6 @@ def build_merge_advisor_recommendation(
             avg_margin=avg_margin,
             coronations=int(s.get("coronations") or 0),
             reign_slots=int(s.get("reign_slots") or 0),
-            sample_mass=sample_mass,
             judge_reliability=judge_rel,
         )
         scored.append(
@@ -893,7 +834,6 @@ def build_merge_advisor_recommendation(
                     "avg_margin": avg_margin,
                     "judge_rel": judge_rel,
                     "bt": bt_strength,
-                    "sample_mass": sample_mass,
                 },
             )
         )
@@ -930,7 +870,6 @@ def build_merge_advisor_recommendation(
                 global_bt_rank=bt_rank_by_uri.get(uri),
                 coronations=int(meta.get("coronations") or 0),
                 reign_slots=int(meta.get("reign_slots") or 0),
-                sample_mass=round(float(meta["sample_mass"]), 4) if meta.get("sample_mass") is not None else None,
                 judge_reliability=round(float(meta["judge_rel"]), 3) if meta.get("judge_rel") is not None else None,
                 merge_weight=round(norm_weights.get(uri, 0.0), 4),
                 density=density,
@@ -992,8 +931,6 @@ def build_merge_advisor_recommendation(
         data_sources.append("past coronated kings as donor candidates")
     if consensus_only:
         data_sources.append("judge-consensus duel filter")
-    if sample_mass_by_uri:
-        data_sources.append(f"SCORING_RESULTS sample mass ({sample_mass_duels} duels)")
 
     rationale = [
         f"Base model: current king {_model_label(base_uri, base_repo)} ({base_family or 'unknown family'}).",
@@ -1007,8 +944,6 @@ def build_merge_advisor_recommendation(
             f"({top_donor.historical_duels} historical), sources={src}, BT rank "
             f"{top_donor.global_bt_rank or '—'}, merge weight {top_donor.merge_weight:.2f}."
         )
-    if sample_mass_by_uri:
-        rationale.append("Sample-level SCORING_RESULTS mass refines donor weights toward per-question wins.")
     if arch_warnings:
         rationale.append(arch_warnings[0])
     rationale.extend(method.rationale)
@@ -1038,7 +973,6 @@ def build_merge_advisor_recommendation(
         data_sources=data_sources,
         duels_analyzed=duels_analyzed,
         binary_duels_analyzed=binary_duels,
-        sample_mass_duels=sample_mass_duels,
         judge_consensus_duels=consensus_duels,
         note=(
             "Recommendations are advisory. Donors must share architecture with the king. "
@@ -1056,29 +990,12 @@ async def get_merge_advisor_recommendation(
     king_versions: list[int] | None = None,
     include_past_kings: bool = True,
     min_duels: int = _DEFAULT_MIN_DONOR_DUELS,
-    include_sample_mass: bool = True,
     max_donors: int = _MAX_DONORS,
     consensus_only: bool = False,
     export_all_methods: bool = True,
-    sample_mass_limit: int = _SAMPLE_MASS_DUEL_LIMIT,
 ) -> AlbedoMergeAdvisorRecommendation:
     settings = settings or get_settings()
     dashboard = await fetch_dashboard(settings=settings)
-    sample_mass: dict[str, float] | None = None
-    sample_mass_duels = 0
-    if include_sample_mass:
-        eval_runs = _recent_eval_runs(list(dashboard.get("eval_runs") or []))
-        reign = (dashboard.get("reign") or {}).get("members") or []
-        base_uri = str(reign[0].get("model_uri") or "") if reign else ""
-        async with httpx.AsyncClient(timeout=max(settings.market_http_timeout_seconds, 30.0)) as client:
-            sample_mass, sample_mass_duels = await _sample_mass_by_uri(
-                eval_runs,
-                base_uri=base_uri,
-                settings=settings,
-                client=client,
-                fresh=fresh,
-                limit=sample_mass_limit,
-            )
     return build_merge_advisor_recommendation(
         dashboard,
         subnet=subnet,
@@ -1086,8 +1003,6 @@ async def get_merge_advisor_recommendation(
         king_versions=king_versions,
         include_past_kings=include_past_kings,
         min_duels=min_duels,
-        sample_mass_by_uri=sample_mass,
-        sample_mass_duels=sample_mass_duels,
         max_donors=max_donors,
         consensus_only=consensus_only,
         export_all_methods=export_all_methods,

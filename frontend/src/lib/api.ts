@@ -643,94 +643,6 @@ export interface AlbedoKingTenure {
   defeated_king_version?: number | null;
 }
 
-export type ScoringConsensusPolarity = "zero" | "one";
-
-export interface KingReignDatasetSlice {
-  king_version: number;
-  coronation_at: string;
-  active_until?: string | null;
-  binary_duels_scanned: number;
-  binary_duels_with_dual_zero: number;
-}
-
-export interface AlbedoDatasetBuildSummary {
-  polarity?: ScoringConsensusPolarity;
-  export_filename: string;
-  dedup_script_filename: string;
-  build_mode?: "recent" | "king_reign";
-  king_versions?: number[];
-  king_reign_breakdown?: KingReignDatasetSlice[];
-  min_questions_per_sample?: number;
-  recent_duels_limit: number;
-  binary_duels_total: number;
-  binary_duels_with_scoring: number;
-  binary_duels_scanned: number;
-  binary_duels_with_dual_zero: number;
-  samples_before_dedup: number;
-  unique_samples: number;
-  duplicates_removed: number;
-  samples_skipped_min_questions?: number;
-  total_dual_zero_questions: number;
-}
-
-export interface AlbedoScoringAnalysis {
-  polarity?: ScoringConsensusPolarity;
-  export_filename?: string | null;
-  total_samples: number;
-  samples_with_dual_zeros: number;
-  total_dual_zero_questions: number;
-  samples: AlbedoSampleDualZeros[];
-}
-
-export interface AlbedoSampleDualZeros {
-  sample_id: string;
-  dual_zero_count: number;
-  questions: AlbedoDualZeroQuestion[];
-}
-
-export interface AlbedoDualZeroQuestion {
-  question_id: string;
-  text: string;
-  example_bad?: string | null;
-  challenger_glm?: string | null;
-  challenger_qwen?: string | null;
-  king_glm?: string | null;
-  king_qwen?: string | null;
-}
-
-export interface AlbedoQuestionMarginRow {
-  question_id: string;
-  question_index?: number | null;
-  is_default_q1_20: boolean;
-  text: string;
-  category?: string | null;
-  observations: number;
-  signed_margin_sum: number;
-  abs_margin_sum: number;
-  share_of_abs_margin_pct: number;
-}
-
-export interface AlbedoQuestionMarginBuckets {
-  default_q1_20_abs_sum: number;
-  other_abs_sum: number;
-  default_q1_20_share_pct: number;
-  other_share_pct: number;
-}
-
-export interface AlbedoDuelQuestionMarginAnalysis {
-  eval_run_id: string;
-  export_filename?: string | null;
-  total_samples: number;
-  total_observations: number;
-  questions_per_sample?: number | null;
-  total_abs_margin: number;
-  total_signed_margin: number;
-  avg_margin_pct_per_observation?: number | null;
-  buckets: AlbedoQuestionMarginBuckets;
-  questions: AlbedoQuestionMarginRow[];
-  note: string;
-}
-
 export type MergeAdvisorMode = "current_king" | "multi_king";
 
 export interface AlbedoMergeGlobalBtRow {
@@ -758,7 +670,6 @@ export interface AlbedoMergeDonorCandidate {
   global_bt_rank?: number | null;
   coronations?: number;
   reign_slots?: number;
-  sample_mass?: number | null;
   judge_reliability?: number | null;
   merge_weight: number;
   density?: number | null;
@@ -816,7 +727,6 @@ export interface AlbedoMergeAdvisorRecommendation {
   data_sources: string[];
   duels_analyzed: number;
   binary_duels_analyzed: number;
-  sample_mass_duels: number;
   judge_consensus_duels: number;
   note?: string | null;
 }
@@ -916,7 +826,6 @@ export interface MergeAdvisorOptions {
   kingVersions?: number[];
   includePastKings?: boolean;
   minDuels?: number;
-  includeSampleMass?: boolean;
   consensusOnly?: boolean;
   maxDonors?: number;
   exportAllMethods?: boolean;
@@ -955,7 +864,6 @@ function mergeAdvisorQuery(
     kingVersions = [],
     includePastKings = true,
     minDuels = 2,
-    includeSampleMass = true,
     consensusOnly = false,
     maxDonors = 5,
     exportAllMethods = true,
@@ -968,7 +876,6 @@ function mergeAdvisorQuery(
     includePastKings ? "" : "include_past_kings=false",
     `min_duels=${minDuels}`,
     forceRefresh ? "fresh=true" : "",
-    includeSampleMass ? "" : "include_sample_mass=false",
     consensusOnly ? "consensus_only=true" : "",
     `max_donors=${maxDonors}`,
     exportAllMethods ? "" : "export_all_methods=false",
@@ -1101,197 +1008,6 @@ export const api = {
     ),
   getAlbedoLiveDuel: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
     fetchApi<AlbedoLiveDuel>(`/albedo/live-duel?subnet=${subnet}`, { forceRefresh }),
-  getAlbedoScoringAnalysis: (
-    evalRunId: string,
-    subnet = DEFAULT_SUBNET,
-    forceRefresh = false,
-    polarity: ScoringConsensusPolarity = "zero"
-  ) =>
-    fetchApi<AlbedoScoringAnalysis>(
-      `/albedo/scoring-analysis?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}&polarity=${polarity}`,
-      { forceRefresh }
-    ),
-  getAlbedoQuestionMarginAnalysis: (
-    evalRunId: string,
-    subnet = DEFAULT_SUBNET,
-    forceRefresh = false
-  ) =>
-    fetchApi<AlbedoDuelQuestionMarginAnalysis>(
-      `/albedo/scoring-analysis/question-margins?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}`,
-      { forceRefresh }
-    ),
-  downloadAlbedoScoringExport: async (
-    evalRunId: string,
-    subnet = DEFAULT_SUBNET,
-    filenameHint?: string | null,
-    polarity: ScoringConsensusPolarity = "zero"
-  ) => {
-    const res = await fetch(
-      `${apiBase()}/albedo/scoring-analysis/export?subnet=${subnet}&eval_run_id=${encodeURIComponent(evalRunId)}&polarity=${polarity}`,
-      { cache: "no-store" }
-    );
-    if (!res.ok) {
-      let detail = `Download failed: HTTP ${res.status}`;
-      try {
-        const body = await res.json();
-        if (body && typeof body.detail === "string") detail = body.detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(detail);
-    }
-    const blob = await res.blob();
-    const duelSlug = evalRunId.replace(/-/g, "").slice(0, 8);
-    const fallback = filenameHint ?? `dual-${polarity}-${duelSlug}.jsonl`;
-    const header = res.headers.get("Content-Disposition");
-    const exportHeader = res.headers.get("X-Export-Filename");
-    const match = header?.match(/filename="?([^";\n]+)"?/i);
-    const filename = exportHeader ?? match?.[1] ?? fallback;
-    const objectUrl = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(objectUrl);
-  },
-  getAlbedoDatasetSummary: (
-    subnet = DEFAULT_SUBNET,
-    forceRefresh = false,
-    polarity: ScoringConsensusPolarity = "zero"
-  ) =>
-    fetchApi<AlbedoDatasetBuildSummary>(
-      `/albedo/scoring-dataset/summary?subnet=${subnet}&polarity=${polarity}`,
-      { forceRefresh }
-    ),
-  downloadAlbedoDatasetExport: async (
-    subnet = DEFAULT_SUBNET,
-    forceRefresh = false,
-    polarity: ScoringConsensusPolarity = "zero"
-  ) => {
-    const qs = [
-      `subnet=${subnet}`,
-      `polarity=${polarity}`,
-      forceRefresh ? "fresh=true" : "",
-    ]
-      .filter(Boolean)
-      .join("&");
-    const res = await fetch(`${apiBase()}/albedo/scoring-dataset/export?${qs}`, {
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      let detail = `Download failed: HTTP ${res.status}`;
-      try {
-        const body = await res.json();
-        if (body && typeof body.detail === "string") detail = body.detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(detail);
-    }
-    const blob = await res.blob();
-    const header = res.headers.get("Content-Disposition");
-    const exportHeader = res.headers.get("X-Export-Filename");
-    const match = header?.match(/filename="?([^";\n]+)"?/i);
-    const filename =
-      exportHeader ??
-      match?.[1] ??
-      (polarity === "one" ? "binary-dual-one-dataset.jsonl" : "binary-dual-zero-dataset.jsonl");
-    const objectUrl = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(objectUrl);
-  },
-  getAlbedoKingReignDatasetSummary: (
-    kingVersions: number[],
-    subnet = DEFAULT_SUBNET,
-    forceRefresh = false,
-    polarity: ScoringConsensusPolarity = "zero"
-  ) => {
-    const versions = [...new Set(kingVersions)].filter((v) => v > 0).sort((a, b) => a - b);
-    if (versions.length === 0) {
-      return Promise.reject(new Error("Select at least one king"));
-    }
-    const qs = [
-      `subnet=${subnet}`,
-      `polarity=${polarity}`,
-      `king_versions=${versions.join(",")}`,
-      forceRefresh ? "fresh=true" : "",
-    ]
-      .filter(Boolean)
-      .join("&");
-    return fetchApi<AlbedoDatasetBuildSummary>(`/albedo/scoring-dataset/king-reign/summary?${qs}`, {
-      forceRefresh,
-    });
-  },
-  downloadAlbedoKingReignDatasetExport: async (
-    kingVersions: number[],
-    subnet = DEFAULT_SUBNET,
-    forceRefresh = false,
-    polarity: ScoringConsensusPolarity = "zero"
-  ) => {
-    const versions = [...new Set(kingVersions)].filter((v) => v > 0).sort((a, b) => a - b);
-    if (versions.length === 0) {
-      throw new Error("Select at least one king");
-    }
-    const qs = [
-      `subnet=${subnet}`,
-      `polarity=${polarity}`,
-      `king_versions=${versions.join(",")}`,
-      forceRefresh ? "fresh=true" : "",
-    ]
-      .filter(Boolean)
-      .join("&");
-    const res = await fetch(`${apiBase()}/albedo/scoring-dataset/king-reign/export?${qs}`, {
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      let detail = `Download failed: HTTP ${res.status}`;
-      try {
-        const body = await res.json();
-        if (body && typeof body.detail === "string") detail = body.detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(detail);
-    }
-    const blob = await res.blob();
-    const header = res.headers.get("Content-Disposition");
-    const exportHeader = res.headers.get("X-Export-Filename");
-    const match = header?.match(/filename="?([^";\n]+)"?/i);
-    const suffix = polarity === "one" ? "dual-one" : "dual-zero";
-    const fallback =
-      versions.length === 1
-        ? `binary-${suffix}-king-v${versions[0]}-dataset.jsonl`
-        : `binary-${suffix}-kings-v${versions.join("-")}-dataset.jsonl`;
-    const filename = exportHeader ?? match?.[1] ?? fallback;
-    const objectUrl = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(objectUrl);
-  },
-  downloadAlbedoDatasetDedupScript: async (subnet = DEFAULT_SUBNET) => {
-    const res = await fetch(`${apiBase()}/albedo/scoring-dataset/dedup-script?subnet=${subnet}`, {
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      throw new Error(`Download failed: HTTP ${res.status}`);
-    }
-    const blob = await res.blob();
-    const header = res.headers.get("Content-Disposition");
-    const exportHeader = res.headers.get("X-Export-Filename");
-    const match = header?.match(/filename="?([^";\n]+)"?/i);
-    const filename = exportHeader ?? match?.[1] ?? "dedup_dual_zero_jsonl.py";
-    const objectUrl = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(objectUrl);
-  },
   getAlbedoMergeAdvisorRecommendation: (
     subnet = DEFAULT_SUBNET,
     forceRefresh = false,

@@ -81,7 +81,6 @@ def test_build_merge_advisor_nuslerp_for_single_donor():
 
     rec = build_merge_advisor_recommendation(
         dashboard,
-        sample_mass_by_uri={"org/donor@sha256:2": 0.62},
         min_duels=1,
         mode="current_king",
     )
@@ -93,8 +92,6 @@ def test_build_merge_advisor_nuslerp_for_single_donor():
     assert "merge_method:" in rec.mergekit_yaml
     assert rec.base_mergekit_ref in rec.mergekit_yaml
     assert rec.duels_analyzed == 2
-    assert rec.sample_mass_duels == 0
-    assert rec.donors[0].sample_mass == 0.62
 
 
 def test_nuslerp_yaml_uses_weights_not_base_model():
@@ -169,46 +166,6 @@ def test_ties_yaml_lists_donors_only_with_king_as_base():
     if rec.method.method in ("ties", "dare_ties", "task_arithmetic"):
         assert "base_model: org/king@sha256:1" in rec.mergekit_yaml
         assert rec.mergekit_yaml.count("org/king@sha256:1") == 1
-
-
-def test_sample_challenger_win_mass_from_answers_dict():
-    from app.services.albedo_merge_advisor_service import _sample_challenger_win_mass
-
-    rows = [
-        {
-            "sample_id": "s1",
-            "questions": [{"id": "q_01"}, {"id": "q_02"}],
-            "judge_results": [
-                {
-                    "judge_model": "z-ai/glm-5.1",
-                    "side": "challenger",
-                    "answers": {"q_01": "1", "q_02": "1"},
-                },
-                {
-                    "judge_model": "z-ai/glm-5.1",
-                    "side": "previous_king",
-                    "answers": {"q_01": "0", "q_02": "0"},
-                },
-            ],
-        },
-        {
-            "sample_id": "s2",
-            "questions": [{"id": "q_01"}],
-            "judge_results": [
-                {
-                    "judge_model": "z-ai/glm-5.1",
-                    "side": "challenger",
-                    "answers": {"q_01": "0"},
-                },
-                {
-                    "judge_model": "z-ai/glm-5.1",
-                    "side": "previous_king",
-                    "answers": {"q_01": "1"},
-                },
-            ],
-        },
-    ]
-    assert _sample_challenger_win_mass(rows) == 0.5
 
 
 def test_build_merge_advisor_ties_for_multiple_donors():

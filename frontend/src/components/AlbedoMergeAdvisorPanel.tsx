@@ -44,17 +44,12 @@ function UsageGuide() {
             <p>
               The panel loads automatically from live SN97 duel data. The <strong className="text-zinc-300">base (king)</strong> is
               always the current reign holder. <strong className="text-zinc-300">Donors</strong> are challengers that performed well
-              against that king (wins, margins, coronations, optional per-question sample mass).
+              against that king (wins, margins, coronations).
             </p>
           </div>
           <div>
-            <p className="text-zinc-300 font-medium mb-0.5">2. Tune the two filters</p>
+            <p className="text-zinc-300 font-medium mb-0.5">2. Tune filters</p>
             <ul className="list-disc list-inside space-y-0.5 ml-0.5">
-              <li>
-                <strong className="text-zinc-300">Sample mass</strong> — fetches recent{" "}
-                <code className="text-zinc-500">SCORING_RESULTS</code> JSONL and weights donors by how often they win
-                individual rubric questions (slower, more precise).
-              </li>
               <li>
                 <strong className="text-zinc-300">Consensus duels only</strong> — ignores split judge panels (e.g. 1–1)
                 when estimating strengths; use when judges disagree a lot.
@@ -68,7 +63,6 @@ function UsageGuide() {
               <li><strong className="text-zinc-300">Weight</strong> — normalized merge share for task-vector methods (TIES / DARE / task arithmetic).</li>
               <li><strong className="text-zinc-300">BT</strong> — Bradley–Terry strength from all pairwise duel outcomes.</li>
               <li><strong className="text-zinc-300">Margin</strong> — average duel win margin vs the king (positive = challenger ahead).</li>
-              <li><strong className="text-zinc-300">Sample</strong> — per-question win rate from scoring JSONL (only when sample mass is on).</li>
               <li><strong className="text-zinc-300">Density</strong> — suggested TIES/DARE sparsity for that donor (higher = bolder task-vector injection).</li>
             </ul>
           </div>
@@ -105,7 +99,7 @@ function UsageGuide() {
           <div>
             <p className="text-zinc-300 font-medium mb-0.5">6. API (optional)</p>
             <p className="font-mono text-[9px] text-zinc-500 break-all">
-              GET /api/v1/albedo/merge-advisor/recommendation?subnet=97&amp;include_sample_mass=true&amp;consensus_only=false
+              GET /api/v1/albedo/merge-advisor/recommendation?subnet=97&amp;consensus_only=false
             </p>
             <p className="font-mono text-[9px] text-zinc-500 break-all mt-0.5">
               GET /api/v1/albedo/merge-advisor/config — same params, returns YAML attachment
@@ -131,7 +125,6 @@ export default function AlbedoMergeAdvisorPanel({
   const [selectedKings, setSelectedKings] = useState<Set<number>>(new Set());
   const [includePastKings, setIncludePastKings] = useState(true);
   const [minDuels, setMinDuels] = useState(2);
-  const [includeSampleMass, setIncludeSampleMass] = useState(true);
   const [consensusOnly, setConsensusOnly] = useState(false);
   const [yamlMethod, setYamlMethod] = useState<string | null>(null);
 
@@ -146,11 +139,10 @@ export default function AlbedoMergeAdvisorPanel({
       kingVersions: mode === "multi_king" ? [...selectedKings].sort((a, b) => a - b) : [],
       includePastKings: mode === "multi_king" ? includePastKings : false,
       minDuels,
-      includeSampleMass,
       consensusOnly,
       exportAllMethods: true,
     }),
-    [mode, selectedKings, includePastKings, minDuels, includeSampleMass, consensusOnly]
+    [mode, selectedKings, includePastKings, minDuels, consensusOnly]
   );
 
   const load = useCallback(
@@ -217,7 +209,7 @@ export default function AlbedoMergeAdvisorPanel({
         <div>
           <h3 className="text-[11px] font-semibold text-zinc-200">Smart merge advisor</h3>
           <p className="text-[9px] text-zinc-600 mt-0.5 max-w-2xl">
-            Builds a mergekit YAML from duel outcomes, reign history, and optional per-sample scoring.
+            Builds a mergekit YAML from duel outcomes and reign history.
             Scroll down on this tab for the full how-to guide.
           </p>
         </div>
@@ -246,15 +238,6 @@ export default function AlbedoMergeAdvisorPanel({
               onChange={(e) => setMinDuels(Math.max(1, Number(e.target.value) || 2))}
               className="w-10 rounded border border-zinc-700 bg-zinc-950 px-1 py-0.5 text-zinc-200"
             />
-          </label>
-          <label className="inline-flex items-center gap-1.5 text-[10px] text-zinc-400">
-            <input
-              type="checkbox"
-              checked={includeSampleMass}
-              onChange={(e) => setIncludeSampleMass(e.target.checked)}
-              className="rounded border-zinc-600"
-            />
-            Sample mass
           </label>
           <label className="inline-flex items-center gap-1.5 text-[10px] text-zinc-400">
             <input
@@ -328,13 +311,12 @@ export default function AlbedoMergeAdvisorPanel({
 
       {rec && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
             <Stat label="Mode" value={rec.mode ?? "current_king"} />
             <Stat label="Method" value={rec.method.pretty_name} />
             <Stat label="Base family" value={rec.base_model_family ?? "—"} />
             <Stat label="Duels analyzed" value={rec.duels_analyzed} />
             <Stat label="Consensus duels" value={rec.judge_consensus_duels} />
-            <Stat label="Sample-mass duels" value={rec.sample_mass_duels} />
             <Stat label="Donors" value={rec.donors.length} />
           </div>
 
@@ -376,7 +358,6 @@ export default function AlbedoMergeAdvisorPanel({
                     <th className="text-right py-1 px-1 font-medium">BT</th>
                     <th className="text-right py-1 px-1 font-medium">Rank</th>
                     <th className="text-right py-1 px-1 font-medium">Margin</th>
-                    <th className="text-right py-1 pl-1 font-medium">Sample</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -400,9 +381,6 @@ export default function AlbedoMergeAdvisorPanel({
                       <td className="text-right py-1 px-1 tabular-nums">{d.bt_strength.toFixed(2)}</td>
                       <td className="text-right py-1 px-1 tabular-nums">{d.global_bt_rank ?? "—"}</td>
                       <td className="text-right py-1 px-1 tabular-nums">{fmtPct(d.avg_margin ?? null)}</td>
-                      <td className="text-right py-1 pl-1 tabular-nums">
-                        {d.sample_mass != null ? `${(d.sample_mass * 100).toFixed(0)}%` : "—"}
-                      </td>
                     </tr>
                   ))}
                 </tbody>
