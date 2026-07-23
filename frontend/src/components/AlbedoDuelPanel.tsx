@@ -586,53 +586,53 @@ export default function AlbedoDuelPanel() {
 
       {section === "duels" && (
         <>
-          <AlbedoScoringDatasetPanel />
-
           <section className="panel px-3 py-2">
             <h3 className="text-[11px] font-semibold text-zinc-200 mb-1">Judge duel scores</h3>
-          <p className="text-[9px] text-zinc-600 mb-2">
-            Finished duels only ({(data.recent_duels ?? []).length} shown, {data.total_duels} total).
-            In-progress evals appear in the live duel banner above. Each judge cell: red = picks
-            challenger, green = picks king.
-          </p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-[10px] min-w-[920px]">
-              <thead>
-                <tr className="text-zinc-500 border-b border-zinc-800">
-                  <th className="text-left py-1 pr-2">When</th>
-                  <th className="text-left py-1 pr-2">Challenger repo</th>
-                  <th className="text-left py-1 pr-2">King</th>
-                  {judgeOrder.map((name) => (
-                    <th key={name} className="text-center py-1 px-1 border-l border-zinc-800/50 text-zinc-400 min-w-[68px]">
-                      <div>{judgeColumnHeader(name)}</div>
-                      <div className="text-[8px] font-normal text-zinc-600">pick / Δ</div>
-                    </th>
-                  ))}
-                  <th className="text-center py-1 px-1 text-zinc-600">σ spread</th>
-                  <th className="text-left py-1 pr-2">Aggregate</th>
-                  <th className="text-left py-1 pr-2">Margin</th>
-                  <th className="text-left py-1 pr-2">Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data.recent_duels ?? []).length === 0 ? (
-                  <tr>
-                    <td colSpan={duelColSpan} className="py-6 text-center text-[10px] text-zinc-500">
-                      No finished duel results in the dashboard feed.
-                      {data.current_eval
-                        ? " A duel may be in progress — check the live banner above."
-                        : " Check API connectivity or Hippius dashboard.json."}
-                    </td>
+            <p className="text-[9px] text-zinc-600 mb-2">
+              Finished duels only ({(data.recent_duels ?? []).length} shown, {data.total_duels} total).
+              In-progress evals appear in the live duel banner above. Each judge cell: red = picks
+              challenger, green = picks king.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[10px] min-w-[920px]">
+                <thead>
+                  <tr className="text-zinc-500 border-b border-zinc-800">
+                    <th className="text-left py-1 pr-2">When</th>
+                    <th className="text-left py-1 pr-2">Challenger repo</th>
+                    <th className="text-left py-1 pr-2">King</th>
+                    {judgeOrder.map((name) => (
+                      <th key={name} className="text-center py-1 px-1 border-l border-zinc-800/50 text-zinc-400 min-w-[68px]">
+                        <div>{judgeColumnHeader(name)}</div>
+                        <div className="text-[8px] font-normal text-zinc-600">pick / Δ</div>
+                      </th>
+                    ))}
+                    <th className="text-center py-1 px-1 text-zinc-600">σ spread</th>
+                    <th className="text-left py-1 pr-2">Aggregate</th>
+                    <th className="text-left py-1 pr-2">Margin</th>
+                    <th className="text-left py-1 pr-2">Result</th>
                   </tr>
-                ) : (
-                (data.recent_duels ?? []).map((duel) => (
-                  <DuelRow key={duel.eval_run_id} duel={duel} judgeOrder={judgeOrder} />
-                ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                </thead>
+                <tbody>
+                  {(data.recent_duels ?? []).length === 0 ? (
+                    <tr>
+                      <td colSpan={duelColSpan} className="py-6 text-center text-[10px] text-zinc-500">
+                        No finished duel results in the dashboard feed.
+                        {data.current_eval
+                          ? " A duel may be in progress — check the live banner above."
+                          : " Check API connectivity or Hippius dashboard.json."}
+                      </td>
+                    </tr>
+                  ) : (
+                    (data.recent_duels ?? []).map((duel) => (
+                      <DuelRow key={duel.eval_run_id} duel={duel} judgeOrder={judgeOrder} />
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <AlbedoScoringDatasetPanel />
         </>
       )}
     </div>
