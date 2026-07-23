@@ -654,6 +654,7 @@ export interface AlbedoScoringFormula {
   observation_margin: string;
   bucket_weighted_margin: string;
   bucket_share: string;
+  slot_pool_margin?: string;
 }
 
 export interface AlbedoScoringOverallSummary {
@@ -665,8 +666,12 @@ export interface AlbedoScoringOverallSummary {
   dashboard_score_king?: number | null;
   dashboard_win_margin?: number | null;
   replicated_valid_samples: number;
+  slot_pooled_challenger_score_pct?: number | null;
+  slot_pooled_king_score_pct?: number | null;
+  slot_pooled_margin_pct?: number | null;
   challenger_win_margin: number;
   jsonl_matches_dashboard: boolean;
+  bucket_margin_matches_duel: boolean;
 }
 
 export interface AlbedoScoringExportDuel {

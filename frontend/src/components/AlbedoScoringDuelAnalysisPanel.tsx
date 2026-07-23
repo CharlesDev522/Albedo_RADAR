@@ -37,6 +37,7 @@ function FormulaBlock({ formula }: { formula: AlbedoScoringFormula }) {
       <p>Duel score: {formula.duel_score}</p>
       <p>Observation margin: {formula.observation_margin}</p>
       <p>Bucket margin: {formula.bucket_weighted_margin}</p>
+      {formula.slot_pool_margin && <p>Slot pool: {formula.slot_pool_margin}</p>}
       <p>Bucket |Δ| share: {formula.bucket_share}</p>
     </div>
   );
@@ -69,12 +70,10 @@ function BucketTable({
             <tr className="text-zinc-500 border-b border-zinc-800">
               <th className="text-left py-1 pr-2 font-medium">Key</th>
               {showWeight && <th className="text-right py-1 px-1 font-medium">Weight</th>}
-              <th className="text-right py-1 px-1 font-medium">Slots</th>
-              <th className="text-right py-1 px-1 font-medium">Ch yes%</th>
-              <th className="text-right py-1 px-1 font-medium">King yes%</th>
-              <th className="text-right py-1 px-1 font-medium">Wtd ch</th>
-              <th className="text-right py-1 px-1 font-medium">Wtd king</th>
-              <th className="text-right py-1 px-1 font-medium">Wtd margin</th>
+              <th className="text-right py-1 px-1 font-medium">Obs</th>
+              <th className="text-right py-1 px-1 font-medium">Ch avg%</th>
+              <th className="text-right py-1 px-1 font-medium">King avg%</th>
+              <th className="text-right py-1 px-1 font-medium">Avg margin</th>
               <th className="text-right py-1 pl-1 font-medium">|Δ| share</th>
             </tr>
           </thead>
@@ -90,8 +89,6 @@ function BucketTable({
                 <td className="py-1 px-1 text-right tabular-nums">{row.question_slots}</td>
                 <td className="py-1 px-1 text-right tabular-nums">{fmtPct(row.challenger_yes_rate)}</td>
                 <td className="py-1 px-1 text-right tabular-nums">{fmtPct(row.king_yes_rate)}</td>
-                <td className="py-1 px-1 text-right tabular-nums">{fmtPct(row.weighted_challenger_score)}</td>
-                <td className="py-1 px-1 text-right tabular-nums">{fmtPct(row.weighted_king_score)}</td>
                 <td className={`py-1 px-1 text-right tabular-nums ${marginClass(row.weighted_margin)}`}>
                   {row.weighted_margin > 0 ? "+" : ""}
                   {fmtPct(row.weighted_margin)}
@@ -114,6 +111,13 @@ export default function AlbedoScoringDuelAnalysisPanel({
   analysis: AlbedoScoringDuelAnalysis;
 }) {
   const overall = analysis.overall;
+  const slotMargin = overall.slot_pooled_margin_pct;
+  const duelMargin = overall.weighted_margin_pct;
+  const bucketsDisagree =
+    slotMargin != null &&
+    Math.abs(slotMargin - duelMargin) > 2 &&
+    (slotMargin > 0) !== (duelMargin > 0);
+
   return (
     <div className="mt-2 rounded border border-zinc-800 bg-zinc-950/60 px-2.5 py-2 space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
@@ -181,6 +185,16 @@ export default function AlbedoScoringDuelAnalysisPanel({
           </p>
         </div>
       </div>
+
+      {bucketsDisagree && (
+        <p className="text-[9px] text-amber-300/90 border border-amber-500/20 rounded px-2 py-1.5 bg-amber-500/5">
+          Category/requires rows can disagree with the duel total: buckets average judge×sample
+          observations (size excluded), while dashboard scores mean per-sample side scores with size
+          multipliers. Slot-pooled margin {slotMargin! > 0 ? "+" : ""}
+          {fmtPct(slotMargin!)} vs duel {duelMargin > 0 ? "+" : ""}
+          {fmtPct(duelMargin)}.
+        </p>
+      )}
 
       <FormulaBlock formula={analysis.formula} />
       <BucketTable title="By category" rows={analysis.categories} />

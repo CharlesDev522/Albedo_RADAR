@@ -19,9 +19,14 @@ class AlbedoScoringFormula(BaseModel):
     duel_score: str = "Mean of per-sample side scores across scored samples (matches dashboard.json)."
     observation_margin: str = "challenger_side_score − king_side_score per sample (0..1 scale)."
     bucket_weighted_margin: str = (
-        "Non-size question slots only: (Σ challenger×weight − Σ king×weight) / Σ weight"
+        "Per judge×sample observation: weighted yes-rate on questions in the bucket "
+        "(size excluded), then averaged equally across observations."
     )
-    bucket_share: str = "Σ|challenger−king|×weight in bucket / Σ|challenger−king|×weight overall"
+    bucket_share: str = "Σ|challenger_rate−king_rate| in bucket / Σ|challenger_rate−king_rate| overall"
+    slot_pool_margin: str = (
+        "Legacy slot-pooled view: each question slot weighted by requires; can disagree with "
+        "duel score when samples have different question counts or size multipliers apply."
+    )
 
 
 class AlbedoScoringOverallSummary(BaseModel):
@@ -33,8 +38,12 @@ class AlbedoScoringOverallSummary(BaseModel):
     dashboard_score_king: float | None = None
     dashboard_win_margin: float | None = None
     replicated_valid_samples: int = 0
+    slot_pooled_challenger_score_pct: float | None = None
+    slot_pooled_king_score_pct: float | None = None
+    slot_pooled_margin_pct: float | None = None
     challenger_win_margin: float = 0.03
     jsonl_matches_dashboard: bool = False
+    bucket_margin_matches_duel: bool = False
 
 
 class AlbedoScoringBucketRow(BaseModel):
@@ -65,6 +74,7 @@ class AlbedoScoringDuelAnalysis(BaseModel):
     categories: list[AlbedoScoringBucketRow] = Field(default_factory=list)
     requires: list[AlbedoScoringBucketRow] = Field(default_factory=list)
     note: str = (
-        "Replicated scores use the Albedo validator rubric (action=2.0, read=0.75, neutral=0.25, "
-        "size multiplier). Dashboard scores should match when the full scoring-results artifact is present."
+        "Duel scores replicate dashboard.json (mean per-sample side scores with size multiplier). "
+        "Category/requires rows average judge×sample observations and may still differ from the "
+        "duel total when size questions or cross-bucket composition shift the final mean."
     )
