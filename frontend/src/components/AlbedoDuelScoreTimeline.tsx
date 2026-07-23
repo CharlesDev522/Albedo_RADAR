@@ -5,9 +5,9 @@ import type { AlbedoScoreTimelinePoint } from "@/lib/api";
 
 const HOURS = 24;
 const PAD = { top: 20, right: 12, bottom: 40, left: 48 };
-const MARKER_R = { normal: 2, active: 2.75, crown: 1.5 };
-const FOCUSED_Y_MIN = 0.75;
-const FOCUSED_Y_MAX = 1.0;
+const FOCUSED_Y_MIN = 0.3;
+const FOCUSED_Y_MAX = 0.75;
+const HOVER_MARKER_R = 1.25;
 
 type YScaleMode = "focused" | "full";
 
@@ -81,22 +81,20 @@ function computeYDomain(scores: number[], mode: YScaleMode): { min: number; max:
 
   const dataMin = Math.min(...scores);
   const dataMax = Math.max(...scores);
-  const padding = 0.012;
+  const padding = 0.015;
 
-  let min = Math.max(0.5, dataMin - padding);
-  let max = Math.min(1.0, dataMax + padding);
+  let min = Math.max(FOCUSED_Y_MIN, dataMin - padding);
+  let max = Math.min(FOCUSED_Y_MAX, dataMax + padding);
 
-  const minSpan = 0.04;
+  const minSpan = 0.08;
   if (max - min < minSpan) {
     const mid = (max + min) / 2;
-    min = Math.max(0.5, mid - minSpan / 2);
-    max = Math.min(1.0, mid + minSpan / 2);
+    min = Math.max(FOCUSED_Y_MIN, mid - minSpan / 2);
+    max = Math.min(FOCUSED_Y_MAX, mid + minSpan / 2);
   }
 
-  if (dataMin >= 0.72) {
-    min = Math.max(FOCUSED_Y_MIN, min);
-  }
-  max = Math.min(1.0, Math.max(max, min + minSpan));
+  min = Math.max(FOCUSED_Y_MIN, min);
+  max = Math.min(FOCUSED_Y_MAX, Math.max(max, min + minSpan));
 
   return { min, max };
 }
@@ -285,7 +283,7 @@ export default function AlbedoDuelScoreTimeline({
                     : "text-zinc-500 hover:text-zinc-300 border border-transparent"
                 }`}
               >
-                {mode === "focused" ? "75–100%" : "0–100%"}
+                {mode === "focused" ? "30–75%" : "0–100%"}
               </button>
             ))}
           </div>
@@ -360,7 +358,7 @@ export default function AlbedoDuelScoreTimeline({
           </span>
         )}
         <span className="flex items-center gap-1.5 text-zinc-600">
-          <span className="w-1.5 h-1.5 rounded-full border border-amber-400/60 bg-amber-500/20" />
+          <span className="w-2 h-0 border-t border-amber-400/70" />
           coronation
         </span>
       </div>
@@ -385,6 +383,14 @@ export default function AlbedoDuelScoreTimeline({
               <linearGradient id="timeline-night" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="rgb(24 24 27 / 0.15)" />
                 <stop offset="100%" stopColor="rgb(24 24 27 / 0)" />
+              </linearGradient>
+              <linearGradient id="timeline-ch-fill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgb(251 113 133 / 0.12)" />
+                <stop offset="100%" stopColor="rgb(251 113 133 / 0)" />
+              </linearGradient>
+              <linearGradient id="timeline-k-fill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgb(52 211 153 / 0.1)" />
+                <stop offset="100%" stopColor="rgb(52 211 153 / 0)" />
               </linearGradient>
             </defs>
 
@@ -416,10 +422,10 @@ export default function AlbedoDuelScoreTimeline({
                   y2={tick.y}
                   stroke={
                     Math.abs(tick.value - 0.5) < 0.001
-                      ? "rgb(63 63 70 / 0.55)"
-                      : "rgb(63 63 70 / 0.4)"
+                      ? "rgb(113 113 122 / 0.35)"
+                      : "rgb(63 63 70 / 0.28)"
                   }
-                  strokeDasharray={Math.abs(tick.value - 0.5) < 0.001 ? "4 3" : "2 4"}
+                  strokeDasharray={Math.abs(tick.value - 0.5) < 0.001 ? "4 3" : "2 5"}
                 />
                 <text
                   x={PAD.left - 6}
@@ -469,26 +475,38 @@ export default function AlbedoDuelScoreTimeline({
               </g>
             ))}
 
+            {chart.chartPoints.length > 1 && (
+              <>
+                <path
+                  d={`${polyline(chart.chartPoints, "yCh")} L ${chart.chartPoints[chart.chartPoints.length - 1].x.toFixed(1)} ${PAD.top + chart.plotH} L ${chart.chartPoints[0].x.toFixed(1)} ${PAD.top + chart.plotH} Z`}
+                  fill="url(#timeline-ch-fill)"
+                />
+                <path
+                  d={`${polyline(chart.chartPoints, "yK")} L ${chart.chartPoints[chart.chartPoints.length - 1].x.toFixed(1)} ${PAD.top + chart.plotH} L ${chart.chartPoints[0].x.toFixed(1)} ${PAD.top + chart.plotH} Z`}
+                  fill="url(#timeline-k-fill)"
+                />
+              </>
+            )}
+
             <path
               d={polyline(chart.chartPoints, "yCh")}
               fill="none"
-              stroke="rgb(251 113 133 / 0.85)"
-              strokeWidth="1.5"
+              stroke="rgb(251 113 133 / 0.9)"
+              strokeWidth="1.25"
               strokeLinejoin="round"
               strokeLinecap="round"
             />
             <path
               d={polyline(chart.chartPoints, "yK")}
               fill="none"
-              stroke="rgb(52 211 153 / 0.85)"
-              strokeWidth="1.5"
+              stroke="rgb(52 211 153 / 0.9)"
+              strokeWidth="1.25"
               strokeLinejoin="round"
               strokeLinecap="round"
             />
 
             {chart.chartPoints.map((p) => {
               const isActive = hovered === p.eval_run_id;
-              const r = isActive ? MARKER_R.active : MARKER_R.normal;
               return (
                 <g
                   key={p.eval_run_id}
@@ -496,44 +514,58 @@ export default function AlbedoDuelScoreTimeline({
                   onMouseLeave={() => setHovered(null)}
                   className="cursor-pointer"
                 >
-                  <line
-                    x1={p.x}
-                    y1={p.yCh}
-                    x2={p.x}
-                    y2={p.yK}
-                    stroke="rgb(113 113 122 / 0.3)"
-                    strokeWidth="0.75"
-                  />
-                  <circle
-                    cx={p.x}
-                    cy={p.yCh}
-                    r={r}
-                    fill={p.challenger_won ? "rgb(251 113 133)" : "rgb(39 39 42)"}
-                    stroke="rgb(251 113 133)"
-                    strokeWidth={isActive ? 1.25 : 0.75}
-                  />
-                  <circle
-                    cx={p.x}
-                    cy={p.yK}
-                    r={r}
-                    fill={p.challenger_won ? "rgb(39 39 42)" : "rgb(52 211 153)"}
-                    stroke="rgb(52 211 153)"
-                    strokeWidth={isActive ? 1.25 : 0.75}
-                  />
+                  {isActive && (
+                    <>
+                      <line
+                        x1={p.x}
+                        y1={PAD.top}
+                        x2={p.x}
+                        y2={PAD.top + chart.plotH}
+                        stroke="rgb(161 161 170 / 0.35)"
+                        strokeWidth="1"
+                        strokeDasharray="2 3"
+                      />
+                      <line
+                        x1={p.x}
+                        y1={p.yCh}
+                        x2={p.x}
+                        y2={p.yK}
+                        stroke="rgb(161 161 170 / 0.45)"
+                        strokeWidth="1"
+                      />
+                      <circle
+                        cx={p.x}
+                        cy={p.yCh}
+                        r={HOVER_MARKER_R}
+                        fill="rgb(251 113 133)"
+                        stroke="rgb(24 24 27)"
+                        strokeWidth="0.75"
+                      />
+                      <circle
+                        cx={p.x}
+                        cy={p.yK}
+                        r={HOVER_MARKER_R}
+                        fill="rgb(52 211 153)"
+                        stroke="rgb(24 24 27)"
+                        strokeWidth="0.75"
+                      />
+                    </>
+                  )}
                   {p.coronated && (
-                    <circle
-                      cx={p.x}
-                      cy={Math.min(p.yCh, p.yK) - 5}
-                      r={MARKER_R.crown}
-                      fill="rgb(251 191 36 / 0.9)"
-                      stroke="rgb(251 191 36)"
-                      strokeWidth="0.5"
+                    <line
+                      x1={p.x - 3}
+                      y1={Math.min(p.yCh, p.yK) - 4}
+                      x2={p.x + 3}
+                      y2={Math.min(p.yCh, p.yK) - 4}
+                      stroke="rgb(251 191 36 / 0.85)"
+                      strokeWidth="1.25"
+                      strokeLinecap="round"
                     />
                   )}
                   <rect
-                    x={p.x - 6}
+                    x={p.x - 5}
                     y={PAD.top}
-                    width={12}
+                    width={10}
                     height={chart.plotH}
                     fill="transparent"
                   />
