@@ -28,6 +28,7 @@ from app.db.models import Miner, MinerCommitment, MinerStatus
 from app.db.session import AsyncSessionLocal, engine
 from app.notifications.dispatcher import NotificationDispatcher
 from app.notifications.config_log import log_notification_config
+from app.notifications.preferences import NotificationPreferencesStore
 from app.notifications.startup_gates import hub_probe_gate_satisfied, startup_ready_for_live
 from app.notifications.status import (
     NOTIFICATION_STARTUP_VERSION,
@@ -54,7 +55,11 @@ class CommitmentPoller:
         self.subtensor_client = SubtensorClient(self.settings)
         self._subtensor: AsyncSubtensor | None = None
         self.publisher = EventPublisher(self.settings)
-        self.notifier = NotificationDispatcher(self.settings)
+        self.notification_preferences = NotificationPreferencesStore(self.settings)
+        self.notifier = NotificationDispatcher(
+            self.settings,
+            preferences=self.notification_preferences,
+        )
         self.notification_watcher = NotificationWatcher(
             dispatcher=self.notifier,
             settings=self.settings,
@@ -68,7 +73,10 @@ class CommitmentPoller:
             settings=self.settings,
             dispatcher=self.notifier,
         )
-        self.github_watcher = GithubRepoWatcher(self.settings)
+        self.github_watcher = GithubRepoWatcher(
+            self.settings,
+            preferences=self.notification_preferences,
+        )
         self._running = False
         self._neurons: dict[int, dict[str, dict]] = {}
         self._last_full_scan: dict[int, float] = {}
@@ -102,6 +110,7 @@ class CommitmentPoller:
             self.settings.notification_startup_max_seconds,
         )
         self._collector_started_at = datetime.now(timezone.utc)
+        await self.notification_preferences.load()
         async with AsyncSessionLocal() as session:
             loaded = await self.notifier.hydrate(session)
             await self.notification_watcher.bootstrap(session)
@@ -334,6 +343,10 @@ class CommitmentPoller:
         while self._running:
             now = time.monotonic()
             include_reg_fee = (now - last_reg_fee) >= reg_every
+            try:
+                await self.notification_preferences.refresh()
+            except Exception:
+                logger.debug("notification preferences refresh failed", exc_info=True)
             for netuid in self.settings.dashboard_subnets:
                 try:
                     async with AsyncSessionLocal() as session:

@@ -1009,6 +1009,29 @@ export interface MergeAdvisorOptions {
   exportAllMethods?: boolean;
 }
 
+export interface NotificationKindSetting {
+  enabled: boolean;
+  label: string;
+  default_enabled: boolean;
+}
+
+export interface NotificationKindGroup {
+  id: string;
+  label: string;
+  kinds: string[];
+}
+
+export interface NotificationSettings {
+  notifications_enabled: boolean;
+  env_notifications_enabled: boolean;
+  stored_notifications_enabled: boolean | null;
+  webhook_configured: boolean;
+  slack_channel: string | null;
+  kinds: Record<string, NotificationKindSetting>;
+  groups: NotificationKindGroup[];
+  updated_at: string | null;
+}
+
 function mergeAdvisorQuery(
   subnet: number,
   forceRefresh: boolean,
@@ -1402,6 +1425,31 @@ export const api = {
     anchor.download = filename;
     anchor.click();
     URL.revokeObjectURL(objectUrl);
+  },
+  getNotificationSettings: (forceRefresh = false) =>
+    fetchApi<NotificationSettings>("/notifications/settings", { forceRefresh }),
+  updateNotificationSettings: async (body: {
+    notifications_enabled?: boolean;
+    kinds?: Record<string, boolean>;
+  }) => {
+    const res = await fetch(`${apiBase()}/notifications/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const payload = (await res.json()) as { detail?: string };
+        if (payload.detail) detail = payload.detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail);
+    }
+    invalidateApiCache("/notifications/settings");
+    return res.json() as Promise<NotificationSettings>;
   },
 };
 

@@ -14,6 +14,7 @@ from app.config import Settings, get_settings
 from app.db.models import AlertNotification
 from app.notifications.kinds import SEVERITY, AlertKind
 from app.notifications.messages import AlertContent
+from app.notifications.preferences import NotificationPreferencesStore
 from app.notifications.slack import send_slack_alert
 
 logger = logging.getLogger(__name__)
@@ -22,8 +23,13 @@ logger = logging.getLogger(__name__)
 class NotificationDispatcher:
     """Deduplicated alert dispatch (DB + optional Slack) with startup grace window."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        preferences: NotificationPreferencesStore | None = None,
+    ) -> None:
         self.settings = settings or get_settings()
+        self.preferences = preferences or NotificationPreferencesStore(self.settings)
         self._seen_keys: set[str] = set()
         self._http: httpx.AsyncClient | None = None
         self._live_after: datetime = datetime.now(timezone.utc)
@@ -31,7 +37,10 @@ class NotificationDispatcher:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.settings.notifications_enabled)
+        return self.preferences.notifications_enabled
+
+    def is_kind_enabled(self, kind: AlertKind | str) -> bool:
+        return self.preferences.is_kind_enabled(str(kind))
 
     @property
     def is_live(self) -> bool:
@@ -118,7 +127,7 @@ class NotificationDispatcher:
         subnet: int | None = None,
         severity: str | None = None,
     ) -> bool:
-        if not self.enabled:
+        if not self.enabled or not self.is_kind_enabled(kind):
             return False
 
         if not self._startup_finalized:

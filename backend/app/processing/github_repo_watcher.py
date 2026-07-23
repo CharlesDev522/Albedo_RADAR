@@ -13,13 +13,19 @@ from app.config import Settings, get_settings
 from app.db.models import GithubCommitAlert, GithubRepoWatchState
 from app.integrations.github_client import GithubClient, GithubWatchTarget, parse_github_watch_specs
 from app.notifications.github_slack import format_github_commit_alert, send_github_commit_slack
+from app.notifications.preferences import NotificationPreferencesStore
 
 logger = logging.getLogger(__name__)
 
 
 class GithubRepoWatcher:
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        preferences: NotificationPreferencesStore | None = None,
+    ) -> None:
         self.settings = settings or get_settings()
+        self.preferences = preferences or NotificationPreferencesStore(self.settings)
         self.client = GithubClient(self.settings)
         self._http: httpx.AsyncClient | None = None
         self._seeded: set[str] = set()
@@ -137,7 +143,11 @@ class GithubRepoWatcher:
                     await session.flush()
                     stats["new_commits"] += 1
 
-                    if self.settings.notifications_enabled and self.settings.slack_webhook_url:
+                    if (
+                        self.preferences.notifications_enabled
+                        and self.preferences.is_kind_enabled("github_commit")
+                        and self.settings.slack_webhook_url
+                    ):
                         sent = await send_github_commit_slack(
                             settings=self.settings,
                             target=target,

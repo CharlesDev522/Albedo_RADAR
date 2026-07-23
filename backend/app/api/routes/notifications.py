@@ -8,9 +8,15 @@ from app.config import get_settings
 from app.db.models import AlertNotification
 from app.db.session import get_db
 from app.notifications.eval_snapshot import fetch_eval_notification_snapshot
+from app.notifications.preferences import NotificationPreferencesStore, build_settings_response
 from app.notifications.slack import send_slack_alert
 from app.notifications.status import NOTIFICATION_STARTUP_VERSION, read_notification_status
-from app.schemas.notifications import AlertNotificationList, AlertNotificationResponse
+from app.schemas.notifications import (
+    AlertNotificationList,
+    AlertNotificationResponse,
+    NotificationSettingsResponse,
+    NotificationSettingsUpdate,
+)
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -81,6 +87,42 @@ async def notification_status(db: AsyncSession = Depends(get_db)) -> dict:
             else "Set SLACK_WEBHOOK_URL in .env and restart collector; POST /notifications/test-slack to verify webhook"
         ),
     }
+
+
+@router.get("/settings", response_model=NotificationSettingsResponse)
+async def get_notification_settings() -> NotificationSettingsResponse:
+    """Read Slack notification master toggle and per-kind preferences."""
+    settings = get_settings()
+    store = NotificationPreferencesStore(settings)
+    stored = await store.load()
+    webhook = bool((settings.slack_webhook_url or "").strip())
+    payload = build_settings_response(
+        settings=settings,
+        stored=stored,
+        webhook_configured=webhook,
+    )
+    return NotificationSettingsResponse.model_validate(payload)
+
+
+@router.patch("/settings", response_model=NotificationSettingsResponse)
+async def update_notification_settings(
+    body: NotificationSettingsUpdate,
+) -> NotificationSettingsResponse:
+    """Update Slack notification master toggle and/or per-kind preferences."""
+    settings = get_settings()
+    store = NotificationPreferencesStore(settings)
+    await store.save(
+        notifications_enabled=body.notifications_enabled,
+        kinds=body.kinds,
+    )
+    stored = store.snapshot()
+    webhook = bool((settings.slack_webhook_url or "").strip())
+    payload = build_settings_response(
+        settings=settings,
+        stored=stored,
+        webhook_configured=webhook,
+    )
+    return NotificationSettingsResponse.model_validate(payload)
 
 
 @router.post("/test-slack")

@@ -75,6 +75,21 @@ notifications LIVE from ... — only changes after docker startup are sent
 curl -X POST http://localhost:8000/api/v1/notifications/test-slack
 ```
 
+## Per-kind settings (dashboard)
+
+Use **Notifications** in the MinerWatch header (bell icon) or `GET/PATCH /api/v1/notifications/settings` to toggle Slack alerts per event type.
+
+Defaults (when unset in Redis):
+
+| Kind | Default |
+|------|---------|
+| Eval / duel / crown / reg fee | **on** |
+| `repo_new`, `repo_updated` | **off** |
+| On-chain commit / slot kinds | **off** |
+| `github_commit` | **on** |
+
+`NOTIFICATIONS_ENABLED=false` in `.env` disables everything regardless of dashboard toggles.
+
 ## What notifies after live
 
 | Event | Kind |

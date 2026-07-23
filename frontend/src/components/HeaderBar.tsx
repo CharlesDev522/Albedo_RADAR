@@ -2,6 +2,7 @@
 
 import DashboardTabs from "@/components/DashboardTabs";
 import MarketTicker from "@/components/MarketTicker";
+import NotificationSettingsPanel from "@/components/NotificationSettingsPanel";
 import { DASHBOARD_TABS, getSubnetProfile } from "@/lib/subnets";
 import { useSubnet } from "@/lib/useSubnet";
 
@@ -28,6 +29,7 @@ export default function HeaderBar() {
         </div>
         <div className="flex items-center gap-3 shrink-0 flex-wrap justify-end">
           <MarketTicker />
+          <NotificationSettingsPanel />
           <DashboardTabs />
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-emerald-500/20 bg-emerald-500/5 text-emerald-400 text-[10px]">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />

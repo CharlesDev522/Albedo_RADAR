@@ -119,10 +119,10 @@ async def test_dispatcher_sends_after_startup_finalized():
     with patch("app.notifications.dispatcher.send_slack_alert", new_callable=AsyncMock):
         sent = await dispatcher.notify(
             session,
-            kind="repo_new",
-            title="[repo_new] test/repo",
+            kind="reg_fee_low",
+            title="[reg_fee_low] SN97",
             message="live event",
-            source_key="alert:hub:hippius:test/repo:digest2",
+            source_key="reg_fee_low:sn97:tier_0.55:test",
         )
 
     assert sent is True
