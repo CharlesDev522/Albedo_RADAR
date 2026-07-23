@@ -1,15 +1,43 @@
 "use client";
 
-import type { AlbedoScoringBucketRow, AlbedoScoringDuelAnalysis } from "@/lib/api";
+import type {
+  AlbedoScoringBucketRow,
+  AlbedoScoringDuelAnalysis,
+  AlbedoScoringFormula,
+} from "@/lib/api";
 
 function fmtPct(n: number): string {
   return `${n.toFixed(1)}%`;
+}
+
+function fmtScore01(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return `${(n * 100).toFixed(1)}%`;
 }
 
 function marginClass(n: number): string {
   if (n > 0.5) return "text-rose-300";
   if (n < -0.5) return "text-emerald-300";
   return "text-zinc-300";
+}
+
+function FormulaBlock({ formula }: { formula: AlbedoScoringFormula }) {
+  return (
+    <div className="rounded border border-zinc-800 bg-zinc-950/40 px-2 py-1.5 text-[9px] text-zinc-500 space-y-0.5">
+      <p className="text-zinc-400 font-medium">Calculation</p>
+      <p>
+        Weights:{" "}
+        {Object.entries(formula.requires_weights)
+          .filter(([key]) => key !== "netural")
+          .map(([key, weight]) => `${key}=${weight}`)
+          .join(", ")}
+      </p>
+      <p>Side score: {formula.side_score}</p>
+      <p>Observation margin: {formula.observation_margin}</p>
+      <p>Bucket margin: {formula.bucket_weighted_margin}</p>
+      <p>Bucket |Δ| share: {formula.bucket_share}</p>
+    </div>
+  );
 }
 
 function BucketTable({
@@ -83,6 +111,7 @@ export default function AlbedoScoringDuelAnalysisPanel({
 }: {
   analysis: AlbedoScoringDuelAnalysis;
 }) {
+  const overall = analysis.overall;
   return (
     <div className="mt-2 rounded border border-zinc-800 bg-zinc-950/60 px-2.5 py-2 space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
@@ -109,6 +138,37 @@ export default function AlbedoScoringDuelAnalysisPanel({
         </div>
       </div>
 
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+        <div className="rounded border border-zinc-800 px-2 py-1.5">
+          <p className="text-[9px] text-zinc-500 uppercase mb-1">JSONL weighted overall</p>
+          <p className="text-zinc-300">
+            Challenger {fmtPct(overall.weighted_challenger_score_pct)} · King{" "}
+            {fmtPct(overall.weighted_king_score_pct)} · Margin{" "}
+            <span className={marginClass(overall.weighted_margin_pct)}>
+              {overall.weighted_margin_pct > 0 ? "+" : ""}
+              {fmtPct(overall.weighted_margin_pct)}
+            </span>
+          </p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">
+            Averaged across {overall.observation_count} sample×judge observations
+          </p>
+        </div>
+        <div className="rounded border border-zinc-800 px-2 py-1.5">
+          <p className="text-[9px] text-zinc-500 uppercase mb-1">Dashboard duel scores</p>
+          <p className="text-zinc-300">
+            Challenger {fmtScore01(overall.dashboard_score_challenger)} · King{" "}
+            {fmtScore01(overall.dashboard_score_king)} · Margin{" "}
+            {overall.dashboard_win_margin != null
+              ? fmtScore01(overall.dashboard_win_margin)
+              : "—"}
+          </p>
+          <p className="text-[9px] text-zinc-600 mt-0.5">
+            From dashboard.json (may use validator aggregation, not per-question weights)
+          </p>
+        </div>
+      </div>
+
+      <FormulaBlock formula={analysis.formula} />
       <BucketTable title="By category" rows={analysis.categories} />
       <BucketTable title="By requires" rows={analysis.requires} showWeight />
 

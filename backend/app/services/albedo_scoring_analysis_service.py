@@ -9,6 +9,8 @@ from typing import Any
 from app.schemas.albedo_scoring_analysis import (
     AlbedoScoringBucketRow,
     AlbedoScoringDuelAnalysis,
+    AlbedoScoringFormula,
+    AlbedoScoringOverallSummary,
 )
 
 CHALLENGER_SIDE = "challenger"
@@ -48,6 +50,40 @@ def _answer_is_one(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "1.0", "true", "yes"}
 
 
+def _answer_value(value: Any) -> float:
+    return 1.0 if _answer_is_one(value) else 0.0
+
+
+def weighted_side_score(
+    answers: dict[str, Any],
+    questions: list[dict[str, Any]],
+) -> float:
+    """Weighted yes-rate for one side on one sample×judge observation (0..1)."""
+    weight_sum = 0.0
+    score_sum = 0.0
+    for question in questions:
+        qid = str(question.get("id") or "")
+        if not qid:
+            continue
+        weight = requires_weight(question.get("requires"))
+        weight_sum += weight
+        score_sum += _answer_value(answers.get(qid)) * weight
+    if weight_sum <= 0:
+        return 0.0
+    return score_sum / weight_sum
+
+
+def weighted_observation_margin(
+    challenger_answers: dict[str, Any],
+    king_answers: dict[str, Any],
+    questions: list[dict[str, Any]],
+) -> tuple[float, float, float]:
+    """Return challenger score, king score, and margin in 0..1 scale."""
+    ch = weighted_side_score(challenger_answers, questions)
+    k = weighted_side_score(king_answers, questions)
+    return ch, k, ch - k
+
+
 @dataclass
 class _BucketAccum:
     observations: int = 0
@@ -56,7 +92,6 @@ class _BucketAccum:
     weighted_ch_sum: float = 0.0
     weighted_k_sum: float = 0.0
     weight_sum: float = 0.0
-    signed_margin_weighted_sum: float = 0.0
     abs_margin_weighted_sum: float = 0.0
 
 
@@ -68,6 +103,9 @@ class _AnalysisAccum:
     judge_observations: int = 0
     question_slots: int = 0
     total_abs_margin_weighted: float = 0.0
+    observation_ch_scores: list[float] = field(default_factory=list)
+    observation_k_scores: list[float] = field(default_factory=list)
+    observation_margins: list[float] = field(default_factory=list)
 
 
 def _accumulate_slot(
@@ -76,7 +114,7 @@ def _accumulate_slot(
     challenger_yes: bool,
     king_yes: bool,
     weight: float,
-) -> tuple[float, float]:
+) -> float:
     ch = 1.0 if challenger_yes else 0.0
     k = 1.0 if king_yes else 0.0
     acc.observations += 1
@@ -87,10 +125,9 @@ def _accumulate_slot(
     acc.weighted_ch_sum += ch * weight
     acc.weighted_k_sum += k * weight
     acc.weight_sum += weight
-    signed = (ch - k) * weight
-    acc.signed_margin_weighted_sum += signed
-    acc.abs_margin_weighted_sum += abs(ch - k) * weight
-    return signed, abs(ch - k) * weight
+    abs_margin = abs(ch - k) * weight
+    acc.abs_margin_weighted_sum += abs_margin
+    return abs_margin
 
 
 def _bucket_row(
@@ -121,6 +158,44 @@ def _bucket_row(
     )
 
 
+def _overall_summary(
+    acc: _AnalysisAccum,
+    *,
+    dashboard_run: dict[str, Any] | None = None,
+) -> AlbedoScoringOverallSummary:
+    obs = len(acc.observation_margins)
+    if obs == 0:
+        return AlbedoScoringOverallSummary()
+
+    ch_avg = sum(acc.observation_ch_scores) / obs * 100.0
+    k_avg = sum(acc.observation_k_scores) / obs * 100.0
+    margin_avg = sum(acc.observation_margins) / obs * 100.0
+
+    dashboard_ch = None
+    dashboard_k = None
+    dashboard_margin = None
+    if dashboard_run:
+        raw_ch = dashboard_run.get("score_challenger")
+        raw_k = dashboard_run.get("score_king")
+        raw_margin = dashboard_run.get("win_margin")
+        if raw_ch is not None:
+            dashboard_ch = float(raw_ch)
+        if raw_k is not None:
+            dashboard_k = float(raw_k)
+        if raw_margin is not None:
+            dashboard_margin = float(raw_margin)
+
+    return AlbedoScoringOverallSummary(
+        observation_count=obs,
+        weighted_challenger_score_pct=round(ch_avg, 4),
+        weighted_king_score_pct=round(k_avg, 4),
+        weighted_margin_pct=round(margin_avg, 4),
+        dashboard_score_challenger=dashboard_ch,
+        dashboard_score_king=dashboard_k,
+        dashboard_win_margin=dashboard_margin,
+    )
+
+
 def analyze_scoring_results_category_requires(
     rows: list[dict[str, Any]],
     *,
@@ -130,6 +205,7 @@ def analyze_scoring_results_category_requires(
     king_label: str | None = None,
     challenger_won: bool = False,
     coronated: bool = False,
+    dashboard_run: dict[str, Any] | None = None,
 ) -> AlbedoScoringDuelAnalysis:
     """Aggregate question answers by category and requires for one duel JSONL."""
     acc = _AnalysisAccum()
@@ -140,6 +216,7 @@ def analyze_scoring_results_category_requires(
             continue
         acc.total_samples += 1
         meta_by_id = {str(q["id"]): q for q in questions}
+        question_list = list(meta_by_id.values())
 
         by_judge: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
         for entry in row.get("judge_results") or []:
@@ -159,6 +236,11 @@ def analyze_scoring_results_category_requires(
             k_ans = k.get("answers") or {}
             acc.judge_observations += 1
 
+            ch_score, k_score, margin = weighted_observation_margin(ch_ans, k_ans, question_list)
+            acc.observation_ch_scores.append(ch_score)
+            acc.observation_k_scores.append(k_score)
+            acc.observation_margins.append(margin)
+
             for qid, question in meta_by_id.items():
                 category = normalize_category(question.get("category"))
                 requires = normalize_requires(question.get("requires"))
@@ -167,7 +249,7 @@ def analyze_scoring_results_category_requires(
                 k_yes = _answer_is_one(k_ans.get(qid))
                 acc.question_slots += 1
 
-                _, abs_margin = _accumulate_slot(
+                abs_margin = _accumulate_slot(
                     acc.categories[category],
                     challenger_yes=ch_yes,
                     king_yes=k_yes,
@@ -212,6 +294,8 @@ def analyze_scoring_results_category_requires(
         total_samples=acc.total_samples,
         judge_observations=acc.judge_observations,
         question_slots=acc.question_slots,
+        formula=AlbedoScoringFormula(requires_weights=dict(REQUIRES_WEIGHTS)),
+        overall=_overall_summary(acc, dashboard_run=dashboard_run),
         categories=categories,
         requires=requires,
     )

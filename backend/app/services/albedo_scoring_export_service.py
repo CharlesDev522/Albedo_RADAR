@@ -183,4 +183,5 @@ async def get_scoring_analysis_for_eval(
         king_label=_king_label(run),
         challenger_won=bool(run.get("challenger_won")),
         coronated=bool(run.get("coronated")),
+        dashboard_run=run,
     )

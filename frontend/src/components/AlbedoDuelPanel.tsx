@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { EntityNameCell } from "@/lib/entityLabels";
 import AlbedoEvalQueueOverviewPanel from "@/components/AlbedoEvalQueueOverview";
 import AlbedoEvalFailsPanel from "@/components/AlbedoEvalFailsPanel";
-import AlbedoMergeAdvisorPanel from "@/components/AlbedoMergeAdvisorPanel";
 import AlbedoScoringDatasetPanel from "@/components/AlbedoScoringDatasetPanel";
 import AlbedoDuelScoreTimeline from "@/components/AlbedoDuelScoreTimeline";
 import {
@@ -579,8 +578,6 @@ export default function AlbedoDuelPanel() {
               </table>
             </div>
           </section>
-
-          <AlbedoMergeAdvisorPanel kingHistory={data.king_history ?? []} />
         </>
       )}
 
