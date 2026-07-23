@@ -10,6 +10,7 @@ from typing import Any
 
 from app.config import Settings, get_settings
 from app.integrations.albedo_dashboard import fetch_dashboard
+from app.integrations.albedo_scoring_results import scoring_results_url
 from app.chain_reader.albedo_model_family import infer_albedo_model_family
 from app.schemas.albedo_merge_advisor import (
     AlbedoMergeAdvisorRecommendation,
@@ -95,17 +96,11 @@ def _recent_eval_runs(eval_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return runs[:_RECENT_DUELS_LIMIT]
 
 
-def _scoring_results_url(eval_run: dict[str, Any]) -> str | None:
-    artifacts = eval_run.get("artifacts") or {}
-    url = artifacts.get("SCORING_RESULTS") or artifacts.get("scoring_results")
-    return str(url) if url else None
-
-
 def _binary_eval_runs(eval_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         run
         for run in eval_runs
-        if run.get("scoring_mode") == "binary" and _scoring_results_url(run)
+        if run.get("scoring_mode") == "binary" and scoring_results_url(run)
     ]
 
 

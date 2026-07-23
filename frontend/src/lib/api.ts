@@ -704,6 +704,28 @@ export interface AlbedoMergeMethodYaml {
   yaml: string;
 }
 
+export interface AlbedoScoringExportDuel {
+  eval_run_id: string;
+  finished_at: string;
+  model_uri: string;
+  repo?: string | null;
+  challenger_label: string;
+  king_label?: string | null;
+  challenger_won: boolean;
+  coronated: boolean;
+  scoring_mode?: string | null;
+  scored_sample_count?: number | null;
+  sample_line_count?: number | null;
+  export_filename: string;
+}
+
+export interface AlbedoScoringExportOverview {
+  generated_at: string;
+  duels_total: number;
+  duels_with_scoring: number;
+  duels: AlbedoScoringExportDuel[];
+}
+
 export interface AlbedoMergeAdvisorRecommendation {
   subnet: number;
   generated_at?: string | null;
@@ -1008,6 +1030,54 @@ export const api = {
     ),
   getAlbedoLiveDuel: (subnet = DEFAULT_SUBNET, forceRefresh = false) =>
     fetchApi<AlbedoLiveDuel>(`/albedo/live-duel?subnet=${subnet}`, { forceRefresh }),
+  getAlbedoScoringExportOverview: (
+    subnet = DEFAULT_SUBNET,
+    forceRefresh = false,
+    opts: { limit?: number; includeLineCounts?: boolean } = {}
+  ) => {
+    const params = new URLSearchParams({ subnet: String(subnet) });
+    if (forceRefresh) params.set("fresh", "true");
+    if (opts.limit != null) params.set("limit", String(opts.limit));
+    if (opts.includeLineCounts) params.set("include_line_counts", "true");
+    return fetchApi<AlbedoScoringExportOverview>(`/albedo/scoring-results?${params}`, {
+      forceRefresh,
+    });
+  },
+  downloadAlbedoScoringResults: async (
+    evalRunId: string,
+    subnet = DEFAULT_SUBNET,
+    forceRefresh = false
+  ) => {
+    const params = new URLSearchParams({
+      subnet: String(subnet),
+      eval_run_id: evalRunId,
+    });
+    if (forceRefresh) params.set("fresh", "true");
+    const res = await fetch(`${apiBase()}/albedo/scoring-results/download?${params}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      let detail = `Download failed: HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        if (body && typeof body.detail === "string") detail = body.detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail);
+    }
+    const blob = await res.blob();
+    const header = res.headers.get("Content-Disposition");
+    const exportHeader = res.headers.get("X-Export-Filename");
+    const match = header?.match(/filename="?([^";\n]+)"?/i);
+    const filename = exportHeader ?? match?.[1] ?? `scoring-results-${evalRunId.slice(0, 8)}.jsonl`;
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
+  },
   getAlbedoMergeAdvisorRecommendation: (
     subnet = DEFAULT_SUBNET,
     forceRefresh = false,
