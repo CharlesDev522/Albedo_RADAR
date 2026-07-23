@@ -1,0 +1,18 @@
+{
+  "_comment": "Copy to data/albedo_crown_seed_sn97.json or set ALBEDO_CROWN_SEED_PATH. Hippius only keeps ~200 eval_runs (coronations from ~v13); add v1–v12 here for complete reward totals.",
+  "coronations": [
+    {
+      "king_version": 1,
+      "finished_at": "2026-05-01T12:00:00+00:00",
+      "model_uri": "namespace/model@sha256:REPLACE",
+      "repo": "namespace/model",
+      "coldkey": "5REPLACE",
+      "hotkey": "5REPLACE",
+      "uid": 0,
+      "defeated_king_version": 0,
+      "score_challenger": 0.6,
+      "score_king": 0.4,
+      "win_margin": 0.2
+    }
+  ]
+}

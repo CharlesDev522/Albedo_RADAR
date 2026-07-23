@@ -1,0 +1,133 @@
+# MinerWatch — full stack
+#
+#   cp .env.example .env
+#   # edit .env (GITHUB_REPO_WATCHES, optional GITHUB_TOKEN + SLACK_WEBHOOK_URL)
+#   docker compose up --build -d
+#
+# Dashboard http://localhost:3000 · API http://localhost:8000/health
+# Logs: docker compose logs -f collector api frontend
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: minerwatch
+      POSTGRES_PASSWORD: minerwatch
+      POSTGRES_DB: minerwatch
+    # No host port mapping — api/collector reach postgres via Docker network.
+    # If you need host access (psql/pgAdmin), uncomment and pick a free port:
+    # ports:
+    #   - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minerwatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    # Internal only; uncomment if you need host Redis access:
+    # ports:
+    #   - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
+      REDIS_URL: redis://redis:6379/0
+      BITTENSOR_NETWORK: finney
+      DEFAULT_SUBNET: "97"
+      POLL_INTERVAL_SECONDS: "3"
+      METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
+      FULL_SCAN_INTERVAL_SECONDS: "300"
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000"]'
+      NOTIFICATIONS_ENABLED: "true"
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SLACK_CHANNEL: ${SLACK_CHANNEL:-}
+      SLACK_APP_NAME: "Albedo_Notification"
+      GITHUB_REPO_TRACKING_ENABLED: "true"
+      GITHUB_REPO_WATCHES: '["https://github.com/tony-dendrite/albedo/tree/dev"]'
+      GITHUB_POLL_INTERVAL_SECONDS: "25"
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:8000/health'', timeout=5)"',
+        ]
+      interval: 10s
+      timeout: 8s
+      retries: 6
+      start_period: 40s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  collector:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.collector
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://minerwatch:minerwatch@postgres:5432/minerwatch
+      REDIS_URL: redis://redis:6379/0
+      BITTENSOR_NETWORK: finney
+      DEFAULT_SUBNET: "97"
+      POLL_INTERVAL_SECONDS: "3"
+      METAGRAPH_SYNC_INTERVAL_SECONDS: "60"
+      FULL_SCAN_INTERVAL_SECONDS: "300"
+      SLOT_SCAN_INTERVAL_SECONDS: "8"
+      REPO_TRACK_INTERVAL_SECONDS: "45"
+      GITHUB_REPO_TRACKING_ENABLED: "true"
+      GITHUB_REPO_WATCHES: '["https://github.com/tony-dendrite/albedo/tree/dev"]'
+      GITHUB_POLL_INTERVAL_SECONDS: "25"
+      NOTIFICATIONS_ENABLED: "true"
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SLACK_CHANNEL: ${SLACK_CHANNEL:-}
+      SLACK_APP_NAME: "Albedo_Notification"
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      # Server-side proxy + SSR (Docker network hostname)
+      API_URL: http://api:8000/api/v1
+      INTERNAL_API_PROXY: http://api:8000/api/v1
+      # Browser uses same-origin /api/v1; SSE via Next proxy
+      NEXT_PUBLIC_LIVE_URL: /api/v1/live/stream
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

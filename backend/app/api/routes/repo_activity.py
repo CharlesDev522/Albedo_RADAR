@@ -1,0 +1,238 @@
+"""Hippius + Hugging Face repo tracking and miner activity feed."""
+
+import logging
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import HippiusRepoRevision, HippiusRepoTrack, RepoActivityEvent
+from app.db.session import get_db
+from app.processing.repo_track_builder import RepoTrackBuilder
+from app.schemas.repo_activity import (
+    HippiusLatestResponse,
+    HuggingFaceLatestResponse,
+    HuggingFaceSearchOptionsResponse,
+    HuggingFaceSortOption,
+    RepoActivityEventResponse,
+    RepoActivityOverview,
+    RepoRevisionResponse,
+    RepoTrackEntry,
+)
+from app.services.hippius_latest_service import fetch_latest_hippius_repos
+from app.services.huggingface_latest_service import (
+    fetch_latest_huggingface_repos,
+    huggingface_search_url,
+)
+from app.services.repo_activity_service import merged_repo_tracks
+from app.integrations.huggingface_search_config import (
+    HF_DEFAULT_TAG_OPTIONS,
+    HF_DISCOVERY_QUERIES,
+    HF_SORT_CREATED_AT,
+    HF_SORT_OPTIONS,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/repo-activity", tags=["repo-activity"])
+
+
+def _event_to_response(row: RepoActivityEvent) -> RepoActivityEventResponse:
+    """Coalesce nullable JSON columns so feed serialization never 500s."""
+    return RepoActivityEventResponse(
+        id=row.id,
+        subnet=row.subnet,
+        event_type=row.event_type,
+        repo=row.repo,
+        uid=row.uid,
+        hotkey=row.hotkey,
+        coldkey=row.coldkey,
+        model_family=row.model_family,
+        chain_digest=row.chain_digest,
+        hub_digest=row.hub_digest,
+        previous_digest=row.previous_digest,
+        revision=row.revision,
+        commit_block=row.commit_block,
+        commit_message=row.commit_message,
+        changed_files=row.changed_files or [],
+        detected_at=row.detected_at,
+        meta=row.meta or {},
+    )
+
+
+@router.post("/sync")
+async def sync_repo_activity(
+    subnet: int = Query(default=97, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """On-demand Hippius/HF poll — use when collector has not run yet."""
+    builder = RepoTrackBuilder()
+    stats = await builder.sync_subnet(db, subnet)
+    await builder.prune_stale_tracks(db, subnet)
+    await db.commit()
+    return {"status": "ok", "subnet": subnet, **stats}
+
+
+@router.get("/overview", response_model=RepoActivityOverview)
+async def repo_activity_overview(
+    subnet: int = Query(default=97, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> RepoActivityOverview:
+    merged = await merged_repo_tracks(db, subnet)
+
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    events_24h = (
+        await db.execute(
+            select(RepoActivityEvent).where(
+                RepoActivityEvent.subnet == subnet,
+                RepoActivityEvent.detected_at >= since,
+            )
+        )
+    ).scalars().all()
+
+    last_poll = (
+        await db.execute(
+            select(func.max(HippiusRepoTrack.last_checked_at)).where(
+                HippiusRepoTrack.subnet == subnet
+            )
+        )
+    ).scalar()
+
+    unique_repos = len({t.repo for t in merged})
+
+    return RepoActivityOverview(
+        subnet=subnet,
+        tracked_miners=len(merged),
+        unique_repos=unique_repos,
+        tracked_repos=len(merged),
+        qwen36_35b_repos=sum(1 for t in merged if t.model_family == "qwen3.6-35b"),
+        qwen3_4b_repos=sum(1 for t in merged if t.model_family == "qwen3-4b"),
+        in_sync_count=sum(1 for t in merged if t.digest_in_sync is True),
+        mismatch_count=sum(1 for t in merged if t.digest_in_sync is False),
+        hub_updates_24h=sum(
+            1
+            for e in events_24h
+            if e.event_type in ("hub_manifest_update", "hub_repo_added")
+        ),
+        on_chain_events_24h=sum(1 for e in events_24h if e.event_type == "on_chain_commit"),
+        last_poll_at=last_poll,
+        hippius_count=sum(1 for t in merged if t.repo_host == "hippius"),
+        huggingface_count=sum(1 for t in merged if t.repo_host == "huggingface"),
+        pending_hub_poll=sum(1 for t in merged if t.pending_hub_poll),
+        hub_watch_count=sum(1 for t in merged if t.track_source == "hub_watch"),
+        slot_only_count=sum(1 for t in merged if t.track_source == "slot"),
+        chain_committed_count=sum(
+            1 for t in merged if t.track_source == "commitment" or t.chain_digest
+        ),
+    )
+
+
+@router.get("/repos", response_model=list[RepoTrackEntry])
+async def list_tracked_repos(
+    subnet: int = Query(default=97, ge=0),
+    family: str | None = Query(default=None, description="qwen3.6-35b | qwen3-4b"),
+    in_sync: bool | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[RepoTrackEntry]:
+    return await merged_repo_tracks(db, subnet, family=family, in_sync=in_sync)
+
+
+@router.get("/feed", response_model=list[RepoActivityEventResponse])
+async def repo_activity_feed(
+    subnet: int = Query(default=97, ge=0),
+    family: str | None = Query(default=None),
+    event_type: str | None = Query(default=None),
+    limit: int = Query(default=80, ge=1, le=300),
+    db: AsyncSession = Depends(get_db),
+) -> list[RepoActivityEventResponse]:
+    q = select(RepoActivityEvent).where(RepoActivityEvent.subnet == subnet)
+    if family:
+        q = q.where(RepoActivityEvent.model_family == family)
+    if event_type:
+        q = q.where(RepoActivityEvent.event_type == event_type)
+    q = q.order_by(RepoActivityEvent.detected_at.desc()).limit(limit)
+    rows = (await db.execute(q)).scalars().all()
+    return [_event_to_response(r) for r in rows]
+
+
+@router.get("/repos/{repo:path}/history", response_model=list[RepoRevisionResponse])
+async def repo_revision_history(
+    repo: str,
+    subnet: int = Query(default=97, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> list[RepoRevisionResponse]:
+    q = (
+        select(HippiusRepoRevision)
+        .where(HippiusRepoRevision.subnet == subnet, HippiusRepoRevision.repo == repo)
+        .order_by(HippiusRepoRevision.detected_at.desc())
+        .limit(limit)
+    )
+    rows = (await db.execute(q)).scalars().all()
+    return [RepoRevisionResponse.model_validate(r) for r in rows]
+
+
+@router.get("/huggingface-latest/options", response_model=HuggingFaceSearchOptionsResponse)
+async def huggingface_latest_options() -> HuggingFaceSearchOptionsResponse:
+    """HF Hub sort modes and common Albedo tag filters."""
+    return HuggingFaceSearchOptionsResponse(
+        sort_options=[HuggingFaceSortOption(key=key, label=label) for key, label in HF_SORT_OPTIONS],
+        tag_options=list(HF_DEFAULT_TAG_OPTIONS),
+        default_sort=HF_SORT_CREATED_AT,
+        default_tags=[],
+    )
+
+
+@router.get("/huggingface-latest", response_model=HuggingFaceLatestResponse)
+async def huggingface_latest_repos(
+    limit: int = Query(default=10, ge=1, le=50),
+    sort: str = Query(default=HF_SORT_CREATED_AT),
+    tags: str | None = Query(default=None, description="Comma-separated HF filter tags (AND)"),
+    subnet: int = Query(default=97, ge=0),
+    force_refresh: bool = Query(default=False, alias="force_refresh"),
+    db: AsyncSession = Depends(get_db),
+) -> HuggingFaceLatestResponse:
+    """Live latest Albedo repos from Hugging Face Hub search."""
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    sort_key = sort if sort in {key for key, _ in HF_SORT_OPTIONS} else HF_SORT_CREATED_AT
+    hub_url = huggingface_search_url(query=HF_DISCOVERY_QUERIES[0], sort=sort_key, tags=tag_list)
+    try:
+        tracked = await merged_repo_tracks(db, subnet)
+        total, repos = await fetch_latest_huggingface_repos(
+            limit=limit,
+            sort=sort_key,
+            tags=tag_list,
+            tracked_entries=tracked,
+            force_refresh=force_refresh,
+        )
+        return HuggingFaceLatestResponse(
+            total_indexed=total,
+            repos=repos,
+            sort=sort_key,
+            tags=tag_list,
+            hub_search_url=hub_url,
+        )
+    except Exception as exc:
+        logger.warning("huggingface-latest fetch failed", exc_info=True)
+        return HuggingFaceLatestResponse(
+            total_indexed=0,
+            repos=[],
+            sort=sort_key,
+            tags=tag_list,
+            hub_search_url=hub_url,
+            error=str(exc),
+        )
+
+
+@router.get("/hippius-latest", response_model=HippiusLatestResponse)
+async def hippius_latest_repos(
+    limit: int = Query(default=10, ge=1, le=50),
+) -> HippiusLatestResponse:
+    """Live latest Albedo repos from Hippius Hub index (hub.hippius.com?q=albedo)."""
+    try:
+        total, repos = await fetch_latest_hippius_repos(limit=limit)
+        return HippiusLatestResponse(total_indexed=total, repos=repos)
+    except Exception:
+        logger.warning("hippius-latest fetch failed", exc_info=True)
+        return HippiusLatestResponse(total_indexed=0, repos=[])
