@@ -125,198 +125,65 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-function KingMetric({
-  label,
-  value,
-  hint,
-  tone = "zinc",
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: "amber" | "emerald" | "sky" | "rose" | "zinc";
-}) {
-  const toneClass = {
-    amber: "text-amber-200",
-    emerald: "text-emerald-300",
-    sky: "text-sky-300",
-    rose: "text-rose-300",
-    zinc: "text-zinc-100",
-  }[tone];
-
-  return (
-    <div className="min-w-0 rounded-md border border-zinc-800/80 bg-zinc-950/50 px-2 py-1.5">
-      <p className="text-[8px] uppercase tracking-wide text-zinc-500 truncate">{label}</p>
-      <p className={`text-[11px] font-semibold mt-0.5 tabular-nums ${toneClass}`}>{value}</p>
-      {hint && <p className="text-[8px] text-zinc-600 mt-0.5 truncate">{hint}</p>}
-    </div>
-  );
-}
-
-function kingCardTheme(tenure: AlbedoKingTenure) {
-  if (tenure.is_current_king) {
-    return {
-      shell: "border-amber-400/35 bg-gradient-to-br from-amber-500/14 via-zinc-900/95 to-zinc-950 shadow-[inset_0_1px_0_rgba(251,191,36,0.12)]",
-      stripe: "bg-gradient-to-b from-amber-300 to-amber-600",
-      rank: "border-amber-400/40 bg-amber-500/15 text-amber-100",
-      weight: "text-amber-100",
-      weightSub: "text-amber-300/70",
-    };
-  }
-  if ((tenure.reign_rank ?? 99) === 2) {
-    return {
-      shell: "border-violet-500/25 bg-gradient-to-br from-violet-500/8 via-zinc-900/95 to-zinc-950",
-      stripe: "bg-gradient-to-b from-violet-300 to-violet-600",
-      rank: "border-violet-500/30 bg-violet-500/10 text-violet-200",
-      weight: "text-violet-100",
-      weightSub: "text-violet-300/70",
-    };
-  }
-  if ((tenure.reign_rank ?? 99) === 3) {
-    return {
-      shell: "border-sky-500/20 bg-gradient-to-br from-sky-500/6 via-zinc-900/95 to-zinc-950",
-      stripe: "bg-gradient-to-b from-sky-300 to-sky-600",
-      rank: "border-sky-500/25 bg-sky-500/10 text-sky-200",
-      weight: "text-sky-100",
-      weightSub: "text-sky-300/70",
-    };
-  }
-  return {
-    shell: "border-zinc-800/90 bg-gradient-to-br from-zinc-800/20 via-zinc-900/95 to-zinc-950",
-    stripe: "bg-gradient-to-b from-zinc-500 to-zinc-700",
-    rank: "border-zinc-700 bg-zinc-800/70 text-zinc-300",
-    weight: "text-zinc-100",
-    weightSub: "text-zinc-500",
-  };
-}
-
 function KingTenureCard({ tenure }: { tenure: AlbedoKingTenure }) {
-  const theme = kingCardTheme(tenure);
-  const rank = tenure.reign_rank ?? "—";
-  const defensePct =
-    tenure.attacks_faced > 0
-      ? Math.min(100, Math.max(0, ((tenure.defenses ?? 0) / tenure.attacks_faced) * 100))
-      : null;
-  const weightSlots = Math.max(1, tenure.reign_slots);
-  const slotFillPct = Math.min(100, (weightSlots / 5) * 100);
+  const active = tenure.is_current_king;
+  const footer = [
+    tenure.reign_slots > 1 ? `${tenure.reign_slots} slots` : null,
+    tenure.coronation_margin != null ? `crown ${fmtMargin(tenure.coronation_margin)}` : null,
+    tenure.voided_bridge_hours != null && tenure.voided_bridge_hours > 0
+      ? `bridge ${fmtHours(tenure.voided_bridge_hours)}`
+      : null,
+    tenure.coronation_at ? fmtTime(tenure.coronation_at) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <article className={`relative overflow-hidden rounded-xl border ${theme.shell}`}>
-      <div className={`absolute left-0 top-0 h-full w-1 ${theme.stripe}`} aria-hidden />
-
-      <div className="pl-3 pr-2.5 py-2.5 space-y-2.5">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1">
-              <span
-                className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide ${theme.rank}`}
-              >
-                #{rank}
-              </span>
-              <span className="text-[9px] mono text-zinc-500">v{tenure.king_version}</span>
-              {tenure.is_current_king && (
-                <span className="inline-flex items-center rounded border border-amber-400/45 bg-amber-500/20 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-amber-100">
-                  Active
-                </span>
-              )}
-              {tenure.reign_slots > 1 && (
-                <span className="inline-flex items-center rounded border border-sky-500/35 bg-sky-500/12 px-1.5 py-0.5 text-[8px] text-sky-200">
-                  {tenure.reign_slots} slots
-                </span>
-              )}
-            </div>
-            <h4
-              className="text-[11px] font-semibold text-zinc-50 mt-1 truncate"
-              title={tenure.model_name}
-            >
-              {shortRepo(tenure.model_name, 28)}
-            </h4>
-            <p className="text-[9px] text-zinc-500 mt-0.5 mono truncate">
-              uid {tenure.uid} · {shortAddr(tenure.hotkey, 4)}
-            </p>
-          </div>
-
-          <div className="text-right shrink-0">
-            <p className={`text-[16px] font-bold leading-none tabular-nums ${theme.weight}`}>
-              {fmtPct(tenure.weight_pct)}
-            </p>
-            <p className={`text-[8px] uppercase tracking-wide mt-0.5 ${theme.weightSub}`}>weight</p>
-          </div>
+    <article
+      className={`rounded-lg border px-3 py-2.5 bg-zinc-900/35 ${
+        active ? "border-zinc-600" : "border-zinc-800"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[9px] text-zinc-500 mono">
+            #{tenure.reign_rank ?? "—"} · v{tenure.king_version}
+            {active && <span className="text-zinc-300"> · current</span>}
+          </p>
+          <h4 className="text-[11px] font-medium text-zinc-100 mt-1 truncate" title={tenure.model_name}>
+            {shortRepo(tenure.model_name, 28)}
+          </h4>
+          <p className="text-[9px] text-zinc-600 mt-0.5 mono truncate">
+            uid {tenure.uid} · {shortAddr(tenure.hotkey, 4)}
+          </p>
         </div>
-
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-[8px] text-zinc-500">
-            <span>Reward slots</span>
-            <span className="mono text-zinc-400">
-              {weightSlots}/5 · {fmtPct(tenure.weight_pct)}
-            </span>
-          </div>
-          <div className="h-1 rounded-full bg-zinc-800/90 overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all ${
-                tenure.is_current_king ? "bg-amber-400/85" : "bg-violet-400/70"
-              }`}
-              style={{ width: `${slotFillPct}%` }}
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-1.5">
-          <KingMetric
-            label="Reign"
-            value={fmtHours(tenure.active_tenure_hours)}
-            hint="as #1"
-            tone={tenure.is_current_king ? "amber" : "zinc"}
-          />
-          <KingMetric
-            label="Slot tenure"
-            value={fmtHours(tenure.slot_tenure_hours)}
-            hint="earning"
-            tone="sky"
-          />
-          <KingMetric
-            label="Defenses"
-            value={`${tenure.defenses}/${tenure.attacks_faced}`}
-            hint={tenure.defense_pct != null ? `${fmtPct(tenure.defense_pct)} held` : undefined}
-            tone="emerald"
-          />
-        </div>
-
-        {defensePct != null && tenure.attacks_faced > 0 && (
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-[8px] text-zinc-500">
-              <span>Defense rate</span>
-              <span className="mono text-emerald-300/90">{defensePct.toFixed(0)}%</span>
-            </div>
-            <div className="h-1 rounded-full bg-zinc-800/90 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-emerald-500/75"
-                style={{ width: `${defensePct}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5 border-t border-zinc-800/70">
-          <div className="flex flex-wrap gap-1.5 text-[9px]">
-            {tenure.coronation_margin != null && (
-              <span className="rounded border border-emerald-500/25 bg-emerald-500/8 px-1.5 py-0.5 text-emerald-300 mono">
-                crown {fmtMargin(tenure.coronation_margin)}
-              </span>
-            )}
-            {tenure.voided_bridge_hours != null && tenure.voided_bridge_hours > 0 && (
-              <span className="rounded border border-amber-500/20 bg-amber-500/8 px-1.5 py-0.5 text-amber-300">
-                bridge {fmtHours(tenure.voided_bridge_hours)}
-              </span>
-            )}
-          </div>
-          {tenure.coronation_at && (
-            <span className="text-[8px] text-zinc-600 whitespace-nowrap">
-              {fmtTime(tenure.coronation_at)}
-            </span>
-          )}
+        <div className="text-right shrink-0">
+          <p className="text-[14px] font-semibold text-zinc-100 tabular-nums">{fmtPct(tenure.weight_pct)}</p>
+          <p className="text-[8px] text-zinc-600 uppercase tracking-wide">weight</p>
         </div>
       </div>
+
+      <dl className="grid grid-cols-3 gap-2 mt-3 pt-2 border-t border-zinc-800/80">
+        <div>
+          <dt className="text-[8px] uppercase tracking-wide text-zinc-600">Reign</dt>
+          <dd className="text-[10px] text-zinc-200 mt-0.5 tabular-nums">{fmtHours(tenure.active_tenure_hours)}</dd>
+        </div>
+        <div>
+          <dt className="text-[8px] uppercase tracking-wide text-zinc-600">Slot</dt>
+          <dd className="text-[10px] text-zinc-200 mt-0.5 tabular-nums">{fmtHours(tenure.slot_tenure_hours)}</dd>
+        </div>
+        <div>
+          <dt className="text-[8px] uppercase tracking-wide text-zinc-600">Defense</dt>
+          <dd className="text-[10px] text-zinc-200 mt-0.5 tabular-nums">
+            {tenure.defenses}/{tenure.attacks_faced}
+            {tenure.defense_pct != null && (
+              <span className="block text-[8px] text-zinc-600">{fmtPct(tenure.defense_pct)}</span>
+            )}
+          </dd>
+        </div>
+      </dl>
+
+      {footer && <p className="text-[8px] text-zinc-600 mt-2 truncate">{footer}</p>}
     </article>
   );
 }
@@ -632,19 +499,17 @@ export default function AlbedoDuelPanel() {
               <div>
                 <h3 className="text-[11px] font-semibold text-zinc-200">Latest 5 kings — reward slots</h3>
                 <p className="text-[9px] text-zinc-600 mt-0.5">
-                  Ranked reign chain · 20% weight per slot · tenure and defense at a glance
+                  Active reign, slot tenure, defenses, and weight share (20% per slot)
                 </p>
               </div>
               {multiSlotHolders.length > 0 && (
-                <div className="text-[9px] text-sky-200 border border-sky-500/25 rounded-lg px-2.5 py-1.5 bg-sky-500/8">
-                  <span className="text-sky-300/80 uppercase tracking-wide text-[8px]">Multi-slot</span>
-                  <p className="mt-0.5 text-sky-100">
-                    {multiSlotHolders.map((h) => `${shortRepo(h.label, 16)} (${h.slots_held})`).join(" · ")}
-                  </p>
-                </div>
+                <p className="text-[9px] text-zinc-500">
+                  Multi-slot:{" "}
+                  {multiSlotHolders.map((h) => `${shortRepo(h.label, 16)} (${h.slots_held})`).join(", ")}
+                </p>
               )}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-2">
               {(data.king_tenures ?? []).map((t) => (
                 <KingTenureCard key={t.king_version} tenure={t} />
               ))}
