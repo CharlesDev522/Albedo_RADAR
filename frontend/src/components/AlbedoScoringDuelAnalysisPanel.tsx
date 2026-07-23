@@ -24,15 +24,17 @@ function marginClass(n: number): string {
 function FormulaBlock({ formula }: { formula: AlbedoScoringFormula }) {
   return (
     <div className="rounded border border-zinc-800 bg-zinc-950/40 px-2 py-1.5 text-[9px] text-zinc-500 space-y-0.5">
-      <p className="text-zinc-400 font-medium">Calculation</p>
+      <p className="text-zinc-400 font-medium">Albedo validator rubric</p>
       <p>
         Weights:{" "}
         {Object.entries(formula.requires_weights)
-          .filter(([key]) => key !== "netural")
           .map(([key, weight]) => `${key}=${weight}`)
           .join(", ")}
       </p>
+      <p>Size multiplier floor: {formula.size_factor_floor}</p>
+      <p>Challenger win margin: {formula.challenger_win_margin}</p>
       <p>Side score: {formula.side_score}</p>
+      <p>Duel score: {formula.duel_score}</p>
       <p>Observation margin: {formula.observation_margin}</p>
       <p>Bucket margin: {formula.bucket_weighted_margin}</p>
       <p>Bucket |Δ| share: {formula.bucket_share}</p>
@@ -128,6 +130,10 @@ export default function AlbedoScoringDuelAnalysisPanel({
           <p className="text-zinc-200 font-medium">{analysis.question_slots}</p>
         </div>
         <div>
+          <p className="text-[9px] text-zinc-500 uppercase">Size slots</p>
+          <p className="text-zinc-200 font-medium">{analysis.size_question_slots}</p>
+        </div>
+        <div>
           <p className="text-[9px] text-zinc-500 uppercase">Duel</p>
           <p
             className="text-zinc-400 truncate"
@@ -140,7 +146,7 @@ export default function AlbedoScoringDuelAnalysisPanel({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
         <div className="rounded border border-zinc-800 px-2 py-1.5">
-          <p className="text-[9px] text-zinc-500 uppercase mb-1">JSONL weighted overall</p>
+          <p className="text-[9px] text-zinc-500 uppercase mb-1">Replicated duel scores (JSONL)</p>
           <p className="text-zinc-300">
             Challenger {fmtPct(overall.weighted_challenger_score_pct)} · King{" "}
             {fmtPct(overall.weighted_king_score_pct)} · Margin{" "}
@@ -150,10 +156,16 @@ export default function AlbedoScoringDuelAnalysisPanel({
             </span>
           </p>
           <p className="text-[9px] text-zinc-600 mt-0.5">
-            Averaged across {overall.observation_count} sample×judge observations
+            Mean of per-sample side scores across {overall.replicated_valid_samples} scored samples
           </p>
         </div>
-        <div className="rounded border border-zinc-800 px-2 py-1.5">
+        <div
+          className={`rounded border px-2 py-1.5 ${
+            overall.jsonl_matches_dashboard
+              ? "border-emerald-500/30 bg-emerald-500/5"
+              : "border-zinc-800"
+          }`}
+        >
           <p className="text-[9px] text-zinc-500 uppercase mb-1">Dashboard duel scores</p>
           <p className="text-zinc-300">
             Challenger {fmtScore01(overall.dashboard_score_challenger)} · King{" "}
@@ -163,7 +175,9 @@ export default function AlbedoScoringDuelAnalysisPanel({
               : "—"}
           </p>
           <p className="text-[9px] text-zinc-600 mt-0.5">
-            From dashboard.json (may use validator aggregation, not per-question weights)
+            {overall.jsonl_matches_dashboard
+              ? "Matches replicated JSONL scores"
+              : "From dashboard.json — compare with replicated scores above"}
           </p>
         </div>
       </div>

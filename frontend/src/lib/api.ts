@@ -645,7 +645,10 @@ export interface AlbedoKingTenure {
 
 export interface AlbedoScoringFormula {
   requires_weights: Record<string, number>;
+  size_factor_floor: number;
+  challenger_win_margin: number;
   side_score: string;
+  duel_score: string;
   observation_margin: string;
   bucket_weighted_margin: string;
   bucket_share: string;
@@ -659,6 +662,9 @@ export interface AlbedoScoringOverallSummary {
   dashboard_score_challenger?: number | null;
   dashboard_score_king?: number | null;
   dashboard_win_margin?: number | null;
+  replicated_valid_samples: number;
+  challenger_win_margin: number;
+  jsonl_matches_dashboard: boolean;
 }
 
 export interface AlbedoScoringExportDuel {
@@ -705,6 +711,7 @@ export interface AlbedoScoringDuelAnalysis {
   total_samples: number;
   judge_observations: number;
   question_slots: number;
+  size_question_slots: number;
   formula: AlbedoScoringFormula;
   overall: AlbedoScoringOverallSummary;
   categories: AlbedoScoringBucketRow[];

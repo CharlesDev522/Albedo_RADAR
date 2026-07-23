@@ -107,7 +107,7 @@ export default function AlbedoScoringDatasetPanel() {
           <p className="text-[10px] text-zinc-500 mt-0.5 max-w-3xl">
             Download raw <code className="text-zinc-400">scoring-results.jsonl</code> per duel, or
             expand <strong className="text-zinc-400">Analyze</strong> for category / requires
-            breakdown (action=1.5, read=1.0, neutral=0.5 weights).
+            breakdown (Albedo rubric: action=2.0, read=0.75, neutral=0.25, size multiplier).
           </p>
         </div>
         <button

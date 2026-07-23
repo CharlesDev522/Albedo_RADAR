@@ -7,12 +7,19 @@ from pydantic import BaseModel, Field
 
 class AlbedoScoringFormula(BaseModel):
     requires_weights: dict[str, float] = Field(
-        default_factory=lambda: {"action": 1.5, "read": 1.0, "neutral": 0.5}
+        default_factory=lambda: {"action": 2.0, "read": 0.75, "neutral": 0.25}
     )
-    side_score: str = "sum(answer × requires_weight) / sum(requires_weight) per sample×judge"
-    observation_margin: str = "challenger_side_score − king_side_score (range −1..+1)"
+    size_factor_floor: float = 0.6
+    challenger_win_margin: float = 0.03
+    side_score: str = (
+        "Per judge: weighted mean of 1/0 answers using requires weights; "
+        "size-category questions excluded from the mean and applied as a multiplier "
+        "(floor + (1-floor)×size_yes_rate)."
+    )
+    duel_score: str = "Mean of per-sample side scores across scored samples (matches dashboard.json)."
+    observation_margin: str = "challenger_side_score − king_side_score per sample (0..1 scale)."
     bucket_weighted_margin: str = (
-        "(Σ challenger×weight − Σ king×weight) / Σ weight across question slots in bucket"
+        "Non-size question slots only: (Σ challenger×weight − Σ king×weight) / Σ weight"
     )
     bucket_share: str = "Σ|challenger−king|×weight in bucket / Σ|challenger−king|×weight overall"
 
@@ -25,6 +32,9 @@ class AlbedoScoringOverallSummary(BaseModel):
     dashboard_score_challenger: float | None = None
     dashboard_score_king: float | None = None
     dashboard_win_margin: float | None = None
+    replicated_valid_samples: int = 0
+    challenger_win_margin: float = 0.03
+    jsonl_matches_dashboard: bool = False
 
 
 class AlbedoScoringBucketRow(BaseModel):
@@ -49,11 +59,12 @@ class AlbedoScoringDuelAnalysis(BaseModel):
     total_samples: int = 0
     judge_observations: int = 0
     question_slots: int = 0
+    size_question_slots: int = 0
     formula: AlbedoScoringFormula = Field(default_factory=AlbedoScoringFormula)
     overall: AlbedoScoringOverallSummary = Field(default_factory=AlbedoScoringOverallSummary)
     categories: list[AlbedoScoringBucketRow] = Field(default_factory=list)
     requires: list[AlbedoScoringBucketRow] = Field(default_factory=list)
     note: str = (
-        "Overall scores average per sample×judge weighted side scores. "
-        "Category/requires tables pool question slots with each question weighted by its requires field."
+        "Replicated scores use the Albedo validator rubric (action=2.0, read=0.75, neutral=0.25, "
+        "size multiplier). Dashboard scores should match when the full scoring-results artifact is present."
     )

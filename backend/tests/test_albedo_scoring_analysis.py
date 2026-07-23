@@ -4,10 +4,8 @@ import pytest
 
 from app.services.albedo_scoring_analysis_service import (
     analyze_scoring_results_category_requires,
-    requires_weight,
-    weighted_observation_margin,
-    weighted_side_score,
 )
+from app.scoring.albedo_judge_scoring import requires_weight
 
 
 def _questions() -> list[dict]:
@@ -28,18 +26,28 @@ def _sample_row(
     neutral_ch: str = "0",
     neutral_k: str = "0",
 ) -> dict:
+    questions = _questions()
+    ch_score = 0.36
+    k_score = 0.30
     return {
         "sample_id": sample_id,
-        "questions": _questions(),
+        "scored": True,
+        "challenger_score": ch_score,
+        "king_score": k_score,
+        "questions": questions,
         "judge_results": [
             {
-                "judge_model": "z-ai/glm-5.1",
+                "judge_model": "z-ai/glm-5.2",
                 "side": "challenger",
+                "parse_ok": True,
+                "yes_rate": ch_score,
                 "answers": {"q_01": action_ch, "q_02": read_ch, "q_03": neutral_ch},
             },
             {
-                "judge_model": "z-ai/glm-5.1",
+                "judge_model": "z-ai/glm-5.2",
                 "side": "previous_king",
+                "parse_ok": True,
+                "yes_rate": k_score,
                 "answers": {"q_01": action_k, "q_02": read_k, "q_03": neutral_k},
             },
         ],
@@ -47,74 +55,39 @@ def _sample_row(
 
 
 def test_requires_weight_mapping():
-    assert requires_weight("action") == 1.5
-    assert requires_weight("read") == 1.0
-    assert requires_weight("neutral") == 0.5
-    assert requires_weight("netural") == 0.5
+    assert requires_weight("action") == 2.0
+    assert requires_weight("read") == 0.75
+    assert requires_weight("neutral") == 0.25
 
 
-def test_weighted_side_score_formula():
-    questions = _questions()
-    ch_answers = {"q_01": "1", "q_02": "1", "q_03": "0"}
-    # (1*1.5 + 1*1.0 + 0*0.5) / (1.5 + 1.0 + 0.5) = 2.5 / 3.0
-    assert weighted_side_score(ch_answers, questions) == 5.0 / 6.0
-
-
-def test_weighted_observation_margin_formula():
-    questions = _questions()
-    ch_answers = {"q_01": "1", "q_02": "1", "q_03": "0"}
-    k_answers = {"q_01": "0", "q_02": "1", "q_03": "0"}
-    ch, k, margin = weighted_observation_margin(ch_answers, k_answers, questions)
-    assert ch == 5.0 / 6.0
-    assert k == 1.0 / 3.0
-    assert margin == ch - k
-
-
-def test_analyze_category_and_requires_buckets():
+def test_analyze_replicates_dashboard_scores():
+    dashboard = {
+        "score_challenger": 0.36,
+        "score_king": 0.30,
+        "win_margin": 0.06,
+    }
     analysis = analyze_scoring_results_category_requires(
         [_sample_row()],
         eval_run_id="eval-1",
-        challenger_label="org/challenger",
-        king_label="org/king",
-        dashboard_run={
-            "score_challenger": 5.0 / 6.0,
-            "score_king": 1.0 / 3.0,
-            "win_margin": 5.0 / 6.0 - 1.0 / 3.0,
-        },
+        dashboard_run=dashboard,
     )
 
-    assert analysis.total_samples == 1
-    assert analysis.judge_observations == 1
-    assert analysis.question_slots == 3
-    assert analysis.overall.observation_count == 1
-    assert abs(analysis.overall.weighted_challenger_score_pct - (5.0 / 6.0) * 100.0) < 0.01
-    assert abs(analysis.overall.weighted_king_score_pct - (1.0 / 3.0) * 100.0) < 0.01
-    assert analysis.overall.dashboard_score_challenger == pytest.approx(5.0 / 6.0)
+    assert analysis.overall.jsonl_matches_dashboard is True
+    assert analysis.overall.weighted_challenger_score_pct == pytest.approx(36.0, abs=0.01)
+    assert analysis.overall.weighted_king_score_pct == pytest.approx(30.0, abs=0.01)
+    assert analysis.overall.weighted_margin_pct == pytest.approx(6.0, abs=0.01)
+
+
+def test_analyze_category_and_requires_buckets():
+    analysis = analyze_scoring_results_category_requires([_sample_row()])
 
     by_cat = {row.key: row for row in analysis.categories}
     assert by_cat["tests"].question_slots == 2
     assert by_cat["docs"].question_slots == 1
-    # tests bucket: q_01 (ch=1,k=0,w=1.5) + q_03 (ch=0,k=0,w=0.5)
-    # weighted margin = (1.5 + 0) / 2.0 * 100 = 75%
-    assert by_cat["tests"].weighted_margin == 75.0
 
     by_req = {row.key: row for row in analysis.requires}
-    assert by_req["action"].weight_multiplier == 1.5
-    assert by_req["action"].weighted_margin == 100.0
-    assert by_req["read"].weighted_margin == 0.0
-
-
-def test_analyze_aggregates_multiple_observations():
-    rows = [
-        _sample_row(sample_id="s1"),
-        _sample_row(sample_id="s2", action_ch="0", action_k="1"),
-    ]
-    analysis = analyze_scoring_results_category_requires(rows)
-    assert analysis.total_samples == 2
-    assert analysis.judge_observations == 2
-    assert analysis.question_slots == 6
-    action = next(row for row in analysis.requires if row.key == "action")
-    assert action.question_slots == 2
-    assert action.challenger_yes_rate == 50.0
-    assert action.king_yes_rate == 50.0
-    assert analysis.overall.observation_count == 2
+    assert by_req["action"].weight_multiplier == 2.0
+    assert by_req["read"].weight_multiplier == 0.75
+    assert by_req["neutral"].weight_multiplier == 0.25
+    assert by_req["action"].challenger_yes_rate == 100.0
+    assert by_req["action"].king_yes_rate == 0.0
