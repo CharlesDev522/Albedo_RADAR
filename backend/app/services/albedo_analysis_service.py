@@ -858,7 +858,7 @@ def build_analysis_overview(
         pipeline=_build_pipeline(state),
         miner_lookup_coverage_pct=miner_lookup.coverage_pct if miner_lookup else None,
         note=(
-            "Live duel data from Hippius Albedo dashboard JSON (eval_runs + reign chain)."
+            "Live duel data from albedo.tech dashboard JSON (eval_runs + reign chain)."
             + (
                 f" Binary rubric scoring on {binary_scoring_duels}/{total} recent duels"
                 f" (win bar ≥ {required_win_margin * 100:.0f}% when set)."

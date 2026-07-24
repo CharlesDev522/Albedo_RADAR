@@ -634,7 +634,7 @@ export default function AlbedoDuelPanel() {
                         No finished duel results in the dashboard feed.
                         {data.current_eval
                           ? " A duel may be in progress — check the live banner above."
-                          : " Check API connectivity or Hippius dashboard.json."}
+                          : " Check API connectivity or albedo.tech dashboard.json."}
                       </td>
                     </tr>
                   ) : (

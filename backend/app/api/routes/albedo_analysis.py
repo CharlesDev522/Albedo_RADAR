@@ -1,4 +1,4 @@
-"""Albedo duel and king-of-the-hill analysis from Hippius dashboard JSON."""
+"""Albedo duel and king-of-the-hill analysis from albedo.tech dashboard JSON."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response

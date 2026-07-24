@@ -198,7 +198,7 @@ class AlbedoKingTenure(BaseModel):
 
 class AlbedoAnalysisOverview(BaseModel):
     subnet: int = 97
-    source: str = "hippius_dashboard"
+    source: str = "albedo_dashboard"
     source_url: str
     updated_at: str | None = None
     judge_models: list[str] = Field(default_factory=list)

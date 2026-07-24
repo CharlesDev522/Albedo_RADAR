@@ -492,7 +492,7 @@ class RepoActivityEvent(Base):
 
 
 class AlbedoKingCrownRecord(Base):
-    """Archived king coronations — Hippius dashboard only keeps ~200 recent eval_runs."""
+    """Archived king coronations — albedo.tech dashboard only keeps ~200 recent eval_runs."""
 
     __tablename__ = "albedo_king_crowns"
     __table_args__ = (

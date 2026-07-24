@@ -1,4 +1,4 @@
-"""Fetch Albedo subnet dashboard JSON from Hippius public endpoints."""
+"""Fetch Albedo subnet dashboard JSON from albedo.tech."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ async def fetch_albedo_json(
     live: bool = False,
     fresh: bool = False,
 ) -> dict[str, Any]:
-    """Fetch a JSON document from the Albedo Hippius dashboard mirror."""
+    """Fetch a JSON document from the Albedo dashboard (albedo.tech)."""
     settings = settings or get_settings()
     base = settings.albedo_dashboard_url.rstrip("/")
     url = f"{base}/{path.lstrip('/')}"

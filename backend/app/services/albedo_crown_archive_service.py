@@ -1,4 +1,4 @@
-"""Persist and merge king coronation history beyond Hippius dashboard window."""
+"""Persist and merge king coronation history beyond the albedo.tech dashboard window."""
 
 from __future__ import annotations
 
@@ -242,7 +242,7 @@ async def purge_voided_coronations(
     subnet: int,
     voided_versions: set[int],
 ) -> int:
-    """Remove illegitimate kings that Hippius rolled back from the reign chain."""
+    """Remove illegitimate kings that were rolled back from the reign chain."""
     if not voided_versions:
         return 0
     result = await session.execute(

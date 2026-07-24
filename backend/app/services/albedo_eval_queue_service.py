@@ -1,4 +1,4 @@
-"""Eval wait queue, pipeline stages, and DQ failures from Hippius dashboard + state."""
+"""Eval wait queue, pipeline stages, and DQ failures from albedo.tech dashboard + state."""
 
 from __future__ import annotations
 
@@ -125,7 +125,7 @@ def parse_dashboard_fails(
     lookup: MinerLookup | None = None,
     limit: int = 100,
 ) -> list[AlbedoEvalFail]:
-    """Parse Hippius dashboard fails[] for DQ list and notifications."""
+    """Parse albedo.tech dashboard fails[] for DQ list and notifications."""
     return _parse_fails(dashboard, lookup=lookup, limit=limit)
 
 
@@ -194,7 +194,7 @@ def build_eval_queue_overview(
         fail_counts_by_class=fail_counts,
         queue_length=len(queue),
         fail_count=len(fails),
-        note="Eval queue and pipeline from Hippius dashboard.json + state.json.",
+        note="Eval queue and pipeline from albedo.tech dashboard.json + state.json.",
     )
 
 

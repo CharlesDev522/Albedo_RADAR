@@ -208,7 +208,7 @@ def crown_history_coverage_note(
     missing = missing_crown_versions(merged)
     parts = [
         f"Reward history uses {archived_count} archived coronations (v{earliest}–v{latest}).",
-        f"Hippius dashboard feed only includes {live_count} recent coronations (oldest ~v13).",
+        f"Albedo dashboard feed only includes {live_count} recent coronations (oldest ~v13).",
     ]
     if missing:
         if len(missing) <= 15:
@@ -217,6 +217,6 @@ def crown_history_coverage_note(
         else:
             parts.append(
                 f"Missing v{missing[0]}–v{missing[-1]} ({len(missing)} kings) — "
-                "Hippius dropped them; add data/albedo_crown_seed_sn97.json to fix totals."
+                "Albedo dropped them; add data/albedo_crown_seed_sn97.json to fix totals."
             )
     return " ".join(parts)

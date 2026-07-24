@@ -84,7 +84,7 @@ export default function AlbedoEvalFailsPanel({ data }: { data: AlbedoEvalQueueOv
         <div>
           <h3 className="text-[11px] font-semibold text-zinc-200">Disqualifications & failures</h3>
           <p className="text-[9px] text-zinc-600 mt-0.5">
-            Terminal invalid states from Hippius dashboard · updated {fmtTime(data.updated_at)}
+            Terminal invalid states from albedo.tech dashboard · updated {fmtTime(data.updated_at)}
           </p>
         </div>
         <div className="inline-flex rounded-md border border-zinc-800 bg-zinc-900/60 p-0.5">

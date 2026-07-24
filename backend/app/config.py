@@ -47,8 +47,8 @@ class Settings(BaseSettings):
     market_subnet_cache_seconds: int = 30
     market_http_timeout_seconds: float = 10.0
 
-    # Albedo subnet dashboard (public Hippius JSON mirror)
-    albedo_dashboard_url: str = "https://us-east-1.hippius.com/albedo"
+    # Albedo subnet dashboard (public JSON at albedo.tech)
+    albedo_dashboard_url: str = "https://albedo.tech"
     # Optional JSON file with pre-v13 coronations (v1–v12 etc.) — see data/albedo_crown_seed_sn97.example.json
     albedo_crown_seed_path: str | None = None
 
