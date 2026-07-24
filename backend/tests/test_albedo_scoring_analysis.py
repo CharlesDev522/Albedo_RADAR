@@ -187,6 +187,53 @@ def test_duel_margin_can_differ_from_requires_margin_when_size_hurts_challenger(
     assert body_sum_margin == pytest.approx(requires["_total"].weighted_margin, abs=0.2)
 
 
+def test_analyze_size_row_only_on_requires_not_categories():
+    questions = [
+        {"id": "q_01", "category": "work", "requires": "action"},
+        {"id": "q_sz", "category": "size", "requires": "neutral"},
+    ]
+    row = {
+        "sample_id": "s1",
+        "scored": True,
+        "challenger_score": 0.6,
+        "king_score": 0.6,
+        "questions": questions,
+        "judge_results": [
+            {
+                "judge_model": "j1",
+                "side": "challenger",
+                "parse_ok": True,
+                "yes_rate": 0.6,
+                "answers": {"q_01": "1", "q_sz": "0"},
+            },
+            {
+                "judge_model": "j1",
+                "side": "previous_king",
+                "parse_ok": True,
+                "yes_rate": 0.6,
+                "answers": {"q_01": "1", "q_sz": "0"},
+            },
+        ],
+    }
+    analysis = analyze_scoring_results_category_requires([row])
+
+    requires_keys = {r.key for r in analysis.requires}
+    category_keys = {r.key for r in analysis.categories}
+    assert "size" in requires_keys
+    assert "size" not in category_keys
+
+    size_row = next(r for r in analysis.requires if r.key == "size")
+    assert size_row.weighted_challenger_score == 0.0
+    assert size_row.weighted_king_score == 0.0
+    assert "multiplier" in (size_row.note or "").lower()
+
+    body_sum_ch = sum(
+        r.weighted_challenger_score for r in analysis.requires if r.key not in {"size", "_total"}
+    )
+    assert body_sum_ch == pytest.approx(analysis.requires[-1].weighted_challenger_score, abs=0.1)
+    assert analysis.overall.categories_contrib_matches_duel is True
+
+
 def test_aggregate_decomposed_metric_matches_sample_then_duel_mean():
     per_sample = [[0.8, 0.6], [0.4, 0.2]]
     assert aggregate_decomposed_metric(per_sample) == pytest.approx(0.5, abs=1e-6)

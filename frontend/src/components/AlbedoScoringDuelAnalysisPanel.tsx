@@ -23,6 +23,7 @@ function marginClass(n: number): string {
 
 function rowLabel(key: string): string {
   if (key === "_total") return "Total";
+  if (key === "size") return "size (multiplier)";
   return key;
 }
 
@@ -99,25 +100,31 @@ function BucketTable({
                     </td>
                   )}
                   <td className="py-1 px-1 text-right tabular-nums text-zinc-500">
-                    {isSize ? "×" : fmtPct(row.weight_share_pct)}
+                    {isSize ? "—" : fmtPct(row.weight_share_pct)}
                   </td>
                   <td className="py-1 px-1 text-right tabular-nums">
-                    {isSize ? fmtPct(row.challenger_yes_rate) : fmtPct(row.challenger_yes_rate)}
+                    {fmtPct(row.challenger_yes_rate)}
                   </td>
                   <td className="py-1 px-1 text-right tabular-nums">
                     {fmtPct(row.king_yes_rate)}
                   </td>
-                  <td className="py-1 px-1 text-right tabular-nums">
-                    {fmtPct(row.weighted_challenger_score)}
+                  <td className="py-1 px-1 text-right tabular-nums text-zinc-500">
+                    {isSize ? "—" : fmtPct(row.weighted_challenger_score)}
                   </td>
-                  <td className="py-1 px-1 text-right tabular-nums">
-                    {fmtPct(row.weighted_king_score)}
+                  <td className="py-1 px-1 text-right tabular-nums text-zinc-500">
+                    {isSize ? "—" : fmtPct(row.weighted_king_score)}
                   </td>
                   <td
-                    className={`py-1 pl-1 text-right tabular-nums ${marginClass(row.weighted_margin)}`}
+                    className={`py-1 pl-1 text-right tabular-nums ${
+                      isSize ? "text-zinc-500" : marginClass(row.weighted_margin)
+                    }`}
                   >
-                    {row.weighted_margin > 0 ? "+" : ""}
-                    {fmtPct(row.weighted_margin)}
+                    {isSize ? "—" : (
+                      <>
+                        {row.weighted_margin > 0 ? "+" : ""}
+                        {fmtPct(row.weighted_margin)}
+                      </>
+                    )}
                   </td>
                 </tr>
               );
@@ -198,13 +205,14 @@ export default function AlbedoScoringDuelAnalysisPanel({
           <p className="text-[9px] text-zinc-600 mt-0.5">
             {overall.jsonl_matches_dashboard ? "Matches replicated score" : "Compare with replicated"}
             {overall.requires_contrib_matches_duel && " · requires rows sum to duel total"}
+            {overall.categories_contrib_matches_duel && " · category rows sum to duel total"}
           </p>
         </div>
       </div>
 
       <FormulaBlock formula={analysis.formula} />
-      <BucketTable title="By requires (additive contributions)" rows={analysis.requires} showWeight />
-      <BucketTable title="By category (additive contributions)" rows={analysis.categories} />
+      <BucketTable title="By requires (additive; size is multiplier only)" rows={analysis.requires} showWeight />
+      <BucketTable title="By category (additive; size excluded)" rows={analysis.categories} />
 
       <p className="text-[9px] text-zinc-600">{analysis.note}</p>
     </div>

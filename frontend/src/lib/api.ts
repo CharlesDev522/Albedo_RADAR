@@ -672,6 +672,7 @@ export interface AlbedoScoringOverallSummary {
   challenger_win_margin: number;
   jsonl_matches_dashboard: boolean;
   requires_contrib_matches_duel: boolean;
+  categories_contrib_matches_duel: boolean;
 }
 
 export interface AlbedoScoringExportDuel {

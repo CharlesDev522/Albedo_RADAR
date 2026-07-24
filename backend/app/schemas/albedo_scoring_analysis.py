@@ -19,9 +19,12 @@ class AlbedoScoringFormula(BaseModel):
     duel_score: str = "Mean of per-sample side scores across scored samples (matches dashboard.json)."
     bucket_contribution: str = (
         "Per bucket: contribution = (bucket_weight / total_weight) × bucket_partial_rate × size_multiplier. "
-        "Requires contributions sum to the duel score (same formula as judge_yes_rate)."
+        "Action/read/neutral (or category) rows sum to the duel score. Size is a multiplier, not an additive row."
     )
-    bucket_partial_rate: str = "Weighted yes-rate within the bucket only (non-size questions)."
+    bucket_partial_rate: str = (
+        "Weighted yes-rate within the bucket (non-size questions). "
+        "Size-category questions supply the multiplier via their yes-rate."
+    )
     bucket_share: str = "Share of absolute margin between buckets (diagnostic)."
 
 
@@ -41,6 +44,7 @@ class AlbedoScoringOverallSummary(BaseModel):
     challenger_win_margin: float = 0.03
     jsonl_matches_dashboard: bool = False
     requires_contrib_matches_duel: bool = False
+    categories_contrib_matches_duel: bool = False
 
 
 class AlbedoScoringBucketRow(BaseModel):
@@ -73,6 +77,6 @@ class AlbedoScoringDuelAnalysis(BaseModel):
     categories: list[AlbedoScoringBucketRow] = Field(default_factory=list)
     requires: list[AlbedoScoringBucketRow] = Field(default_factory=list)
     note: str = (
-        "Requires rows show additive contributions to the duel score (size multiplier included). "
-        "The Total row matches dashboard.json; action + read + neutral contributions sum to it."
+        "Requires and category rows are additive to the duel score (size multiplier is already applied). "
+        "The size row shows multiplier diagnostics only — do not add it to the Total."
     )

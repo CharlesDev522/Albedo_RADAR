@@ -270,24 +270,30 @@ def _finalize_bucket_shares(rows: list[AlbedoScoringBucketRow]) -> list[AlbedoSc
     ]
 
 
-def _size_bucket_row(acc: _AnalysisAccum) -> AlbedoScoringBucketRow | None:
+def _size_multiplier_row(acc: _AnalysisAccum) -> AlbedoScoringBucketRow | None:
+    """Requires-table only: size yes-rate + multiplier (not additive to Total)."""
     ch_mult = aggregate_decomposed_metric(acc.totals.size_mult_ch)
     k_mult = aggregate_decomposed_metric(acc.totals.size_mult_k)
     ch_yes = aggregate_decomposed_metric(acc.totals.size_yes_ch)
     k_yes = aggregate_decomposed_metric(acc.totals.size_yes_k)
     if ch_mult is None and k_mult is None:
         return None
+    ch_mult_val = ch_mult if ch_mult is not None else 1.0
+    k_mult_val = k_mult if k_mult is not None else 1.0
     return AlbedoScoringBucketRow(
         key="size",
         question_slots=acc.size_slots,
         weight_share_pct=0.0,
         challenger_yes_rate=(ch_yes or 0.0) * 100.0,
         king_yes_rate=(k_yes or 0.0) * 100.0,
-        weighted_challenger_score=(ch_mult or 1.0) * 100.0,
-        weighted_king_score=(k_mult or 1.0) * 100.0,
-        weighted_margin=((ch_mult or 1.0) - (k_mult or 1.0)) * 100.0,
+        weighted_challenger_score=0.0,
+        weighted_king_score=0.0,
+        weighted_margin=0.0,
         share_of_abs_weighted_margin_pct=0.0,
-        note="Size multiplier (informational; already embedded in requires contributions)",
+        note=(
+            f"Size multiplier (not additive): ch ×{ch_mult_val:.3f}, k ×{k_mult_val:.3f}. "
+            "Already applied inside action/read/neutral and category contributions."
+        ),
     )
 
 
@@ -314,12 +320,24 @@ def _total_row(
     )
 
 
+def _contrib_body_sum(
+    rows: list[AlbedoScoringBucketRow],
+    *,
+    exclude_keys: set[str] | None = None,
+) -> tuple[float, float]:
+    skip = exclude_keys or {"size", "_total"}
+    ch = sum(row.weighted_challenger_score for row in rows if row.key not in skip)
+    k = sum(row.weighted_king_score for row in rows if row.key not in skip)
+    return ch, k
+
+
 def _overall_summary(
     acc: _AnalysisAccum,
     *,
     replicated: dict[str, float | None],
     dashboard_run: dict[str, Any] | None = None,
     requires_rows: list[AlbedoScoringBucketRow],
+    categories_rows: list[AlbedoScoringBucketRow],
 ) -> AlbedoScoringOverallSummary:
     ch = replicated.get("score_challenger")
     k = replicated.get("score_king")
@@ -341,16 +359,8 @@ def _overall_summary(
 
     base_ch = aggregate_decomposed_metric(acc.totals.base_ch)
     base_k = aggregate_decomposed_metric(acc.totals.base_k)
-    contrib_ch = sum(
-        row.weighted_challenger_score
-        for row in requires_rows
-        if row.key not in {"size", "_total"}
-    )
-    contrib_k = sum(
-        row.weighted_king_score
-        for row in requires_rows
-        if row.key not in {"size", "_total"}
-    )
+    contrib_ch, contrib_k = _contrib_body_sum(requires_rows)
+    cat_ch, cat_k = _contrib_body_sum(categories_rows)
 
     duel_ch_pct = round(float(ch) * 100.0, 4) if ch is not None else None
     duel_k_pct = round(float(k) * 100.0, 4) if k is not None else None
@@ -382,6 +392,12 @@ def _overall_summary(
             and duel_k_pct is not None
             and abs(contrib_ch - duel_ch_pct) < 0.2
             and abs(contrib_k - duel_k_pct) < 0.2
+        ),
+        categories_contrib_matches_duel=(
+            duel_ch_pct is not None
+            and duel_k_pct is not None
+            and abs(cat_ch - duel_ch_pct) < 0.2
+            and abs(cat_k - duel_k_pct) < 0.2
         ),
     )
 
@@ -472,14 +488,14 @@ def analyze_scoring_results_category_requires(
     final_k = replicated.get("score_king")
 
     requires_rows = list(requires_body)
-    size_row = _size_bucket_row(acc)
+    size_row = _size_multiplier_row(acc)
     if size_row:
         requires_rows.append(size_row)
     total_row = _total_row(
         "_total",
         ch_score=final_ch,
         k_score=final_k,
-        note="Duel score (mean per-sample side scores; requires rows sum here)",
+        note="Duel score (mean per-sample side scores; body rows sum here, excluding size)",
     )
     if total_row:
         requires_rows.append(total_row)
@@ -492,10 +508,12 @@ def analyze_scoring_results_category_requires(
         )
     ]
     categories = _finalize_bucket_shares(categories_body)
-    if size_row:
-        categories.append(size_row.model_copy())
     if total_row:
-        categories.append(total_row.model_copy())
+        categories.append(
+            total_row.model_copy(
+                update={"note": "Duel score (category rows sum here; size applies as multiplier only)"}
+            )
+        )
 
     return AlbedoScoringDuelAnalysis(
         eval_run_id=eval_run_id,
@@ -518,6 +536,7 @@ def analyze_scoring_results_category_requires(
             replicated=replicated,
             dashboard_run=dashboard_run,
             requires_rows=requires_body,
+            categories_rows=categories_body,
         ),
         categories=categories,
         requires=requires_rows,
