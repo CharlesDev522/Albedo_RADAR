@@ -5,8 +5,9 @@ Source: https://github.com/tony-dendrite/albedo/tree/dev
 
 from __future__ import annotations
 
+from collections import defaultdict
 from statistics import mean
-from typing import Any
+from typing import Any, Literal
 
 # Defaults match albedo judge_core.py (overridable via env on the validator).
 REQUIRES_WEIGHTS: dict[str, float] = {
@@ -38,6 +39,20 @@ def _answer_bit(value: Any) -> float | None:
 def requires_weight(value: Any) -> float:
     key = str(value or "neutral").strip().lower() or "neutral"
     return REQUIRES_WEIGHTS.get(key, 1.0)
+
+
+def _normalize_requires(value: Any) -> str:
+    key = str(value or "neutral").strip().lower()
+    return key or "neutral"
+
+
+def _normalize_category(value: Any) -> str:
+    key = str(value or "uncategorized").strip()
+    return key or "uncategorized"
+
+
+def _is_size_question(question: dict[str, Any]) -> bool:
+    return str(question.get("category") or "").strip().lower() == "size"
 
 
 def judge_yes_rate(
@@ -75,6 +90,89 @@ def judge_yes_rate(
     bits = [_answer_bit(v) for v in answers.values()]
     bits = [b for b in bits if b is not None]
     return round(mean(bits), 6) if bits else None
+
+
+def decompose_judge_yes_rate(
+    answers: dict[str, Any],
+    questions: list[dict[str, Any]],
+    *,
+    group_by: Literal["requires", "category"] = "requires",
+) -> dict[str, Any]:
+    """Decompose a judge yes-rate into additive bucket contributions.
+
+    For non-size buckets B: contribution_B = (den_B / den_all) * rate_B
+    Sum(contribution_B) == base_rate exactly.
+
+    final_rate == base_rate * size_multiplier when size questions exist.
+    """
+    non_size = [q for q in questions if isinstance(q, dict) and q.get("id") and not _is_size_question(q)]
+    size_questions = [q for q in questions if isinstance(q, dict) and q.get("id") and _is_size_question(q)]
+
+    buckets: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for question in non_size:
+        key = _normalize_requires(question.get("requires")) if group_by == "requires" else _normalize_category(
+            question.get("category")
+        )
+        buckets[key].append(question)
+
+    den_all = 0.0
+    num_all = 0.0
+    raw_buckets: dict[str, dict[str, float]] = {}
+
+    for key, qs in buckets.items():
+        den_b = 0.0
+        num_b = 0.0
+        for question in qs:
+            qid = str(question["id"])
+            bit = _answer_bit(answers.get(qid))
+            if bit is None:
+                continue
+            weight = requires_weight(question.get("requires"))
+            den_b += weight
+            num_b += weight * bit
+        raw_buckets[key] = {"den_b": den_b, "num_b": num_b}
+        den_all += den_b
+        num_all += num_b
+
+    bucket_parts: dict[str, dict[str, float]] = {}
+    for key, data in raw_buckets.items():
+        den_b = data["den_b"]
+        num_b = data["num_b"]
+        rate_b = num_b / den_b if den_b > 0 else 0.0
+        bucket_parts[key] = {
+            "weight_den": den_b,
+            "weight_share": den_b / den_all if den_all > 0 else 0.0,
+            "partial_rate": rate_b,
+            "contribution": num_b / den_all if den_all > 0 else 0.0,
+        }
+
+    base_rate = num_all / den_all if den_all > 0 else None
+
+    size_num = size_den = 0.0
+    for question in size_questions:
+        qid = str(question["id"])
+        bit = _answer_bit(answers.get(qid))
+        if bit is None:
+            continue
+        size_num += bit
+        size_den += 1.0
+    size_yes_rate = size_num / size_den if size_den > 0 else None
+    size_multiplier = (
+        SIZE_FACTOR_FLOOR + (1.0 - SIZE_FACTOR_FLOOR) * size_yes_rate if size_den > 0 else 1.0
+    )
+
+    final_rate = round(base_rate * size_multiplier, 6) if base_rate is not None else None
+    if base_rate is not None:
+        base_rate = round(base_rate, 6)
+
+    return {
+        "base_rate": base_rate,
+        "size_yes_rate": round(size_yes_rate, 6) if size_yes_rate is not None else None,
+        "size_multiplier": round(size_multiplier, 6),
+        "final_rate": final_rate,
+        "buckets": bucket_parts,
+        "size_question_count": int(size_den),
+    }
 
 
 def response_score(
@@ -172,3 +270,11 @@ def aggregate_scores_from_records(records: list[dict[str, Any]]) -> dict[str, fl
         "win_margin": round(ch_mean - k_mean, 6),
         "valid_samples": len(valid),
     }
+
+
+def aggregate_decomposed_metric(
+    per_sample_values: list[list[float]],
+) -> float | None:
+    """Mean across samples of (mean across judges within each sample)."""
+    sample_means = [mean(values) for values in per_sample_values if values]
+    return round(mean(sample_means), 6) if sample_means else None

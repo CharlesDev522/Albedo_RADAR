@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from app.scoring.albedo_judge_scoring import (
     CHALLENGER_WIN_MARGIN,
     REQUIRES_WEIGHTS,
     SIZE_FACTOR_FLOOR,
+    aggregate_decomposed_metric,
     aggregate_scores_from_records,
-    judge_yes_rate,
+    decompose_judge_yes_rate,
     requires_weight,
     sample_side_scores,
 )
@@ -26,119 +27,196 @@ CHALLENGER_SIDE = "challenger"
 KING_SIDE_RAW = "previous_king"
 
 
-def normalize_requires(value: Any) -> str:
-    key = str(value or "neutral").strip().lower()
-    return key or "neutral"
-
-
-def normalize_category(value: Any) -> str:
-    key = str(value or "uncategorized").strip()
-    return key or "uncategorized"
-
-
-def _is_size_question(question: dict[str, Any]) -> bool:
-    return str(question.get("category") or "").strip().lower() == "size"
-
-
-def _non_size_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [q for q in questions if isinstance(q, dict) and q.get("id") and not _is_size_question(q)]
-
-
-def _subset_rate(answers: dict[str, Any], questions: list[dict[str, Any]]) -> float | None:
-    if not questions:
-        return None
-    ids = {str(q["id"]) for q in questions if q.get("id")}
-    filtered = {qid: answers[qid] for qid in ids if qid in answers}
-    return judge_yes_rate(filtered, questions)
-
-
 @dataclass
 class _BucketAccum:
     observations: int = 0
-    ch_rate_sum: float = 0.0
-    k_rate_sum: float = 0.0
-    abs_margin_sum: float = 0.0
+    weight_share_sum: float = 0.0
+    ch_partial_sum: float = 0.0
+    k_partial_sum: float = 0.0
+    ch_contrib_sum: float = 0.0
+    k_contrib_sum: float = 0.0
 
 
 @dataclass
-class _SlotPoolAccum:
-    weighted_ch_sum: float = 0.0
-    weighted_k_sum: float = 0.0
-    weight_sum: float = 0.0
-    abs_margin_weighted_sum: float = 0.0
+class _TotalsAccum:
+    base_ch: list[list[float]] = field(default_factory=list)
+    base_k: list[list[float]] = field(default_factory=list)
+    final_ch: list[list[float]] = field(default_factory=list)
+    final_k: list[list[float]] = field(default_factory=list)
+    size_mult_ch: list[list[float]] = field(default_factory=list)
+    size_mult_k: list[list[float]] = field(default_factory=list)
+    size_yes_ch: list[list[float]] = field(default_factory=list)
+    size_yes_k: list[list[float]] = field(default_factory=list)
 
 
 @dataclass
 class _AnalysisAccum:
-    categories: dict[str, _BucketAccum] = field(default_factory=lambda: defaultdict(_BucketAccum))
-    requires: dict[str, _BucketAccum] = field(default_factory=lambda: defaultdict(_BucketAccum))
-    slot_pool: _SlotPoolAccum = field(default_factory=_SlotPoolAccum)
+    buckets: dict[str, dict[str, _BucketAccum]] = field(
+        default_factory=lambda: defaultdict(lambda: defaultdict(_BucketAccum))
+    )
+    totals: _TotalsAccum = field(default_factory=_TotalsAccum)
     size_slots: int = 0
     total_samples: int = 0
     judge_observations: int = 0
-    question_slots: int = 0
+    current_sample_ch_base: list[float] = field(default_factory=list)
+    current_sample_k_base: list[float] = field(default_factory=list)
+    current_sample_ch_final: list[float] = field(default_factory=list)
+    current_sample_k_final: list[float] = field(default_factory=list)
+    current_sample_ch_mult: list[float] = field(default_factory=list)
+    current_sample_k_mult: list[float] = field(default_factory=list)
+    current_sample_ch_size_yes: list[float] = field(default_factory=list)
+    current_sample_k_size_yes: list[float] = field(default_factory=list)
 
 
-def _add_observation(acc: _BucketAccum, *, ch_rate: float, k_rate: float) -> float:
-    acc.observations += 1
-    acc.ch_rate_sum += ch_rate
-    acc.k_rate_sum += k_rate
-    abs_margin = abs(ch_rate - k_rate)
-    acc.abs_margin_sum += abs_margin
-    return abs_margin
+def _flush_sample(acc: _AnalysisAccum) -> None:
+    if acc.current_sample_ch_final:
+        acc.totals.final_ch.append(list(acc.current_sample_ch_final))
+        acc.totals.final_k.append(list(acc.current_sample_k_final))
+        acc.totals.base_ch.append(list(acc.current_sample_ch_base))
+        acc.totals.base_k.append(list(acc.current_sample_k_base))
+        acc.totals.size_mult_ch.append(list(acc.current_sample_ch_mult))
+        acc.totals.size_mult_k.append(list(acc.current_sample_k_mult))
+        if acc.current_sample_ch_size_yes:
+            acc.totals.size_yes_ch.append(list(acc.current_sample_ch_size_yes))
+            acc.totals.size_yes_k.append(list(acc.current_sample_k_size_yes))
+    acc.current_sample_ch_base.clear()
+    acc.current_sample_k_base.clear()
+    acc.current_sample_ch_final.clear()
+    acc.current_sample_k_final.clear()
+    acc.current_sample_ch_mult.clear()
+    acc.current_sample_k_mult.clear()
+    acc.current_sample_ch_size_yes.clear()
+    acc.current_sample_k_size_yes.clear()
 
 
-def _accumulate_slot_pool(
-    acc: _SlotPoolAccum,
+def _accumulate_decomposition(
+    acc: _AnalysisAccum,
     *,
-    challenger_yes: bool,
-    king_yes: bool,
-    weight: float,
-) -> float:
-    ch = 1.0 if challenger_yes else 0.0
-    k = 1.0 if king_yes else 0.0
-    acc.weighted_ch_sum += ch * weight
-    acc.weighted_k_sum += k * weight
-    acc.weight_sum += weight
-    abs_margin = abs(ch - k) * weight
-    acc.abs_margin_weighted_sum += abs_margin
-    return abs_margin
+    group_by: Literal["requires", "category"],
+    ch_answers: dict[str, Any],
+    k_answers: dict[str, Any],
+    questions: list[dict[str, Any]],
+) -> None:
+    ch_dec = decompose_judge_yes_rate(ch_answers, questions, group_by=group_by)
+    k_dec = decompose_judge_yes_rate(k_answers, questions, group_by=group_by)
+
+    if ch_dec["base_rate"] is not None:
+        acc.current_sample_ch_base.append(ch_dec["base_rate"])
+    if k_dec["base_rate"] is not None:
+        acc.current_sample_k_base.append(k_dec["base_rate"])
+    if ch_dec["final_rate"] is not None:
+        acc.current_sample_ch_final.append(ch_dec["final_rate"])
+    if k_dec["final_rate"] is not None:
+        acc.current_sample_k_final.append(k_dec["final_rate"])
+    acc.current_sample_ch_mult.append(ch_dec["size_multiplier"])
+    acc.current_sample_k_mult.append(k_dec["size_multiplier"])
+    if ch_dec["size_yes_rate"] is not None:
+        acc.current_sample_ch_size_yes.append(ch_dec["size_yes_rate"])
+    if k_dec["size_yes_rate"] is not None:
+        acc.current_sample_k_size_yes.append(k_dec["size_yes_rate"])
+
+    all_keys = set(ch_dec["buckets"]) | set(k_dec["buckets"])
+    for key in all_keys:
+        ch_part = ch_dec["buckets"].get(key, {})
+        k_part = k_dec["buckets"].get(key, {})
+        bucket = acc.buckets[group_by][key]
+        bucket.observations += 1
+        bucket.weight_share_sum += ch_part.get("weight_share", k_part.get("weight_share", 0.0))
+        bucket.ch_partial_sum += ch_part.get("partial_rate", 0.0)
+        bucket.k_partial_sum += k_part.get("partial_rate", 0.0)
+        bucket.ch_contrib_sum += ch_part.get("contribution", 0.0)
+        bucket.k_contrib_sum += k_part.get("contribution", 0.0)
 
 
 def _bucket_row(
     key: str,
     acc: _BucketAccum,
     *,
-    total_abs_margin: float,
     show_requires_weight: bool = False,
 ) -> AlbedoScoringBucketRow:
     obs = acc.observations
     if obs <= 0:
-        return AlbedoScoringBucketRow(key=key, weight_multiplier=requires_weight(key) if show_requires_weight else None)
+        return AlbedoScoringBucketRow(
+            key=key,
+            weight_multiplier=requires_weight(key) if show_requires_weight else None,
+        )
 
-    ch_mean = acc.ch_rate_sum / obs
-    k_mean = acc.k_rate_sum / obs
-    share = acc.abs_margin_sum / total_abs_margin * 100.0 if total_abs_margin > 0 else 0.0
+    ch_contrib = acc.ch_contrib_sum / obs
+    k_contrib = acc.k_contrib_sum / obs
+    ch_partial = acc.ch_partial_sum / obs
+    k_partial = acc.k_partial_sum / obs
+    weight_share = acc.weight_share_sum / obs
+
     return AlbedoScoringBucketRow(
         key=key,
         weight_multiplier=requires_weight(key) if show_requires_weight else None,
         question_slots=obs,
-        challenger_yes_rate=ch_mean * 100.0,
-        king_yes_rate=k_mean * 100.0,
-        weighted_challenger_score=ch_mean * 100.0,
-        weighted_king_score=k_mean * 100.0,
-        weighted_margin=(ch_mean - k_mean) * 100.0,
-        share_of_abs_weighted_margin_pct=share,
+        weight_share_pct=weight_share * 100.0,
+        challenger_yes_rate=ch_partial * 100.0,
+        king_yes_rate=k_partial * 100.0,
+        weighted_challenger_score=ch_contrib * 100.0,
+        weighted_king_score=k_contrib * 100.0,
+        weighted_margin=(ch_contrib - k_contrib) * 100.0,
+        share_of_abs_weighted_margin_pct=0.0,
     )
 
 
-def _slot_pool_summary(acc: _SlotPoolAccum) -> tuple[float | None, float | None, float | None]:
-    weight_sum = acc.weight_sum
-    if weight_sum <= 0:
-        return None, None, None
-    ch = acc.weighted_ch_sum / weight_sum
-    k = acc.weighted_k_sum / weight_sum
-    return ch, k, ch - k
+def _finalize_bucket_shares(rows: list[AlbedoScoringBucketRow]) -> list[AlbedoScoringBucketRow]:
+    total_abs = sum(abs(row.weighted_margin) for row in rows)
+    if total_abs <= 0:
+        return rows
+    return [
+        row.model_copy(
+            update={
+                "share_of_abs_weighted_margin_pct": abs(row.weighted_margin) / total_abs * 100.0,
+            }
+        )
+        for row in rows
+    ]
+
+
+def _size_bucket_row(acc: _AnalysisAccum) -> AlbedoScoringBucketRow | None:
+    ch_mult = aggregate_decomposed_metric(acc.totals.size_mult_ch)
+    k_mult = aggregate_decomposed_metric(acc.totals.size_mult_k)
+    ch_yes = aggregate_decomposed_metric(acc.totals.size_yes_ch)
+    k_yes = aggregate_decomposed_metric(acc.totals.size_yes_k)
+    if ch_mult is None and k_mult is None:
+        return None
+    return AlbedoScoringBucketRow(
+        key="size",
+        question_slots=acc.size_slots,
+        weight_share_pct=0.0,
+        challenger_yes_rate=(ch_yes or 0.0) * 100.0,
+        king_yes_rate=(k_yes or 0.0) * 100.0,
+        weighted_challenger_score=(ch_mult or 1.0) * 100.0,
+        weighted_king_score=(k_mult or 1.0) * 100.0,
+        weighted_margin=((ch_mult or 1.0) - (k_mult or 1.0)) * 100.0,
+        share_of_abs_weighted_margin_pct=0.0,
+        note="Multiplier applied to base score (not additive)",
+    )
+
+
+def _total_row(
+    key: str,
+    *,
+    ch_score: float | None,
+    k_score: float | None,
+    note: str | None = None,
+) -> AlbedoScoringBucketRow | None:
+    if ch_score is None or k_score is None:
+        return None
+    return AlbedoScoringBucketRow(
+        key=key,
+        question_slots=0,
+        weight_share_pct=100.0,
+        challenger_yes_rate=ch_score * 100.0,
+        king_yes_rate=k_score * 100.0,
+        weighted_challenger_score=ch_score * 100.0,
+        weighted_king_score=k_score * 100.0,
+        weighted_margin=(ch_score - k_score) * 100.0,
+        share_of_abs_weighted_margin_pct=0.0,
+        note=note,
+    )
 
 
 def _overall_summary(
@@ -146,6 +224,7 @@ def _overall_summary(
     *,
     replicated: dict[str, float | None],
     dashboard_run: dict[str, Any] | None = None,
+    requires_rows: list[AlbedoScoringBucketRow],
 ) -> AlbedoScoringOverallSummary:
     ch = replicated.get("score_challenger")
     k = replicated.get("score_king")
@@ -165,7 +244,10 @@ def _overall_summary(
         if raw_margin is not None:
             dashboard_margin = float(raw_margin)
 
-    slot_ch, slot_k, slot_margin = _slot_pool_summary(acc.slot_pool)
+    base_ch = aggregate_decomposed_metric(acc.totals.base_ch)
+    base_k = aggregate_decomposed_metric(acc.totals.base_k)
+    contrib_ch = sum(row.weighted_challenger_score for row in requires_rows if row.key not in {"size", "_base", "_final"})
+    contrib_k = sum(row.weighted_king_score for row in requires_rows if row.key not in {"size", "_base", "_final"})
 
     return AlbedoScoringOverallSummary(
         observation_count=acc.total_samples,
@@ -176,9 +258,10 @@ def _overall_summary(
         dashboard_score_king=dashboard_k,
         dashboard_win_margin=dashboard_margin,
         replicated_valid_samples=int(replicated.get("valid_samples") or 0),
-        slot_pooled_challenger_score_pct=round(slot_ch * 100.0, 4) if slot_ch is not None else None,
-        slot_pooled_king_score_pct=round(slot_k * 100.0, 4) if slot_k is not None else None,
-        slot_pooled_margin_pct=round(slot_margin * 100.0, 4) if slot_margin is not None else None,
+        base_challenger_score_pct=round(base_ch * 100.0, 4) if base_ch is not None else None,
+        base_king_score_pct=round(base_k * 100.0, 4) if base_k is not None else None,
+        requires_contrib_challenger_pct=round(contrib_ch, 4) if requires_rows else None,
+        requires_contrib_king_pct=round(contrib_k, 4) if requires_rows else None,
         challenger_win_margin=CHALLENGER_WIN_MARGIN,
         jsonl_matches_dashboard=(
             ch is not None
@@ -188,12 +271,11 @@ def _overall_summary(
             and dashboard_k is not None
             and abs(k - dashboard_k) < 1e-4
         ),
-        bucket_margin_matches_duel=(
-            ch is not None
-            and k is not None
-            and margin is not None
-            and slot_margin is not None
-            and abs(slot_margin - margin) < 0.02
+        requires_contrib_matches_base=(
+            base_ch is not None
+            and base_k is not None
+            and abs(contrib_ch / 100.0 - base_ch) < 0.002
+            and abs(contrib_k / 100.0 - base_k) < 0.002
         ),
     )
 
@@ -209,7 +291,7 @@ def analyze_scoring_results_category_requires(
     coronated: bool = False,
     dashboard_run: dict[str, Any] | None = None,
 ) -> AlbedoScoringDuelAnalysis:
-    """Aggregate per-sample judge observations by category and requires."""
+    """Decompose duel scores by category/requires using the official rubric."""
     acc = _AnalysisAccum()
     replicated = aggregate_scores_from_records(rows)
 
@@ -222,10 +304,6 @@ def analyze_scoring_results_category_requires(
         if ch_score is not None and k_score is not None:
             acc.total_samples += 1
 
-        meta_by_id = {str(q["id"]): q for q in questions}
-        question_list = list(meta_by_id.values())
-        non_size = _non_size_questions(question_list)
-
         by_judge: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
         for entry in row.get("judge_results") or []:
             if not isinstance(entry, dict):
@@ -235,8 +313,9 @@ def analyze_scoring_results_category_requires(
             if side in (CHALLENGER_SIDE, KING_SIDE_RAW) and judge and entry.get("parse_ok"):
                 by_judge[judge][str(side)] = entry
 
-        categories_seen = {normalize_category(q.get("category")) for q in non_size}
-        requires_seen = {normalize_requires(q.get("requires")) for q in non_size}
+        acc.size_slots += sum(
+            1 for q in questions if str(q.get("category") or "").strip().lower() == "size"
+        )
 
         for sides in by_judge.values():
             ch = sides.get(CHALLENGER_SIDE)
@@ -246,73 +325,63 @@ def analyze_scoring_results_category_requires(
             ch_ans = ch.get("answers") or {}
             k_ans = k.get("answers") or {}
             acc.judge_observations += 1
+            _accumulate_decomposition(
+                acc,
+                group_by="requires",
+                ch_answers=ch_ans,
+                k_answers=k_ans,
+                questions=questions,
+            )
+            _accumulate_decomposition(
+                acc,
+                group_by="category",
+                ch_answers=ch_ans,
+                k_answers=k_ans,
+                questions=questions,
+            )
 
-            for category in categories_seen:
-                subset = [
-                    q
-                    for q in non_size
-                    if normalize_category(q.get("category")) == category
-                ]
-                ch_rate = _subset_rate(ch_ans, subset)
-                k_rate = _subset_rate(k_ans, subset)
-                if ch_rate is None or k_rate is None:
-                    continue
-                _add_observation(acc.categories[category], ch_rate=ch_rate, k_rate=k_rate)
+        _flush_sample(acc)
 
-            for requires in requires_seen:
-                subset = [
-                    q
-                    for q in non_size
-                    if normalize_requires(q.get("requires")) == requires
-                ]
-                ch_rate = _subset_rate(ch_ans, subset)
-                k_rate = _subset_rate(k_ans, subset)
-                if ch_rate is None or k_rate is None:
-                    continue
-                _add_observation(acc.requires[requires], ch_rate=ch_rate, k_rate=k_rate)
-
-            for qid, question in meta_by_id.items():
-                if _is_size_question(question):
-                    acc.size_slots += 1
-                    continue
-
-                category = normalize_category(question.get("category"))
-                requires = normalize_requires(question.get("requires"))
-                weight = requires_weight(requires)
-                ch_bit = _subset_rate({qid: ch_ans.get(qid)}, [question])
-                k_bit = _subset_rate({qid: k_ans.get(qid)}, [question])
-                ch_yes = ch_bit == 1.0 if ch_bit is not None else False
-                k_yes = k_bit == 1.0 if k_bit is not None else False
-                acc.question_slots += 1
-                _accumulate_slot_pool(
-                    acc.slot_pool,
-                    challenger_yes=ch_yes,
-                    king_yes=k_yes,
-                    weight=weight,
-                )
-
-    category_abs = sum(b.abs_margin_sum for b in acc.categories.values())
-    requires_abs = sum(b.abs_margin_sum for b in acc.requires.values())
-
-    categories = [
-        _bucket_row(key, bucket, total_abs_margin=category_abs)
-        for key, bucket in sorted(
-            acc.categories.items(),
-            key=lambda item: item[1].abs_margin_sum,
-            reverse=True,
-        )
-    ]
     requires_order = {"action": 0, "read": 1, "neutral": 2, "unknown": 99}
-    requires = [
-        _bucket_row(key, bucket, total_abs_margin=requires_abs, show_requires_weight=True)
+    requires_body = [
+        _bucket_row(key, bucket, show_requires_weight=True)
         for key, bucket in sorted(
-            acc.requires.items(),
-            key=lambda item: (
-                requires_order.get(item[0], 99),
-                -item[1].abs_margin_sum,
-            ),
+            acc.buckets["requires"].items(),
+            key=lambda item: (requires_order.get(item[0], 99), -item[1].ch_contrib_sum),
         )
     ]
+    requires_body = _finalize_bucket_shares(requires_body)
+
+    base_ch = aggregate_decomposed_metric(acc.totals.base_ch)
+    base_k = aggregate_decomposed_metric(acc.totals.base_k)
+    final_ch = replicated.get("score_challenger")
+    final_k = replicated.get("score_king")
+
+    requires_rows = list(requires_body)
+    size_row = _size_bucket_row(acc)
+    if size_row:
+        requires_rows.append(size_row)
+    base_row = _total_row("_base", ch_score=base_ch, k_score=base_k, note="Sum of requires contributions")
+    final_row = _total_row("_final", ch_score=final_ch, k_score=final_k, note="Duel score (base × size multiplier, mean per sample)")
+    if base_row:
+        requires_rows.append(base_row)
+    if final_row:
+        requires_rows.append(final_row)
+
+    categories_body = [
+        _bucket_row(key, bucket)
+        for key, bucket in sorted(
+            acc.buckets["category"].items(),
+            key=lambda item: -item[1].ch_contrib_sum,
+        )
+    ]
+    categories = _finalize_bucket_shares(categories_body)
+    if size_row:
+        categories.append(size_row.model_copy())
+    if base_row:
+        categories.append(base_row.model_copy())
+    if final_row:
+        categories.append(final_row.model_copy())
 
     return AlbedoScoringDuelAnalysis(
         eval_run_id=eval_run_id,
@@ -323,14 +392,19 @@ def analyze_scoring_results_category_requires(
         coronated=coronated,
         total_samples=acc.total_samples,
         judge_observations=acc.judge_observations,
-        question_slots=acc.question_slots,
+        question_slots=acc.judge_observations,
         size_question_slots=acc.size_slots,
         formula=AlbedoScoringFormula(
             requires_weights=dict(REQUIRES_WEIGHTS),
             size_factor_floor=SIZE_FACTOR_FLOOR,
             challenger_win_margin=CHALLENGER_WIN_MARGIN,
         ),
-        overall=_overall_summary(acc, replicated=replicated, dashboard_run=dashboard_run),
+        overall=_overall_summary(
+            acc,
+            replicated=replicated,
+            dashboard_run=dashboard_run,
+            requires_rows=requires_body,
+        ),
         categories=categories,
-        requires=requires,
+        requires=requires_rows,
     )

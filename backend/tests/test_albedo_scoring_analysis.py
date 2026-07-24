@@ -2,10 +2,14 @@
 
 import pytest
 
+from app.scoring.albedo_judge_scoring import (
+    aggregate_decomposed_metric,
+    decompose_judge_yes_rate,
+    requires_weight,
+)
 from app.services.albedo_scoring_analysis_service import (
     analyze_scoring_results_category_requires,
 )
-from app.scoring.albedo_judge_scoring import requires_weight
 
 
 def _questions() -> list[dict]:
@@ -60,6 +64,27 @@ def test_requires_weight_mapping():
     assert requires_weight("neutral") == 0.25
 
 
+def test_decompose_requires_contributions_sum_to_base():
+    questions = _questions()
+    answers = {"q_01": "1", "q_02": "1", "q_03": "0"}
+    dec = decompose_judge_yes_rate(answers, questions, group_by="requires")
+    contrib_sum = sum(part["contribution"] for part in dec["buckets"].values())
+    assert dec["base_rate"] == pytest.approx(contrib_sum, abs=1e-6)
+    assert dec["final_rate"] == dec["base_rate"]
+
+
+def test_decompose_with_size_multiplier():
+    questions = [
+        {"id": "q_01", "category": "work", "requires": "action"},
+        {"id": "q_sz", "category": "size", "requires": "neutral"},
+    ]
+    answers = {"q_01": "1", "q_sz": "0"}
+    dec = decompose_judge_yes_rate(answers, questions, group_by="requires")
+    assert dec["base_rate"] == 1.0
+    assert dec["size_multiplier"] == pytest.approx(0.6, abs=1e-6)
+    assert dec["final_rate"] == pytest.approx(0.6, abs=1e-6)
+
+
 def test_analyze_replicates_dashboard_scores():
     dashboard = {
         "score_challenger": 0.36,
@@ -74,35 +99,38 @@ def test_analyze_replicates_dashboard_scores():
 
     assert analysis.overall.jsonl_matches_dashboard is True
     assert analysis.overall.weighted_challenger_score_pct == pytest.approx(36.0, abs=0.01)
-    assert analysis.overall.weighted_king_score_pct == pytest.approx(30.0, abs=0.01)
-    assert analysis.overall.weighted_margin_pct == pytest.approx(6.0, abs=0.01)
+    assert analysis.overall.requires_contrib_matches_base is True
+
+    requires = {row.key: row for row in analysis.requires}
+    assert "_base" in requires
+    assert "_final" in requires
+    assert requires["_final"].weighted_challenger_score == pytest.approx(36.0, abs=0.1)
+
+    body_sum_ch = sum(
+        requires[k].weighted_challenger_score
+        for k in requires
+        if k not in {"size", "_base", "_final"}
+    )
+    assert body_sum_ch == pytest.approx(requires["_base"].weighted_challenger_score, abs=0.1)
 
 
-def test_analyze_category_and_requires_buckets_use_observation_means():
+def test_analyze_requires_buckets():
     analysis = analyze_scoring_results_category_requires([_sample_row()])
-
-    by_cat = {row.key: row for row in analysis.categories}
-    assert by_cat["tests"].question_slots == 1
-    assert by_cat["docs"].question_slots == 1
-
-    by_req = {row.key: row for row in analysis.requires}
+    by_req = {row.key: row for row in analysis.requires if row.key not in {"_base", "_final", "size"}}
     assert by_req["action"].weight_multiplier == 2.0
-    assert by_req["read"].weight_multiplier == 0.75
-    assert by_req["neutral"].weight_multiplier == 0.25
-  # action: ch=1, k=0 on single observation
     assert by_req["action"].challenger_yes_rate == pytest.approx(100.0, abs=0.1)
     assert by_req["action"].king_yes_rate == pytest.approx(0.0, abs=0.1)
+    assert by_req["action"].weighted_challenger_score > by_req["action"].weighted_king_score
 
 
-def test_slot_pool_can_disagree_with_duel_when_samples_differ():
-    """More slot observations can favor challenger while per-sample means favor king."""
+def test_duel_margin_can_differ_from_requires_margin_when_size_hurts_challenger():
     questions = [
         {"id": "q_a1", "category": "work", "requires": "action"},
         {"id": "q_a2", "category": "work", "requires": "action"},
         {"id": "q_sz", "category": "size", "requires": "neutral"},
     ]
 
-    def row(sample_id: str, *, ch_score: float, k_score: float, ch_answers: dict, k_answers: dict) -> dict:
+    def row(sample_id: str, *, ch_score: float, k_score: float, ch_ans: dict, k_ans: dict) -> dict:
         return {
             "sample_id": sample_id,
             "scored": True,
@@ -115,14 +143,14 @@ def test_slot_pool_can_disagree_with_duel_when_samples_differ():
                     "side": "challenger",
                     "parse_ok": True,
                     "yes_rate": ch_score,
-                    "answers": ch_answers,
+                    "answers": ch_ans,
                 },
                 {
                     "judge_model": "z-ai/glm-5.2",
                     "side": "previous_king",
                     "parse_ok": True,
                     "yes_rate": k_score,
-                    "answers": k_answers,
+                    "answers": k_ans,
                 },
             ],
         }
@@ -131,33 +159,30 @@ def test_slot_pool_can_disagree_with_duel_when_samples_differ():
         "win",
         ch_score=0.72,
         k_score=0.28,
-        ch_answers={"q_a1": "1", "q_a2": "1", "q_sz": "1"},
-        k_answers={"q_a1": "0", "q_a2": "0", "q_sz": "1"},
-    )
-    win2 = row(
-        "win2",
-        ch_score=0.72,
-        k_score=0.28,
-        ch_answers={"q_a1": "1", "q_a2": "1", "q_sz": "1"},
-        k_answers={"q_a1": "0", "q_a2": "0", "q_sz": "1"},
+        ch_ans={"q_a1": "1", "q_a2": "1", "q_sz": "1"},
+        k_ans={"q_a1": "0", "q_a2": "0", "q_sz": "1"},
     )
     loss = row(
         "loss",
         ch_score=0.05,
         k_score=0.95,
-        ch_answers={"q_a1": "0", "q_a2": "0", "q_sz": "0"},
-        k_answers={"q_a1": "1", "q_a2": "1", "q_sz": "1"},
+        ch_ans={"q_a1": "0", "q_a2": "0", "q_sz": "0"},
+        k_ans={"q_a1": "1", "q_a2": "1", "q_sz": "1"},
     )
 
     analysis = analyze_scoring_results_category_requires(
-        [win, win2, loss],
+        [win, win, loss],
         dashboard_run={"score_challenger": 0.496667, "score_king": 0.503333, "win_margin": -0.006666},
     )
 
     assert analysis.overall.jsonl_matches_dashboard is True
+    requires = {row.key: row for row in analysis.requires}
+    assert requires["action"].weighted_margin > 0
     assert analysis.overall.weighted_margin_pct < 0
-    assert analysis.overall.slot_pooled_margin_pct is not None
-    assert analysis.overall.slot_pooled_margin_pct > 0
-    assert analysis.overall.bucket_margin_matches_duel is False
-    by_req = {row.key: row for row in analysis.requires}
-    assert by_req["action"].weighted_margin > 0
+    assert requires["_base"].weighted_margin > 0
+    assert requires["_final"].weighted_margin < 0
+
+
+def test_aggregate_decomposed_metric_matches_sample_then_duel_mean():
+    per_sample = [[0.8, 0.6], [0.4, 0.2]]
+    assert aggregate_decomposed_metric(per_sample) == pytest.approx(0.5, abs=1e-6)

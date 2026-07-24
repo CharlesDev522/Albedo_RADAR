@@ -651,10 +651,9 @@ export interface AlbedoScoringFormula {
   challenger_win_margin: number;
   side_score: string;
   duel_score: string;
-  observation_margin: string;
-  bucket_weighted_margin: string;
+  bucket_contribution: string;
+  bucket_partial_rate: string;
   bucket_share: string;
-  slot_pool_margin?: string;
 }
 
 export interface AlbedoScoringOverallSummary {
@@ -666,12 +665,13 @@ export interface AlbedoScoringOverallSummary {
   dashboard_score_king?: number | null;
   dashboard_win_margin?: number | null;
   replicated_valid_samples: number;
-  slot_pooled_challenger_score_pct?: number | null;
-  slot_pooled_king_score_pct?: number | null;
-  slot_pooled_margin_pct?: number | null;
+  base_challenger_score_pct?: number | null;
+  base_king_score_pct?: number | null;
+  requires_contrib_challenger_pct?: number | null;
+  requires_contrib_king_pct?: number | null;
   challenger_win_margin: number;
   jsonl_matches_dashboard: boolean;
-  bucket_margin_matches_duel: boolean;
+  requires_contrib_matches_base: boolean;
 }
 
 export interface AlbedoScoringExportDuel {
@@ -700,12 +700,14 @@ export interface AlbedoScoringBucketRow {
   key: string;
   weight_multiplier?: number | null;
   question_slots: number;
+  weight_share_pct: number;
   challenger_yes_rate: number;
   king_yes_rate: number;
   weighted_challenger_score: number;
   weighted_king_score: number;
   weighted_margin: number;
   share_of_abs_weighted_margin_pct: number;
+  note?: string | null;
 }
 
 export interface AlbedoScoringDuelAnalysis {

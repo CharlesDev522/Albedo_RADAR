@@ -4,6 +4,7 @@ from app.scoring.albedo_judge_scoring import (
     CHALLENGER_WIN_MARGIN,
     REQUIRES_WEIGHTS,
     aggregate_scores_from_records,
+    decompose_judge_yes_rate,
     judge_yes_rate,
     response_score,
     sample_side_scores,
@@ -24,7 +25,6 @@ def test_judge_yes_rate_weighted_requires():
         {"id": "q_03", "category": "protocol", "requires": "neutral"},
     ]
     answers = {"q_01": "1", "q_02": "1", "q_03": "0"}
-    # (1*2.0 + 1*0.75 + 0*0.25) / (2.0 + 0.75 + 0.25) = 2.75 / 3.0
     assert judge_yes_rate(answers, questions) == round(2.75 / 3.0, 6)
 
 
@@ -37,6 +37,16 @@ def test_judge_yes_rate_applies_size_multiplier():
     base = 1.0
     expected = round(base * (0.6 + 0.4 * 0.0), 6)
     assert judge_yes_rate(answers, questions) == expected
+
+
+def test_decompose_matches_judge_yes_rate():
+    questions = [
+        {"id": "q_01", "category": "progress", "requires": "action"},
+        {"id": "q_02", "category": "size", "requires": "neutral"},
+    ]
+    answers = {"q_01": "1", "q_02": "0"}
+    dec = decompose_judge_yes_rate(answers, questions, group_by="requires")
+    assert dec["final_rate"] == judge_yes_rate(answers, questions)
 
 
 def test_aggregate_scores_from_records_matches_dashboard_pattern():

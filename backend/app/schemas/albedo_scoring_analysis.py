@@ -17,16 +17,12 @@ class AlbedoScoringFormula(BaseModel):
         "(floor + (1-floor)×size_yes_rate)."
     )
     duel_score: str = "Mean of per-sample side scores across scored samples (matches dashboard.json)."
-    observation_margin: str = "challenger_side_score − king_side_score per sample (0..1 scale)."
-    bucket_weighted_margin: str = (
-        "Per judge×sample observation: weighted yes-rate on questions in the bucket "
-        "(size excluded), then averaged equally across observations."
+    bucket_contribution: str = (
+        "Per bucket: contribution = (bucket_weight / total_weight) × bucket_partial_rate. "
+        "Requires contributions sum to the base score before the size multiplier."
     )
-    bucket_share: str = "Σ|challenger_rate−king_rate| in bucket / Σ|challenger_rate−king_rate| overall"
-    slot_pool_margin: str = (
-        "Legacy slot-pooled view: each question slot weighted by requires; can disagree with "
-        "duel score when samples have different question counts or size multipliers apply."
-    )
+    bucket_partial_rate: str = "Weighted yes-rate within the bucket only (non-size questions)."
+    bucket_share: str = "Share of absolute margin between buckets (diagnostic)."
 
 
 class AlbedoScoringOverallSummary(BaseModel):
@@ -38,24 +34,27 @@ class AlbedoScoringOverallSummary(BaseModel):
     dashboard_score_king: float | None = None
     dashboard_win_margin: float | None = None
     replicated_valid_samples: int = 0
-    slot_pooled_challenger_score_pct: float | None = None
-    slot_pooled_king_score_pct: float | None = None
-    slot_pooled_margin_pct: float | None = None
+    base_challenger_score_pct: float | None = None
+    base_king_score_pct: float | None = None
+    requires_contrib_challenger_pct: float | None = None
+    requires_contrib_king_pct: float | None = None
     challenger_win_margin: float = 0.03
     jsonl_matches_dashboard: bool = False
-    bucket_margin_matches_duel: bool = False
+    requires_contrib_matches_base: bool = False
 
 
 class AlbedoScoringBucketRow(BaseModel):
     key: str
     weight_multiplier: float | None = None
     question_slots: int = 0
+    weight_share_pct: float = 0.0
     challenger_yes_rate: float = 0.0
     king_yes_rate: float = 0.0
     weighted_challenger_score: float = 0.0
     weighted_king_score: float = 0.0
     weighted_margin: float = 0.0
     share_of_abs_weighted_margin_pct: float = 0.0
+    note: str | None = None
 
 
 class AlbedoScoringDuelAnalysis(BaseModel):
@@ -74,7 +73,6 @@ class AlbedoScoringDuelAnalysis(BaseModel):
     categories: list[AlbedoScoringBucketRow] = Field(default_factory=list)
     requires: list[AlbedoScoringBucketRow] = Field(default_factory=list)
     note: str = (
-        "Duel scores replicate dashboard.json (mean per-sample side scores with size multiplier). "
-        "Category/requires rows average judge×sample observations and may still differ from the "
-        "duel total when size questions or cross-bucket composition shift the final mean."
+        "Requires rows show additive contributions to the base score (before size multiplier). "
+        "_base sums requires contributions; _final is the duel score from dashboard.json."
     )
