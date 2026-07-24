@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+from statistics import mean
 from typing import Any, Literal
 
 from app.scoring.albedo_judge_scoring import (
@@ -28,21 +29,29 @@ KING_SIDE_RAW = "previous_king"
 
 
 @dataclass
-class _BucketAccum:
-    observations: int = 0
-    weight_share_sum: float = 0.0
-    ch_partial_sum: float = 0.0
-    k_partial_sum: float = 0.0
-    ch_contrib_sum: float = 0.0
-    k_contrib_sum: float = 0.0
+class _CurrentSampleBuckets:
+    ch_contrib: dict[str, list[float]] = field(default_factory=lambda: defaultdict(list))
+    k_contrib: dict[str, list[float]] = field(default_factory=lambda: defaultdict(list))
+    ch_partial: dict[str, list[float]] = field(default_factory=lambda: defaultdict(list))
+    k_partial: dict[str, list[float]] = field(default_factory=lambda: defaultdict(list))
+    weight_share: dict[str, list[float]] = field(default_factory=lambda: defaultdict(list))
+    judge_observations: int = 0
+
+
+@dataclass
+class _BucketSeries:
+    ch_contrib_samples: list[float] = field(default_factory=list)
+    k_contrib_samples: list[float] = field(default_factory=list)
+    ch_partial_samples: list[float] = field(default_factory=list)
+    k_partial_samples: list[float] = field(default_factory=list)
+    weight_share_samples: list[float] = field(default_factory=list)
+    judge_observations: int = 0
 
 
 @dataclass
 class _TotalsAccum:
     base_ch: list[list[float]] = field(default_factory=list)
     base_k: list[list[float]] = field(default_factory=list)
-    final_ch: list[list[float]] = field(default_factory=list)
-    final_k: list[list[float]] = field(default_factory=list)
     size_mult_ch: list[list[float]] = field(default_factory=list)
     size_mult_k: list[list[float]] = field(default_factory=list)
     size_yes_ch: list[list[float]] = field(default_factory=list)
@@ -51,8 +60,11 @@ class _TotalsAccum:
 
 @dataclass
 class _AnalysisAccum:
-    buckets: dict[str, dict[str, _BucketAccum]] = field(
-        default_factory=lambda: defaultdict(lambda: defaultdict(_BucketAccum))
+    buckets: dict[str, dict[str, _BucketSeries]] = field(
+        default_factory=lambda: defaultdict(lambda: defaultdict(_BucketSeries))
+    )
+    current: dict[str, _CurrentSampleBuckets] = field(
+        default_factory=lambda: defaultdict(_CurrentSampleBuckets)
     )
     totals: _TotalsAccum = field(default_factory=_TotalsAccum)
     size_slots: int = 0
@@ -60,18 +72,38 @@ class _AnalysisAccum:
     judge_observations: int = 0
     current_sample_ch_base: list[float] = field(default_factory=list)
     current_sample_k_base: list[float] = field(default_factory=list)
-    current_sample_ch_final: list[float] = field(default_factory=list)
-    current_sample_k_final: list[float] = field(default_factory=list)
     current_sample_ch_mult: list[float] = field(default_factory=list)
     current_sample_k_mult: list[float] = field(default_factory=list)
     current_sample_ch_size_yes: list[float] = field(default_factory=list)
     current_sample_k_size_yes: list[float] = field(default_factory=list)
 
 
+def _mean_or_zero(values: list[float]) -> float:
+    return mean(values) if values else 0.0
+
+
 def _flush_sample(acc: _AnalysisAccum) -> None:
-    if acc.current_sample_ch_final:
-        acc.totals.final_ch.append(list(acc.current_sample_ch_final))
-        acc.totals.final_k.append(list(acc.current_sample_k_final))
+    for group_by, sample_buckets in acc.current.items():
+        if sample_buckets.judge_observations <= 0:
+            continue
+
+        for key, ch_values in sample_buckets.ch_contrib.items():
+            series = acc.buckets[group_by][key]
+            series.ch_contrib_samples.append(_mean_or_zero(ch_values))
+            series.k_contrib_samples.append(_mean_or_zero(sample_buckets.k_contrib.get(key, [])))
+            series.ch_partial_samples.append(_mean_or_zero(sample_buckets.ch_partial.get(key, [])))
+            series.k_partial_samples.append(_mean_or_zero(sample_buckets.k_partial.get(key, [])))
+            series.weight_share_samples.append(_mean_or_zero(sample_buckets.weight_share.get(key, [])))
+            series.judge_observations += sample_buckets.judge_observations
+
+        sample_buckets.ch_contrib.clear()
+        sample_buckets.k_contrib.clear()
+        sample_buckets.ch_partial.clear()
+        sample_buckets.k_partial.clear()
+        sample_buckets.weight_share.clear()
+        sample_buckets.judge_observations = 0
+
+    if acc.current_sample_ch_base:
         acc.totals.base_ch.append(list(acc.current_sample_ch_base))
         acc.totals.base_k.append(list(acc.current_sample_k_base))
         acc.totals.size_mult_ch.append(list(acc.current_sample_ch_mult))
@@ -79,14 +111,66 @@ def _flush_sample(acc: _AnalysisAccum) -> None:
         if acc.current_sample_ch_size_yes:
             acc.totals.size_yes_ch.append(list(acc.current_sample_ch_size_yes))
             acc.totals.size_yes_k.append(list(acc.current_sample_k_size_yes))
+
     acc.current_sample_ch_base.clear()
     acc.current_sample_k_base.clear()
-    acc.current_sample_ch_final.clear()
-    acc.current_sample_k_final.clear()
     acc.current_sample_ch_mult.clear()
     acc.current_sample_k_mult.clear()
     acc.current_sample_ch_size_yes.clear()
     acc.current_sample_k_size_yes.clear()
+
+
+def _scale_bucket_contributions(
+    decomposition: dict[str, Any],
+    *,
+    target_rate: float | None,
+) -> dict[str, Any]:
+    """Scale bucket contributions so they sum to target_rate (stored yes_rate)."""
+    if target_rate is None:
+        return decomposition
+
+    target = float(target_rate)
+    final_rate = decomposition.get("final_rate")
+    buckets: dict[str, dict[str, float]] = decomposition.get("buckets") or {}
+
+    if final_rate is not None and final_rate > 0:
+        scale = target / float(final_rate)
+        if abs(scale - 1.0) < 1e-9:
+            return decomposition
+        scaled = dict(decomposition)
+        scaled_buckets: dict[str, dict[str, float]] = {}
+        for key, part in buckets.items():
+            scaled_part = dict(part)
+            scaled_part["contribution"] = part.get("contribution", 0.0) * scale
+            scaled_part["base_contribution"] = part.get("base_contribution", 0.0) * scale
+            scaled_buckets[key] = scaled_part
+        scaled["buckets"] = scaled_buckets
+        scaled["final_rate"] = round(target, 6)
+        if decomposition.get("base_rate") is not None:
+            scaled["base_rate"] = round(float(decomposition["base_rate"]) * scale, 6)
+        return scaled
+
+    if target <= 0:
+        return decomposition
+
+    # Stored yes_rate is positive but answer-derived score is zero (e.g. all misses).
+    total_share = sum(part.get("weight_share", 0.0) for part in buckets.values())
+    scaled = dict(decomposition)
+    scaled_buckets = {}
+    for key, part in buckets.items():
+        share = part.get("weight_share", 0.0)
+        if total_share > 0:
+            fraction = share / total_share
+        else:
+            fraction = 1.0 / len(buckets) if buckets else 0.0
+        scaled_part = dict(part)
+        scaled_part["contribution"] = target * fraction
+        scaled_part["base_contribution"] = target * fraction
+        scaled_buckets[key] = scaled_part
+    scaled["buckets"] = scaled_buckets
+    scaled["final_rate"] = round(target, 6)
+    scaled["base_rate"] = round(target, 6)
+    return scaled
 
 
 def _accumulate_decomposition(
@@ -96,61 +180,72 @@ def _accumulate_decomposition(
     ch_answers: dict[str, Any],
     k_answers: dict[str, Any],
     questions: list[dict[str, Any]],
+    ch_yes_rate: float | None = None,
+    k_yes_rate: float | None = None,
 ) -> None:
-    ch_dec = decompose_judge_yes_rate(ch_answers, questions, group_by=group_by)
-    k_dec = decompose_judge_yes_rate(k_answers, questions, group_by=group_by)
+    ch_dec = _scale_bucket_contributions(
+        decompose_judge_yes_rate(ch_answers, questions, group_by=group_by),
+        target_rate=ch_yes_rate,
+    )
+    k_dec = _scale_bucket_contributions(
+        decompose_judge_yes_rate(k_answers, questions, group_by=group_by),
+        target_rate=k_yes_rate,
+    )
 
-    if ch_dec["base_rate"] is not None:
-        acc.current_sample_ch_base.append(ch_dec["base_rate"])
-    if k_dec["base_rate"] is not None:
-        acc.current_sample_k_base.append(k_dec["base_rate"])
-    if ch_dec["final_rate"] is not None:
-        acc.current_sample_ch_final.append(ch_dec["final_rate"])
-    if k_dec["final_rate"] is not None:
-        acc.current_sample_k_final.append(k_dec["final_rate"])
-    acc.current_sample_ch_mult.append(ch_dec["size_multiplier"])
-    acc.current_sample_k_mult.append(k_dec["size_multiplier"])
-    if ch_dec["size_yes_rate"] is not None:
-        acc.current_sample_ch_size_yes.append(ch_dec["size_yes_rate"])
-    if k_dec["size_yes_rate"] is not None:
-        acc.current_sample_k_size_yes.append(k_dec["size_yes_rate"])
+    if group_by == "requires":
+        if ch_dec["base_rate"] is not None:
+            acc.current_sample_ch_base.append(ch_dec["base_rate"])
+        if k_dec["base_rate"] is not None:
+            acc.current_sample_k_base.append(k_dec["base_rate"])
+        acc.current_sample_ch_mult.append(ch_dec["size_multiplier"])
+        acc.current_sample_k_mult.append(k_dec["size_multiplier"])
+        if ch_dec["size_yes_rate"] is not None:
+            acc.current_sample_ch_size_yes.append(ch_dec["size_yes_rate"])
+        if k_dec["size_yes_rate"] is not None:
+            acc.current_sample_k_size_yes.append(k_dec["size_yes_rate"])
+
+    sample_buckets = acc.current[group_by]
+    sample_buckets.judge_observations += 1
 
     all_keys = set(ch_dec["buckets"]) | set(k_dec["buckets"])
     for key in all_keys:
         ch_part = ch_dec["buckets"].get(key, {})
         k_part = k_dec["buckets"].get(key, {})
-        bucket = acc.buckets[group_by][key]
-        bucket.observations += 1
-        bucket.weight_share_sum += ch_part.get("weight_share", k_part.get("weight_share", 0.0))
-        bucket.ch_partial_sum += ch_part.get("partial_rate", 0.0)
-        bucket.k_partial_sum += k_part.get("partial_rate", 0.0)
-        bucket.ch_contrib_sum += ch_part.get("contribution", 0.0)
-        bucket.k_contrib_sum += k_part.get("contribution", 0.0)
+        sample_buckets.ch_contrib[key].append(ch_part.get("contribution", 0.0))
+        sample_buckets.k_contrib[key].append(k_part.get("contribution", 0.0))
+        sample_buckets.ch_partial[key].append(ch_part.get("partial_rate", 0.0))
+        sample_buckets.k_partial[key].append(k_part.get("partial_rate", 0.0))
+        sample_buckets.weight_share[key].append(
+            ch_part.get("weight_share", k_part.get("weight_share", 0.0))
+        )
+
+
+def _mean_across_samples(values: list[float]) -> float:
+    return round(mean(values), 6) if values else 0.0
 
 
 def _bucket_row(
     key: str,
-    acc: _BucketAccum,
+    series: _BucketSeries,
     *,
     show_requires_weight: bool = False,
 ) -> AlbedoScoringBucketRow:
-    obs = acc.observations
-    if obs <= 0:
+    if not series.ch_contrib_samples:
         return AlbedoScoringBucketRow(
             key=key,
             weight_multiplier=requires_weight(key) if show_requires_weight else None,
         )
 
-    ch_contrib = acc.ch_contrib_sum / obs
-    k_contrib = acc.k_contrib_sum / obs
-    ch_partial = acc.ch_partial_sum / obs
-    k_partial = acc.k_partial_sum / obs
-    weight_share = acc.weight_share_sum / obs
+    ch_contrib = _mean_across_samples(series.ch_contrib_samples)
+    k_contrib = _mean_across_samples(series.k_contrib_samples)
+    ch_partial = _mean_across_samples(series.ch_partial_samples)
+    k_partial = _mean_across_samples(series.k_partial_samples)
+    weight_share = _mean_across_samples(series.weight_share_samples)
 
     return AlbedoScoringBucketRow(
         key=key,
         weight_multiplier=requires_weight(key) if show_requires_weight else None,
-        question_slots=obs,
+        question_slots=series.judge_observations,
         weight_share_pct=weight_share * 100.0,
         challenger_yes_rate=ch_partial * 100.0,
         king_yes_rate=k_partial * 100.0,
@@ -192,7 +287,7 @@ def _size_bucket_row(acc: _AnalysisAccum) -> AlbedoScoringBucketRow | None:
         weighted_king_score=(k_mult or 1.0) * 100.0,
         weighted_margin=((ch_mult or 1.0) - (k_mult or 1.0)) * 100.0,
         share_of_abs_weighted_margin_pct=0.0,
-        note="Multiplier applied to base score (not additive)",
+        note="Size multiplier (informational; already embedded in requires contributions)",
     )
 
 
@@ -246,8 +341,19 @@ def _overall_summary(
 
     base_ch = aggregate_decomposed_metric(acc.totals.base_ch)
     base_k = aggregate_decomposed_metric(acc.totals.base_k)
-    contrib_ch = sum(row.weighted_challenger_score for row in requires_rows if row.key not in {"size", "_base", "_final"})
-    contrib_k = sum(row.weighted_king_score for row in requires_rows if row.key not in {"size", "_base", "_final"})
+    contrib_ch = sum(
+        row.weighted_challenger_score
+        for row in requires_rows
+        if row.key not in {"size", "_total"}
+    )
+    contrib_k = sum(
+        row.weighted_king_score
+        for row in requires_rows
+        if row.key not in {"size", "_total"}
+    )
+
+    duel_ch_pct = round(float(ch) * 100.0, 4) if ch is not None else None
+    duel_k_pct = round(float(k) * 100.0, 4) if k is not None else None
 
     return AlbedoScoringOverallSummary(
         observation_count=acc.total_samples,
@@ -271,11 +377,11 @@ def _overall_summary(
             and dashboard_k is not None
             and abs(k - dashboard_k) < 1e-4
         ),
-        requires_contrib_matches_base=(
-            base_ch is not None
-            and base_k is not None
-            and abs(contrib_ch / 100.0 - base_ch) < 0.002
-            and abs(contrib_k / 100.0 - base_k) < 0.002
+        requires_contrib_matches_duel=(
+            duel_ch_pct is not None
+            and duel_k_pct is not None
+            and abs(contrib_ch - duel_ch_pct) < 0.2
+            and abs(contrib_k - duel_k_pct) < 0.2
         ),
     )
 
@@ -324,6 +430,12 @@ def analyze_scoring_results_category_requires(
                 continue
             ch_ans = ch.get("answers") or {}
             k_ans = k.get("answers") or {}
+            ch_yes_rate = ch.get("yes_rate")
+            k_yes_rate = k.get("yes_rate")
+            if ch_yes_rate is not None:
+                ch_yes_rate = float(ch_yes_rate)
+            if k_yes_rate is not None:
+                k_yes_rate = float(k_yes_rate)
             acc.judge_observations += 1
             _accumulate_decomposition(
                 acc,
@@ -331,6 +443,8 @@ def analyze_scoring_results_category_requires(
                 ch_answers=ch_ans,
                 k_answers=k_ans,
                 questions=questions,
+                ch_yes_rate=ch_yes_rate,
+                k_yes_rate=k_yes_rate,
             )
             _accumulate_decomposition(
                 acc,
@@ -338,22 +452,22 @@ def analyze_scoring_results_category_requires(
                 ch_answers=ch_ans,
                 k_answers=k_ans,
                 questions=questions,
+                ch_yes_rate=ch_yes_rate,
+                k_yes_rate=k_yes_rate,
             )
 
         _flush_sample(acc)
 
     requires_order = {"action": 0, "read": 1, "neutral": 2, "unknown": 99}
     requires_body = [
-        _bucket_row(key, bucket, show_requires_weight=True)
-        for key, bucket in sorted(
+        _bucket_row(key, series, show_requires_weight=True)
+        for key, series in sorted(
             acc.buckets["requires"].items(),
-            key=lambda item: (requires_order.get(item[0], 99), -item[1].ch_contrib_sum),
+            key=lambda item: (requires_order.get(item[0], 99), -sum(item[1].ch_contrib_samples)),
         )
     ]
     requires_body = _finalize_bucket_shares(requires_body)
 
-    base_ch = aggregate_decomposed_metric(acc.totals.base_ch)
-    base_k = aggregate_decomposed_metric(acc.totals.base_k)
     final_ch = replicated.get("score_challenger")
     final_k = replicated.get("score_king")
 
@@ -361,27 +475,27 @@ def analyze_scoring_results_category_requires(
     size_row = _size_bucket_row(acc)
     if size_row:
         requires_rows.append(size_row)
-    base_row = _total_row("_base", ch_score=base_ch, k_score=base_k, note="Sum of requires contributions")
-    final_row = _total_row("_final", ch_score=final_ch, k_score=final_k, note="Duel score (base × size multiplier, mean per sample)")
-    if base_row:
-        requires_rows.append(base_row)
-    if final_row:
-        requires_rows.append(final_row)
+    total_row = _total_row(
+        "_total",
+        ch_score=final_ch,
+        k_score=final_k,
+        note="Duel score (mean per-sample side scores; requires rows sum here)",
+    )
+    if total_row:
+        requires_rows.append(total_row)
 
     categories_body = [
-        _bucket_row(key, bucket)
-        for key, bucket in sorted(
+        _bucket_row(key, series)
+        for key, series in sorted(
             acc.buckets["category"].items(),
-            key=lambda item: -item[1].ch_contrib_sum,
+            key=lambda item: -sum(item[1].ch_contrib_samples),
         )
     ]
     categories = _finalize_bucket_shares(categories_body)
     if size_row:
         categories.append(size_row.model_copy())
-    if base_row:
-        categories.append(base_row.model_copy())
-    if final_row:
-        categories.append(final_row.model_copy())
+    if total_row:
+        categories.append(total_row.model_copy())
 
     return AlbedoScoringDuelAnalysis(
         eval_run_id=eval_run_id,

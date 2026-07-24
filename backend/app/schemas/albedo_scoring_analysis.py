@@ -18,8 +18,8 @@ class AlbedoScoringFormula(BaseModel):
     )
     duel_score: str = "Mean of per-sample side scores across scored samples (matches dashboard.json)."
     bucket_contribution: str = (
-        "Per bucket: contribution = (bucket_weight / total_weight) × bucket_partial_rate. "
-        "Requires contributions sum to the base score before the size multiplier."
+        "Per bucket: contribution = (bucket_weight / total_weight) × bucket_partial_rate × size_multiplier. "
+        "Requires contributions sum to the duel score (same formula as judge_yes_rate)."
     )
     bucket_partial_rate: str = "Weighted yes-rate within the bucket only (non-size questions)."
     bucket_share: str = "Share of absolute margin between buckets (diagnostic)."
@@ -40,7 +40,7 @@ class AlbedoScoringOverallSummary(BaseModel):
     requires_contrib_king_pct: float | None = None
     challenger_win_margin: float = 0.03
     jsonl_matches_dashboard: bool = False
-    requires_contrib_matches_base: bool = False
+    requires_contrib_matches_duel: bool = False
 
 
 class AlbedoScoringBucketRow(BaseModel):
@@ -73,6 +73,6 @@ class AlbedoScoringDuelAnalysis(BaseModel):
     categories: list[AlbedoScoringBucketRow] = Field(default_factory=list)
     requires: list[AlbedoScoringBucketRow] = Field(default_factory=list)
     note: str = (
-        "Requires rows show additive contributions to the base score (before size multiplier). "
-        "_base sums requires contributions; _final is the duel score from dashboard.json."
+        "Requires rows show additive contributions to the duel score (size multiplier included). "
+        "The Total row matches dashboard.json; action + read + neutral contributions sum to it."
     )

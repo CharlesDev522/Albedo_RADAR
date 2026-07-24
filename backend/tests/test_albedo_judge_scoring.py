@@ -1,5 +1,7 @@
 """Tests for Albedo judge scoring replication."""
 
+import pytest
+
 from app.scoring.albedo_judge_scoring import (
     CHALLENGER_WIN_MARGIN,
     REQUIRES_WEIGHTS,
@@ -47,6 +49,8 @@ def test_decompose_matches_judge_yes_rate():
     answers = {"q_01": "1", "q_02": "0"}
     dec = decompose_judge_yes_rate(answers, questions, group_by="requires")
     assert dec["final_rate"] == judge_yes_rate(answers, questions)
+    contrib_sum = sum(part["contribution"] for part in dec["buckets"].values())
+    assert dec["final_rate"] == pytest.approx(contrib_sum, abs=1e-6)
 
 
 def test_aggregate_scores_from_records_matches_dashboard_pattern():

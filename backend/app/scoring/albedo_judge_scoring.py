@@ -98,12 +98,10 @@ def decompose_judge_yes_rate(
     *,
     group_by: Literal["requires", "category"] = "requires",
 ) -> dict[str, Any]:
-    """Decompose a judge yes-rate into additive bucket contributions.
+    """Decompose a judge yes-rate into additive bucket contributions to the final score.
 
-    For non-size buckets B: contribution_B = (den_B / den_all) * rate_B
-    Sum(contribution_B) == base_rate exactly.
-
-    final_rate == base_rate * size_multiplier when size questions exist.
+    Per observation: contribution_B = (num_B / den_all) * size_multiplier
+    Sum(contribution_B) == final_rate exactly (same formula as judge_yes_rate).
     """
     non_size = [q for q in questions if isinstance(q, dict) and q.get("id") and not _is_size_question(q)]
     size_questions = [q for q in questions if isinstance(q, dict) and q.get("id") and _is_size_question(q)]
@@ -134,20 +132,6 @@ def decompose_judge_yes_rate(
         den_all += den_b
         num_all += num_b
 
-    bucket_parts: dict[str, dict[str, float]] = {}
-    for key, data in raw_buckets.items():
-        den_b = data["den_b"]
-        num_b = data["num_b"]
-        rate_b = num_b / den_b if den_b > 0 else 0.0
-        bucket_parts[key] = {
-            "weight_den": den_b,
-            "weight_share": den_b / den_all if den_all > 0 else 0.0,
-            "partial_rate": rate_b,
-            "contribution": num_b / den_all if den_all > 0 else 0.0,
-        }
-
-    base_rate = num_all / den_all if den_all > 0 else None
-
     size_num = size_den = 0.0
     for question in size_questions:
         qid = str(question["id"])
@@ -160,6 +144,23 @@ def decompose_judge_yes_rate(
     size_multiplier = (
         SIZE_FACTOR_FLOOR + (1.0 - SIZE_FACTOR_FLOOR) * size_yes_rate if size_den > 0 else 1.0
     )
+
+    bucket_parts: dict[str, dict[str, float]] = {}
+    for key, data in raw_buckets.items():
+        den_b = data["den_b"]
+        num_b = data["num_b"]
+        rate_b = num_b / den_b if den_b > 0 else 0.0
+        base_contribution = num_b / den_all if den_all > 0 else 0.0
+        final_contribution = base_contribution * size_multiplier
+        bucket_parts[key] = {
+            "weight_den": den_b,
+            "weight_share": den_b / den_all if den_all > 0 else 0.0,
+            "partial_rate": rate_b,
+            "base_contribution": base_contribution,
+            "contribution": final_contribution,
+        }
+
+    base_rate = num_all / den_all if den_all > 0 else None
 
     final_rate = round(base_rate * size_multiplier, 6) if base_rate is not None else None
     if base_rate is not None:

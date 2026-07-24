@@ -671,7 +671,7 @@ export interface AlbedoScoringOverallSummary {
   requires_contrib_king_pct?: number | null;
   challenger_win_margin: number;
   jsonl_matches_dashboard: boolean;
-  requires_contrib_matches_base: boolean;
+  requires_contrib_matches_duel: boolean;
 }
 
 export interface AlbedoScoringExportDuel {

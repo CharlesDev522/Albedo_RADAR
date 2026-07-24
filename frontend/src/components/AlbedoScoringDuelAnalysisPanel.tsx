@@ -22,8 +22,7 @@ function marginClass(n: number): string {
 }
 
 function rowLabel(key: string): string {
-  if (key === "_base") return "Base total";
-  if (key === "_final") return "Duel total";
+  if (key === "_total") return "Total";
   return key;
 }
 
@@ -83,7 +82,7 @@ function BucketTable({
           </thead>
           <tbody>
             {rows.map((row) => {
-              const isTotal = row.key === "_base" || row.key === "_final";
+              const isTotal = row.key === "_total";
               const isSize = row.key === "size";
               return (
                 <tr
@@ -198,7 +197,7 @@ export default function AlbedoScoringDuelAnalysisPanel({
           </p>
           <p className="text-[9px] text-zinc-600 mt-0.5">
             {overall.jsonl_matches_dashboard ? "Matches replicated score" : "Compare with replicated"}
-            {overall.requires_contrib_matches_base && " · requires rows sum to base"}
+            {overall.requires_contrib_matches_duel && " · requires rows sum to duel total"}
           </p>
         </div>
       </div>
